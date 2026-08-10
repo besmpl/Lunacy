@@ -16,6 +16,22 @@ Read this for implementation, repair, recovery, and adversarial-review work. Pro
 6. Understand ownership, lifecycle, invariants, and data flow around the change; do not patch one visible caller while ignoring the system around it.
 7. When external behavior/library semantics are uncertain and research is available, check authoritative/primary documentation rather than guessing.
 
+## Concurrent ownership
+
+When other Lunacy steps are active concurrently, **own your step and do not race neighboring workers**.
+
+Your initial step boundary is an independence assumption made by the orchestrator. Your deeper repository inspection must validate it. If correct completion unexpectedly requires any of the following, stop before making the conflicting edit and report the overlap/blocker:
+
+- editing a surface another active step owns or is likely editing;
+- changing a shared schema, protocol, API, abstraction, generated artifact, or behavioral contract that another active worker depends on;
+- consuming another active worker's not-yet-durable result;
+- mutating shared state that is unsafe to modify concurrently;
+- making an architectural decision that invalidates another active step's assumptions.
+
+Do not quietly broaden scope across another active worker just because the edit seems easy. Preserve your non-conflicting work and let the orchestrator serialize or replan the overlap.
+
+Conversely, do not avoid required in-scope work merely because it touches many files. The issue is **conflicting active ownership**, not change size.
+
 ## Design preferences
 
 - Preserve and strengthen the project's existing architecture when it is sound.
@@ -46,6 +62,7 @@ Before PASS, inspect the resulting diff and ask:
 - Did I exclude any caller/test as legacy or historical without explicit authority?
 - Did I mistake a green selected test matrix for proof that uncovered maintained surfaces are irrelevant?
 - Did I miss any caller, sibling path, lifecycle edge, persistence boundary, or integration surface?
+- If other workers were concurrent, did deeper inspection reveal any shared ownership/contract interaction that should have been escalated?
 - Did I create something the repository already had?
 - Did I introduce a second way to do the same thing?
 - Could this cleanly reuse/extend an existing abstraction instead?
