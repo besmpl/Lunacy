@@ -5,37 +5,42 @@ description: Execute a coding plan or task with Codex, GPT-5.6 Sol, or GPT-5.6 T
 
 # Lunacy
 
-**Primary goal: minimize orchestrator token use.** The parent owns global understanding and judgment. Luna/max owns repository-heavy execution.
+**Primary goal: minimize orchestrator context while preserving high-leverage judgment.** The parent owns global intent, architecture decisions, scheduling, and acceptance. Luna/max owns repository-heavy work.
 
 Every technical subagent MUST be `gpt-5.6-luna` at reasoning effort `max`. Never silently fall back.
 
-## Rules
+## Invariants
 
-1. **Project intent is authority.** Goal, user constraints, ethos, principles, architecture, contracts, and authoritative plan drive decisions.
-2. **Prefer the simplest sound design.** Complexity must earn its cost. Reuse/extend sound mechanisms before inventing new ones; sophistication is not quality.
-3. **Plan → phases → steps.** A phase is an integrated milestone. A step is the largest coherent unit one Luna/max worker can safely own. Do not over-decompose for agent count.
-4. **The orchestrator follows `orchestrator/PLANNING.md`** when creating/materially replanning a run: reuse/OOP/polymorphism where they genuinely fit, explicit YAGNI/anti-overengineering, and cross-run ownership discipline.
-5. **Workers own the full local loop.** Inspect → implement → verify → self-review → fix → reverify → one terminal durable report.
-6. **Workers follow `worker/ENGINEERING.md`.** Project-specific authority outranks the generic doctrine.
-7. **Do not micromanage.** Give goals, authority, boundaries, dependencies, acceptance boundary, doctrine path, and report path.
-8. **Parallelize safe independent work.** Launch the largest safe dependency-ready set up to host capacity. Serialize overlapping writes/contracts/state/decisions. Never distort architecture to manufacture concurrency.
-9. **Multiple runs may coexist.** Each run lives under `Lunacy/runs/<run-id>/`; project-wide user memory lives at `Lunacy/PROJECT_NOTES.md`. No global run registry or current-run pointer.
-10. **Parent review cadence is phase-end by default.** Step reports control progress; they do not trigger routine parent code review.
-11. **Use fresh adversaries selectively** for unusually risky steps.
-12. **Spend parent reasoning only at leverage points:** planning, ambiguity, architecture/integration tradeoffs, conflicting evidence, scope/blocker decisions, and hard gates.
-13. **No fake completion:** no stubs, hidden TODOs, weakened tests, test-specific hard-coding, skipped integration, or unsupported PASS claims.
+1. **Project intent is authority.** Goal, current user constraints, ethos, architecture, contracts, and authoritative plan drive decisions.
+2. **Prefer the simplest sound design.** Complexity must earn its cost. Reuse/extend sound mechanisms before inventing new ones.
+3. **Plan → phases → steps.** A step is the largest coherent unit one Luna/max worker can safely own; do not micro-split for agent count.
+4. **Multiple runs may coexist.** Each run lives under `Lunacy/runs/<run-id>/`; project-wide user memory lives at `Lunacy/PROJECT_NOTES.md`.
+5. **Workers get fresh context by default.** When the spawn API exposes `fork_turns`, use `fork_turns:"none"`. Do not inherit the parent conversation for convenience. Any exception requires a concise reason in run `DECISIONS.md`.
+6. **Workers own the full local loop.** Inspect → implement → verify → self-review → fix → terminal reverify → one immutable durable report.
+7. **Parallelize only safe independent work.** Serialize overlapping writes/contracts/state/decisions; never distort architecture to manufacture concurrency.
+8. **Parent review cadence is phase-end by default.** Ordinary PASS steps do not trigger parent code review.
+9. **Adversaries and gate scouts are conditional, not ceremonial.** Use them only when risk/integration complexity earns the extra call.
+10. **No fake completion:** no stubs, hidden TODOs, weakened tests, test-specific hard-coding, skipped integration, or unsupported PASS claims.
 
-## Token / process discipline
+Read `orchestrator/PLANNING.md` when creating/materially replanning. Point implementation/repair/recovery/adversary workers to `worker/ENGINEERING.md`. Project-specific authority outranks both generic doctrines.
 
-Do not bulk-read repositories, long logs, worker chats, or historical reports. Prefer compact durable files and exact source paths. Delegate broad discovery/large-document ingestion to Luna/max with a compact cited digest; the parent still owns the resulting decision.
+## Hard context / communication limits
 
-Default worker handoffs are tiny and path-based. Workers stay silent unless blocked/decision-needed. After their **terminal verification snapshot** and final Control Block, they freeze changes and finalize immediately: no post-PASS polish, reruns just to update counts, or revised completion chatter.
+**Path-only handoffs.** Give workers durable authority paths, step/report paths, and only facts not already durable. User changes must be written to notes/plan/state before spawning affected workers.
 
-Prefer event-driven/blocking waits. For concurrent workers, prefer one batch-level wait/reconciliation cycle. If the host forces polling/visible heartbeats, use the coarsest practical cadence and do not reread unchanged state because a timer fired.
+**Worker mailbox has exactly three useful message types:** `BLOCKED`, `DECISION_REQUIRED`, `FINAL`. Each mailbox message is at most three short lines and contains no evidence dump. `FINAL` points to the immutable report; the parent reads the Control Block there.
 
-Do not add phases, micro-steps, scouts, adversaries, durable files, compatibility layers, or verification machinery unless they materially improve correctness, ownership, risk control, or resumability.
+**Parent reads slices, not dossiers.** Default parent inputs are run control files, terminal Control Blocks, concise decision briefs, and gate packs. Read only exact named source/report slices needed for the current decision. A full worker report may be read only to resolve a specific contradiction that cannot be resolved from its Control Block + cited slices.
 
-At hard gates, summaries are navigation aids, not correctness authority. Inspect the smallest **actual code/diff/behavior** surface that tests architecture, ethos, integration, risk, and complexity proportionality; broaden only when evidence warrants it.
+**Three-deep-read rule.** If one parent decision/gate would require more than three substantive detail/source slices, stop accumulating context: delegate a fresh Luna compression/decision brief or persist a checkpoint and continue in fresh parent context. Do not brute-force the repository into the parent.
+
+**No raw verification output in parent context.** Long output goes to a log/evidence file or temporary file. Parent-facing text contains command/check name, exit/result, counts when useful, and the first relevant red only.
+
+**No hash catalogs.** Do not list per-file hashes unless project authority specifically requires them. Prefer one aggregate snapshot/fingerprint when provenance needs one.
+
+**Never invent token usage.** Record exact host counters only when directly exposed. Otherwise report usage as unavailable; never estimate historical worker/parent tokens from output size, elapsed time, or intuition.
+
+Prefer event-driven/blocking waits. For concurrent workers, wait/reconcile at batch level. If the host forces polling/visible updates, use the coarsest practical cadence and never reread unchanged state because a timer fired.
 
 ## 1. Resolve/create the run, then plan
 
@@ -44,44 +49,49 @@ At hard gates, summaries are navigation aids, not correctness authority. Inspect
 - Explicit new task/plan: create a short semantic unique run id.
 - Explicit named/path resume: bind to that run.
 - Unspecified resume: inspect only `Lunacy/runs/*/STATE.md`; bind when unambiguous, otherwise ask which run.
-- Legacy root-level `Lunacy/PLAN.md/STATE.md/phases/`: follow `WORKSPACE.md` and migrate once into a run; do not keep duplicate authority.
+- Legacy root-level `Lunacy/PLAN.md/STATE.md/phases/`: migrate once per `WORKSPACE.md`; do not keep duplicate authority.
 
-On new run/fresh session/context recovery, read applicable project instructions plus `Lunacy/PROJECT_NOTES.md` and run-local `USER_NOTES.md` if present. User-originated notes are memory, not workflow state. When the user adds/changes a material requirement, update the appropriate note scope **and evaluate it immediately**; change `PLAN.md`/`STATE.md`/`STEPS.md`/`DECISIONS.md` when execution authority actually changes.
+On new run/fresh session/context recovery, read applicable project instructions plus project/run user notes. When user input materially changes requirements, update the appropriate notes **and evaluate it immediately**; update execution authority/state when needed.
 
-Read `orchestrator/PLANNING.md` when creating or materially changing architecture/decomposition. Read `WORKSPACE.md` on new-run setup or damaged/ambiguous recovery, not every resume.
+Create/maintain compact `<run-root>/PLAN.md`, `STATE.md`, and phase `STEPS.md`. Define phase goals, dependencies, gates, selective adversaries, and verification ownership. Avoid assigning the same expensive/global verification matrix to multiple layers without a reason.
 
-Create/maintain `<run-root>/PLAN.md`, `STATE.md`, and phase `STEPS.md`. Keep `PLAN.md` compact. Preserve a structured source plan's meaningful hierarchy; vague work gets the minimum useful phases/steps.
+For migration/replacement/removal work, coverage defaults to **every maintained affected surface**—production, tests, fixtures, adapters, examples, indirect/variable-mediated construction—unless explicit authority excludes something. A green selected matrix is evidence, not scope authority.
 
-Define phase goals, dependencies, phase-end gates, exceptional extra gates, selective adversaries, and final gate. For migration/replacement/removal work, coverage defaults to **every maintained affected surface**—production, tests, fixtures, adapters, examples, indirect/variable-mediated construction—unless explicit authority excludes something. A green selected matrix is evidence, not scope authority.
-
-Record concise `Workspace` and `Ownership` fields in `STATE.md`. Before implementation and after material ownership changes, inspect only other `ACTIVE` run `STATE.md` files. Prefer isolated worktrees/branches for simultaneous runs when available. Serialize/replan overlapping surfaces/shared contracts or unsafe shared checkout/state. Isolation does not make semantically overlapping architecture independent.
+Record concise `Workspace` and `Ownership` in `STATE.md`. Before implementation and after ownership changes, inspect only other ACTIVE run states. Prefer isolated worktrees/branches where available; serialize/replan semantic or shared-state overlap.
 
 ## 2. Execute with Luna/max
 
-The first **real** Luna/max worker spawn doubles as capability check; no dummy probe.
+The first real Luna/max spawn doubles as capability check; no dummy probe.
 
-At each scheduling point, use the current phase dependency table and known contracts to form the **maximal safe concurrent batch** of ready steps. Persist the whole active batch in run `STATE.md`, then launch one Luna/max owner per step.
+At each scheduling point, form the maximal safe concurrent batch from READY steps. Persist the active batch, then launch one Luna/max owner per step with fresh/no-turn inheritance when supported.
 
-Worker handoff points to:
+The handoff points to:
 
 - `<run-root>/PLAN.md` + applicable project instructions;
 - `<lunacy-skill-root>/worker/ENGINEERING.md`;
 - its `<run-root>/phases/<phase>/STEPS.md` row;
 - its report path.
 
-Require inspect/reuse inventory first, full implement→verify→self-review→fix→reverify loop, silence unless blocked/decision-needed, overlap escalation before conflicting edits, and one terminal Control Block followed by immediate finalization.
+Require existing-system/reuse inventory first; full implement→verify→self-review→fix→terminal reverify; overlap escalation before conflicting edits; silence except `BLOCKED`/`DECISION_REQUIRED`/`FINAL`.
 
-Luna owns repository-scale caller/surface/reuse discovery. If deeper inspection reveals conflict with another active step/run or a shared contract that invalidates independence, it stops before the conflicting edit and escalates; the parent serializes/replans.
+Luna owns repository-scale caller/surface/reuse discovery. Unexpected active-step/run overlap stops before conflicting edits and returns to the parent for serialization/replanning.
 
-After a batch settles, read each **terminal Control Block once**, reconcile `STATE.md`/`STEPS.md` once, then schedule the next batch. Read detail only for a decision, contradiction, blocker, planned adversary, recovery, or gate.
+After a batch settles, read each terminal Control Block **once**, reconcile run state **once**, then schedule the next batch. Do not reopen finalized reports to append later findings.
 
-If Codex rejects Luna/max because of the known multi-agent catalog mismatch, never downgrade. Follow `references/CODEX_LUNA_COMPAT.md`, persist exact restart/resume state, then tell the user to close/relaunch Codex and open a new task.
+If a worker needs a parent decision, it freezes the conflicting boundary, writes one concise decision brief with exact evidence pointers, sends `DECISION_REQUIRED`, and stops. Related contradictions discovered in the same bounded investigation should be consolidated into one brief rather than serial amendments/messages.
 
-## 3. Optional fresh-Luna adversary
+If Codex rejects Luna/max because of the known multi-agent catalog mismatch, never downgrade. Follow `references/CODEX_LUNA_COMPAT.md`, persist exact restart/resume state, then require a fresh Codex task.
 
-For selected risky work, use a fresh Luna/max agent that did not implement it. Give durable principles/step contract, `worker/ENGINEERING.md`, actual code/diff, and verification entry points—not implementer chat/reasoning.
+## 3. Verification ownership
 
-It attacks correctness, integration, assumptions, regressions, coverage, reuse, abstractions, and unjustified complexity. It may repair in-scope findings and reverify; broader design questions return to the parent. Its final report uses the same terminal snapshot rule.
+Avoid proof multiplication.
+
+- **Implementer:** after its last code change, run the step's terminal verification once and report that final snapshot. Development checks before the final state need not be narrated.
+- **Adversary (when justified):** attack new risk/assumptions. If it fixes something, verify the impacted surface; do not blindly replay the implementer's entire broad matrix unless the repair invalidates it.
+- **Gate scout (when justified):** read-only compression/navigation. It does **not** rerun broad verification suites.
+- **Parent gate:** inspect actual targeted code/diff/behavior and run one bounded acceptance sample/check set chosen for integration risk. Do not replay every worker suite.
+
+If code changes after any terminal verification, that verification is stale and the changing owner must produce a new terminal snapshot before acceptance.
 
 ## 4. Hard decisions
 
@@ -93,36 +103,37 @@ Resolve genuine hard questions in this order:
 4. established evidence/accepted behavior;
 5. conservative engineering judgment preserving intent.
 
-Keep the design bias active during execution: **reuse/extend sound abstractions first; use OOP/polymorphism only when they simplify real current variation or repeated branching; otherwise prefer the simpler direct design and reject speculative machinery.**
+Keep the execution-time design bias active: **reuse/extend sound abstractions first; use OOP/polymorphism only when they simplify real current variation or repeated branching; otherwise prefer the simpler direct design and reject speculative machinery.**
 
-Record consequential decisions, then delegate implementation consequences to Luna/max.
+Record consequential decisions append-only, then delegate implementation consequences to Luna/max.
 
 ## 5. Phase hard gate
 
-When required phase steps are done, stop normal execution.
+When required phase steps are terminal, stop normal execution and close a **write barrier**: no active writer may remain. Any later change to phase-owned code/evidence reopens the barrier and invalidates a gate pack produced against the older state.
 
-For a nontrivial phase, a fresh Luna/max gate scout may compress integrated changes, cross-step interfaces, verification, risks, and exact parent inspection targets into a small gate pack. The scout cannot approve the phase.
+Use a fresh Luna/max gate scout only when it materially compresses parent work—for example multiple writers changed interacting surfaces, an adversary repaired integration, reports conflict, or the phase is genuinely high-risk/cross-cutting. Skip it for a single coherent low-risk phase.
 
-The parent inspects targeted actual code/diff/behavior and judges the integrated phase against goal, user notes, ethos, architecture/contracts, regressions, cross-step integration, and **complexity proportionality**. Functional correctness does not excuse duplicate mechanisms, speculative abstractions, excessive layers, or maintenance burden.
+A scout starts only after the write barrier is closed, is read-only except for its small immutable gate pack, and must point the parent to exact source symbols/diff regions. It cannot approve the phase and cannot run broad verification suites.
 
-Findings become Luna/max repair steps; re-gate after material repair. Tiny obvious phases may skip the scout.
+The parent then inspects targeted actual code/diff/behavior and performs one bounded acceptance sample. Judge goal, user notes, architecture/contracts, regressions, integration, and complexity proportionality. Findings become new Luna repair attempts/steps; never reopen or edit finalized worker reports/gate packs. Re-close the barrier and re-gate with new numbered evidence after repair.
 
 ## 6. Resume and finish
 
-Run `STATE.md` always describes reality, including active workers, workspace/ownership, and one exact `Next action`.
+Run `STATE.md` always describes reality, active workers, workspace/ownership, gate barrier, and one exact `Next action`.
 
 Fresh/restarted/context-compacted orchestration reads only:
 
 1. applicable project instructions;
-2. `Lunacy/PROJECT_NOTES.md` if present;
-3. `<run-root>/USER_NOTES.md` if present;
-4. `<run-root>/STATE.md`;
-5. `<run-root>/PLAN.md`;
-6. current phase `STEPS.md`;
-7. artifact(s) required by `Next action`.
+2. project/run user notes;
+3. `<run-root>/STATE.md`;
+4. `<run-root>/PLAN.md`;
+5. current phase `STEPS.md`;
+6. artifact(s) explicitly required by `Next action`.
 
-Do not reconstruct history from worker chats or reread old reports/decisions/gates unless specifically required.
+Do not reconstruct history from chats or bulk-reread reports/decisions/gates.
 
-If interruption leaves steps active, reconcile terminal Control Blocks first. Incomplete attempts become fresh Luna continuation/recovery attempts against current repository state; account for partial-write and cross-run overlap before re-forming concurrency.
+If interruption leaves steps active, reconcile immutable terminal Control Blocks first. Incomplete attempts become fresh continuation/recovery attempts against current repository state; finalized prior evidence remains untouched.
+
+If the host signals context pressure/compaction, persist run state and the exact next action **before** compaction/restart when possible. If exact usage counters are exposed, they may inform the checkpoint; otherwise use the three-deep-read rule and host context signals rather than fabricated token estimates.
 
 At the final gate, reread project/run user notes and judge the integrated result against the whole goal, ethos, plan, architecture/contracts, required verification, and proportional complexity. Every current run-relevant user request must be satisfied, explicitly superseded, or deliberately deferred with authority.
