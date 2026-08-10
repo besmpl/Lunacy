@@ -16,10 +16,11 @@ Every technical subagent MUST be `gpt-5.6-luna` at reasoning effort `max`. Never
 3. **Workers own the full local loop.** Inspect → implement → verify → self-review → fix → reverify → terse durable report.
 4. **Workers follow the companion engineering doctrine.** Point implementation/repair/recovery/adversary workers to `worker/ENGINEERING.md`; project-specific authority outranks the generic doctrine.
 5. **Do not micromanage.** Give goals, relevant principles/authority, boundaries, dependencies, acceptance boundary, doctrine path, and report path. Let Luna resolve ordinary engineering details.
-6. **Parent review cadence is phase-end by default.** Step reports control progress; they do not trigger routine parent code review.
-7. **Use fresh adversaries selectively.** A fresh Luna/max agent may independently attack a completed high-risk step when the extra review is worth it.
-8. **Spend parent reasoning only at leverage points:** planning, genuine ambiguity, architecture/integration tradeoffs, conflicting evidence, scope/blocker decisions, and hard gates.
-9. **No fake completion:** no stubs, hidden TODOs, weakened tests, test-specific hard-coding, skipped integration, or unsupported PASS claims.
+6. **Parallelize safe independent work.** At each scheduling point, launch the largest safe set of dependency-ready steps concurrently, up to host capacity. Serialize when steps overlap likely write surfaces, change a shared contract/abstraction, consume one another's output, share unsafe mutable state, or need the same unresolved architecture decision. If independence is uncertain, serialize.
+7. **Parent review cadence is phase-end by default.** Step reports control progress; they do not trigger routine parent code review.
+8. **Use fresh adversaries selectively.** A fresh Luna/max agent may independently attack a completed high-risk step when the extra review is worth it.
+9. **Spend parent reasoning only at leverage points:** planning, genuine ambiguity, architecture/integration tradeoffs, conflicting evidence, scope/blocker decisions, and hard gates.
+10. **No fake completion:** no stubs, hidden TODOs, weakened tests, test-specific hard-coding, skipped integration, or unsupported PASS claims.
 
 ## Token discipline
 
@@ -31,7 +32,7 @@ If broad discovery or large-document ingestion would consume substantial parent 
 
 **Workers stay quiet while working.** They emit no intermediate progress/mailbox messages unless blocked or a genuine orchestrator decision is required. After writing the final durable Control Block/report, they finalize immediately instead of sending post-completion polish/status chatter.
 
-**Minimize orchestrator wakeups.** Where the host supports event-driven or blocking completion waits, use them instead of repeated short timeout polling. If polling or visible heartbeats are forced by the host, use the coarsest practical cadence, keep unchanged updates minimal, and do not reread unchanged worker/repository state merely because a timer fired.
+**Minimize orchestrator wakeups.** Where the host supports event-driven or blocking completion waits, use them instead of repeated short timeout polling. For a concurrent batch, prefer one batch-level wait/reconciliation cycle over repeatedly waking for each worker. If polling or visible heartbeats are forced by the host, use the coarsest practical cadence, keep unchanged updates minimal, and do not reread unchanged worker/repository state merely because a timer fired.
 
 At hard gates, worker summaries are navigation aids, not correctness authority. The parent reviews **actual effects/current code**, but this is global integrated judgment—not duplicate line-by-line implementation review. Inspect the smallest actual code/diff/behavior surface that can test architecture, ethos, integration, and risk; expand only when evidence warrants it.
 
@@ -46,7 +47,7 @@ Use the companion `WORKSPACE.md` located beside this `SKILL.md` for durable file
 
 `PLAN.md` is the compact durable authority/execution digest. Preserve a structured source plan's meaningful hierarchy. For vague work, create the minimum useful phases/steps yourself; small work may be one phase.
 
-Before implementation define phase goals, step dependencies, phase-end hard gates, any exceptional extra gates, selected adversarial reviews, and the final gate. Replan when real facts justify it; persist consequential decisions.
+Before implementation define phase goals, step dependencies, phase-end hard gates, any exceptional extra gates, selected adversarial reviews, and the final gate. Design steps so genuinely independent work can run concurrently without competing ownership. Replan when real facts justify it; persist consequential decisions.
 
 For any **migration, replacement, compatibility cleanup, or removal** step, the step contract must make coverage unambiguous. Default coverage is every maintained affected caller/surface in the repository—including production code, tests, fixtures, adapters, examples, and indirect or variable-mediated construction—unless authoritative project material explicitly excludes something. Do not let workers infer that an uncovered surface is `legacy`/`historical` merely because a selected test matrix is green or does not include it.
 
@@ -54,11 +55,15 @@ For any **migration, replacement, compatibility cleanup, or removal** step, the 
 
 The first **real** Luna/max worker spawn doubles as the capability check; do not spend an extra agent call on a dummy probe.
 
-For each dependency-ready step, persist current state and launch one Luna/max owner. The normal handoff can be only a few lines: identify the step, point to durable authority/step/doctrine/report paths, require the full implementation→verification→self-review→fix→reverify loop, require silence unless blocked/decision-needed, and tell it to finalize immediately after its durable report.
+At each scheduling point, inspect only the phase dependency/status table and known step contracts. Form the **maximal safe concurrent batch** of `READY` steps whose dependencies are satisfied. Concurrent steps must have independent outcomes and no known conflicting write/contract/state ownership. Launch one Luna/max owner per step, up to host capacity. Do not parallelize merely for speed when merge/integration risk would shift expensive work back to the parent.
+
+For each launched step, persist current state first. The normal handoff can be only a few lines: identify the step, point to durable authority/step/doctrine/report paths, require the full implementation→verification→self-review→fix→reverify loop, require silence unless blocked/decision-needed, and tell it to finalize immediately after its durable report.
 
 The worker must inspect the existing system before editing: identify relevant callers, sibling paths, objects/types/interfaces, helpers, tests, lifecycle/persistence boundaries, and safe reuse/extension points. For migration/replacement/removal work it must prove the full contract coverage, including indirect/variable-mediated uses; this repository-scale inventory belongs to Luna, not the parent.
 
-After an ordinary PASS, read only the report's Control Block, update `STATE.md`/`STEPS.md`, and continue. Read deeper only for a decision request, contradiction, blocker, planned adversary, recovery, or gate.
+A worker in a concurrent batch owns only its step. If discovery shows that correct completion requires editing a surface owned by another active worker, consuming an uncommitted sibling result, or changing a shared contract in a way that invalidates the independence assumption, it must **stop before the conflicting edit and escalate the overlap**. The orchestrator then serializes/replans the affected work instead of allowing a race.
+
+After a batch completes, read only each report's Control Block, reconcile `STATE.md`/`STEPS.md` once, then schedule the next safe batch. Read deeper only for a decision request, contradiction, blocker, planned adversary, recovery, or gate.
 
 If Codex rejects Luna/max because of the known multi-agent catalog mismatch, do not downgrade. Read the skill companion `references/CODEX_LUNA_COMPAT.md`, apply only that procedure, validate it, persist restart/resume state, then tell the user to **close and relaunch Codex and open a new task**. Stop execution in the current task; its model-selection schema cannot refresh mid-task.
 
@@ -92,10 +97,10 @@ Persist the terse gate result. Findings become Luna/max repair steps; repeat the
 
 ## 6. Resume and finish
 
-`STATE.md` always describes reality and contains one exact `next_action`.
+`STATE.md` always describes reality and contains one exact `next_action`. It may name multiple active steps/workers when a safe batch is in flight.
 
-Resume by reading only project-level instructions, `STATE.md`, `PLAN.md`, current phase `STEPS.md`, and the one artifact required by `next_action`. Read historical decisions/reports only when explicitly relevant. Never reconstruct history from worker chats.
+Resume by reading only project-level instructions, `STATE.md`, `PLAN.md`, current phase `STEPS.md`, and the artifact(s) explicitly required by `next_action`. Read historical decisions/reports only when explicitly relevant. Never reconstruct history from worker chats.
 
-If interruption left a step `ACTIVE`, do not investigate its partial implementation yourself. Check only whether its report/control block completed. If not, mark the attempt interrupted and launch a fresh Luna/max continuation/recovery worker for the same step against the **current repository state**; it must inspect/adopt/fix partial changes and finish the normal step loop.
+If interruption leaves one or more steps `ACTIVE`, do not investigate their partial implementations yourself. Check only whether each active attempt's report/control block completed. Reconcile completed attempts. For each incomplete attempt, mark it interrupted and launch a fresh Luna/max continuation/recovery worker for that same step against the **current repository state**. Re-form a safe batch only after accounting for any surviving partial writes/overlap risk.
 
 At the final gate, judge the integrated result against the whole goal, project ethos/core principles, authoritative plan, architecture/contracts, and required verification. Finish only with no unresolved task-relevant findings.
