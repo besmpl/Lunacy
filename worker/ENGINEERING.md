@@ -1,6 +1,6 @@
 # Lunacy Worker Engineering Doctrine
 
-Read this for implementation, repair, recovery, and adversarial-review work. Project-specific authority (`AGENTS.md`, architecture, contracts, `Lunacy/PLAN.md`) outranks this generic doctrine.
+Read this for implementation, repair, recovery, and adversarial-review work. Project-specific authority (`AGENTS.md`, architecture, contracts, the active Lunacy run `PLAN.md`) outranks this generic doctrine.
 
 ## Core rule
 
@@ -20,17 +20,17 @@ Do not confuse sophistication with quality. Prefer modifying, reusing, deleting,
 
 ## Concurrent ownership
 
-When other Lunacy steps are active concurrently, **own your step and do not race neighboring workers**.
+When other Lunacy steps or runs are active concurrently, **own your assigned scope and do not race neighboring workers**.
 
-Your initial step boundary is an independence assumption made by the orchestrator. Your deeper repository inspection must validate it. If correct completion unexpectedly requires any of the following, stop before making the conflicting edit and report the overlap/blocker:
+Your initial boundary is an independence assumption made by the orchestrator. Your deeper repository inspection must validate it. If correct completion unexpectedly requires any of the following, stop before making the conflicting edit and report the overlap/blocker:
 
-- editing a surface another active step owns or is likely editing;
-- changing a shared schema, protocol, API, abstraction, generated artifact, or behavioral contract that another active worker depends on;
+- editing a surface another active step/run owns or is likely editing;
+- changing a shared schema, protocol, API, abstraction, generated artifact, or behavioral contract another active worker/run depends on;
 - consuming another active worker's not-yet-durable result;
 - mutating shared state that is unsafe to modify concurrently;
-- making an architectural decision that invalidates another active step's assumptions.
+- making an architectural decision that invalidates another active step/run's assumptions.
 
-Do not quietly broaden scope across another active worker just because the edit seems easy. Preserve your non-conflicting work and let the orchestrator serialize or replan the overlap.
+Do not quietly broaden scope across another active owner just because the edit seems easy. Preserve your non-conflicting work and let the orchestrator serialize or replan the overlap.
 
 Conversely, do not avoid required in-scope work merely because it touches many files. The issue is **conflicting active ownership**, not change size.
 
@@ -83,7 +83,7 @@ Before PASS, inspect the resulting diff and ask:
 - Did I exclude any caller/test as legacy or historical without explicit authority?
 - Did I mistake a green selected test matrix for proof that uncovered maintained surfaces are irrelevant?
 - Did I miss any caller, sibling path, lifecycle edge, persistence boundary, or integration surface?
-- If other workers were concurrent, did deeper inspection reveal any shared ownership/contract interaction that should have been escalated?
+- If other workers/runs were concurrent, did deeper inspection reveal any shared ownership/contract interaction that should have been escalated?
 - Did I create something the repository already had?
 - Did I introduce a second way to do the same thing?
 - Could this cleanly reuse/extend an existing abstraction instead?
@@ -96,4 +96,18 @@ Before PASS, inspect the resulting diff and ask:
 - Do tests verify behavior and integration, not just implementation details?
 - Did I preserve project contracts and avoid regressions?
 
-If a simpler design preserves the required behavior, maintainability, and project architecture, simplify it. Fix every issue found, re-run relevant verification, then write the concise Lunacy Control Block and finalize immediately.
+If a simpler design preserves the required behavior, maintainability, and project architecture, simplify it. Fix every issue found and re-run relevant verification.
+
+## Terminal verification/report boundary
+
+The verification recorded in the final Control Block is the **terminal verification snapshot** for the exact repository state being reported.
+
+After that snapshot passes and the Control Block is written:
+
+- freeze code, tests, generated artifacts, and report counts/results;
+- make no further edits, cleanup, formatting, polish, or opportunistic fixes;
+- do not rerun verification merely to produce a newer count/status message;
+- do not emit revised post-completion progress or verification summaries;
+- finalize immediately.
+
+If anything material changes after the supposed final snapshot, the prior PASS/report is invalid: perform the required verification again and rewrite the final Control Block once for the new terminal state.
