@@ -1,21 +1,21 @@
 # Codex Luna subagent compatibility
 
-Read this file **only** when Codex cannot natively spawn `gpt-5.6-luna` at `max` reasoning.
+Read this file **only** when Codex cannot natively spawn the intended `gpt-5.6-luna` worker at Lunacy's selected `xhigh` or `max` reasoning effort.
 
 This is a narrow compatibility override for the known catalog mismatch where Luna is otherwise valid but advertises `multi_agent_version = "v1"` while Sol and Terra use `v2`. It changes Luna's multi-agent eligibility metadata only.
 
 ## First: prove the override is needed
 
-Attempt the intended real Luna/max worker first. If native Luna/max spawning works, do nothing here.
+Attempt the intended real Luna worker first at the effort selected by Lunacy (`xhigh` normally, `max` when justified). If native spawning works, do nothing here.
 
-Do not apply this procedure when the catalog shape or failure is materially different. Do not downgrade to another worker model.
+Do not apply this procedure when the catalog shape or failure is materially different. Do not downgrade to another worker model or below `xhigh`.
 
 ## Invariants
 
 - Preserve the current Codex catalog snapshot as-is except for Luna's `multi_agent_version`.
 - Change **only** Luna from `"v1"` to `"v2"`.
-- Do not change Luna's slug, model identifier, tool mode, context metadata, or any other property.
-- Luna must retain `max` reasoning support.
+- Do not change Luna's slug, model identifier, tool mode, context metadata, reasoning levels, or any other property.
+- Luna must retain both `xhigh` and `max` reasoning support from the source snapshot.
 - **Do not add `ultra` to Luna.**
 - Do not change the user's primary `model` or primary `model_reasoning_effort`.
 - Use an absolute path in `model_catalog_json`; TOML does not expand `~` or `$HOME` inside a quoted value.
@@ -69,9 +69,9 @@ Perform all of these checks:
 2. Parse `model_catalog.luna-v2.json` successfully with `jq` or another real JSON parser.
 3. Run Codex Doctor/diagnostics and confirm the configuration is loaded.
 4. From a **fresh Codex process/catalog load**, inspect the current rows for exactly Sol, Terra, and Luna and verify the compatibility assumptions:
-   - Sol: multi-agent version `v2`; reasoning includes `max`.
-   - Terra: multi-agent version `v2`; reasoning includes `max`.
-   - Luna: multi-agent version `v2`; reasoning includes `max`.
+   - Sol: multi-agent version `v2`.
+   - Terra: multi-agent version `v2`.
+   - Luna: multi-agent version `v2`; reasoning includes both `xhigh` and `max` exactly as in the source snapshot.
    - Luna does **not** gain `ultra` from this override.
 5. Reconfirm that no catalog property other than Luna's multi-agent version changed from the source snapshot.
 
@@ -79,7 +79,7 @@ Configuration/catalog proof is not live-subagent proof.
 
 ## Mandatory process boundary
 
-If you installed or changed this override during a Lunacy run, first persist the exact interrupted worker/step and set that run's `<run-root>/STATE.md` `Next action` to retry the intended Luna/max worker after restart. `<run-root>` is `Lunacy/runs/<run-id>`.
+If you installed or changed this override during a Lunacy run, first persist the exact interrupted worker/step and set that run's `<run-root>/STATE.md` `Next action` to retry the intended Luna worker after restart. `<run-root>` is `Lunacy/runs/<run-id>`.
 
 Then tell the user plainly:
 
@@ -89,11 +89,11 @@ The already-open task cannot replace its model-selection/subagent tool schema mi
 
 ## Proof after restart
 
-In the new task, bind back to the same Lunacy run and retry the intended real worker with the normal Lunacy fresh-context/path-only handoff:
+In the new task, bind back to the same Lunacy run and retry the intended real worker at the same effort the orchestrator selected, with the normal fresh-context/path-only handoff:
 
 ```text
 model: gpt-5.6-luna
-reasoning_effort: max
+reasoning_effort: xhigh | max
 fork_turns: "none"   # when exposed by the current spawn API
 ```
 
@@ -101,7 +101,7 @@ Do not reattach the old parent conversation merely because this is a retry. The 
 
 A successful real worker spawn is the live proof; a separate dummy probe is unnecessary.
 
-If the spawn still fails, preserve the evidence and report the blocker. Do not silently fall back to Sol, Terra, or another effort.
+If the spawn still fails, preserve the evidence and report the blocker. Do not silently fall back to Sol, Terra, or lower reasoning effort.
 
 ## Maintenance
 
@@ -109,9 +109,9 @@ If the spawn still fails, preserve the evidence and report the blocker. Do not s
 
 Therefore:
 
-- always try native Luna/max before installing this override;
+- always try native Luna at the selected effort before installing this override;
 - when upstream Codex exposes Luna with the required multi-agent protocol natively, remove `model_catalog_json` and return to the managed catalog;
-- after removing the override, restart Codex and prove native Luna/max by starting the intended real worker again.
+- after removing the override, restart Codex and prove native Luna by starting the intended real worker again.
 
 ## Rollback
 
