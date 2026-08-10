@@ -17,6 +17,14 @@ Prefer modifying, reusing, deleting, or extending sound existing mechanisms over
 - Do not redesign healthy architecture merely because another design is theoretically cleaner.
 - Make each step the largest coherent Luna-owned unit; make each phase earn a real integration/gate boundary.
 
+## Luna effort routing
+
+Plan Luna work assuming **`xhigh` by default**. Reserve **`max`** for steps where extra exploration/verification has a concrete expected payoff: unresolved high-blast-radius architecture, subtle integrity/security/concurrency/replay/finality invariants, genuinely difficult cross-cutting interaction reasoning, recovery from an `xhigh` attempt that failed on the same hard reasoning boundary, a critical named adversarial risk, or explicit user/project authority.
+
+Do not mark a step `max` merely because it is large, touches many files, is an adversary/scout, or because higher effort sounds safer. Read-only surveys/scouts, bounded implementation, migrations after the design decision, focused repairs, tests, and documentation normally stay `xhigh`.
+
+The orchestrator may choose effort at spawn time; no permanent effort column is required unless the project itself benefits from recording it. If `max` is selected for an otherwise ordinary-looking step, a one-line rationale in the handoff is enough—do not create an effort bureaucracy.
+
 ## Multi-run boundary
 
 A run owns one coherent plan/scope. Multiple runs may coexist when repository ownership is safely independent.
@@ -90,6 +98,7 @@ Before approving the plan, ask:
 7. Is verification owned once per layer while still satisfying every authoritative acceptance requirement?
 8. Does each planned scout/adversary/decision artifact actually earn its cost?
 9. Is this run safely independent of other ACTIVE run ownership?
+10. Is each `max` Luna call justified by a concrete reasoning-risk trigger rather than task size/role alone?
 
 If #6 is yes, choose the simpler design.
 
