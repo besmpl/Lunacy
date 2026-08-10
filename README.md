@@ -4,14 +4,16 @@ A compact execution skill for using **Codex, GPT-5.6 Sol, or GPT-5.6 Terra as a 
 
 The main design rule is: **spend orchestrator tokens only where global judgment has leverage.**
 
-The orchestrator understands project intent and ethos, plans the work, resolves genuinely difficult decisions, schedules safe parallel work, and owns phase-end hard gates. Luna/max workers investigate, implement, verify, self-review, repair, adversarially review when selected, and prepare phase evidence.
+The orchestrator understands project intent and ethos, plans work, resolves hard decisions, schedules safe parallelism, tracks user constraints, and owns phase-end hard gates. Luna/max workers inspect, implement, test, self-review, repair, and prepare concise evidence.
 
-Both sides also operate under a **complexity budget**: prefer the simplest sound design that fully satisfies the real task and existing architecture. Reuse/extend sound mechanisms before inventing new ones; use OOP/polymorphism when they model real variation; do not manufacture layers, frameworks, factories, managers, micro-steps, or future-proofing merely because they look architecturally sophisticated.
+Both sides operate under a **complexity budget**: prefer the simplest sound design that fully satisfies the real task and existing architecture. Reuse/extend sound mechanisms before inventing new ones; use OOP/polymorphism when they model real variation; do not manufacture layers, frameworks, factories, managers, micro-steps, or future-proofing merely because they look sophisticated.
 
 ## Execution model
 
 ```text
-project intent / ethos
+project intent / notes
+        ↓
+independent Lunacy run
         ↓
 compact PLAN.md
         ↓
@@ -21,73 +23,104 @@ dependency-ready steps
    ↙       ↓       ↘
  Luna     Luna     Luna    ← concurrent when safely independent
    ↘       ↓       ↙
- batch Control Blocks
+ terminal Control Blocks
         ↓
-optional fresh Luna adversary on selected risky steps
+optional fresh Luna adversary
         ↓
-fresh Luna gate scout compresses nontrivial phase evidence
+fresh Luna gate scout for nontrivial phase
         ↓
-orchestrator phase hard gate
+orchestrator hard gate
 ```
 
-A phase is an integrated milestone. A step is the **largest coherent unit** one Luna/max worker can safely own end-to-end. Lunacy deliberately avoids over-decomposing work just to create more agents or orchestration ceremony.
+A phase is an integrated milestone. A step is the **largest coherent unit** one Luna/max worker can safely own end-to-end. Lunacy deliberately avoids micro-decomposition just to create more agents.
 
-For vague requests, the orchestrator first creates the minimum useful phase/step plan. For already-structured plans, it preserves the meaningful hierarchy. Its compact planning doctrine tells it to inspect existing architectural/reuse points, use clean OOP/polymorphic design where it actually fits, and reject speculative abstractions or process machinery that have not earned their cost.
+At each scheduling point, Lunacy launches the largest safe set of dependency-ready steps up to host capacity. Work stays serialized when workers are likely to overlap writes, shared contracts, mutable state, dependencies, or unresolved architectural decisions.
 
-At each scheduling point Lunacy looks for the **largest safe set of dependency-ready steps** and launches them concurrently, up to host capacity. Work stays serialized when steps are likely to overlap write surfaces, change the same contract/abstraction, consume one another's outputs, share unsafe mutable state, or depend on the same unresolved architecture decision. If independence is uncertain, Lunacy serializes rather than gambling on a race. It does not distort architecture or split coherent work merely to manufacture parallelism.
+Workers inspect the existing system before writing, search for safe reuse/extension points, inventory affected callers/surfaces, and own the full loop: implement → verify → self-review → fix → reverify → concise report.
 
-Each step owner performs the full local loop: inspect → implement → verify → self-review → fix → reverify → concise report. The orchestrator normally reads only the report's tiny Control Block and moves on; it does **not** review code after every step. For a parallel batch it waits/reconciles at batch level where the host allows it, reducing repeated parent wakeups.
+## Multiple plans / sessions in one project
 
-Workers follow a compact engineering doctrine: **inspect and understand the existing system before writing**, search for safe reuse/extension points before inventing parallel mechanisms, favor clean cohesive abstractions and polymorphism where they genuinely fit, and reject ceremonial OOP, speculative frameworks, unnecessary compatibility layers, and unrelated refactoring. This repository-scale architectural hygiene is deliberately paid for with Luna tokens rather than parent tokens.
+Lunacy supports multiple independent plans in the same repository without a global scheduler or run database:
 
-Concurrent workers validate their assumed independence during that deeper inspection. If a worker discovers it really needs to edit another active step's surface or change a shared contract another worker depends on, it stops before the conflicting edit and escalates the overlap so the orchestrator can serialize/replan it.
+```text
+Lunacy/
+  PROJECT_NOTES.md                 # project-wide user constraints/preferences
+  runs/
+    auth-refactor/
+      PLAN.md
+      STATE.md
+      USER_NOTES.md
+      DECISIONS.md
+      phases/
+        ...
+    generation-pipeline/
+      PLAN.md
+      STATE.md
+      USER_NOTES.md
+      DECISIONS.md
+      phases/
+        ...
+```
 
-For unusually risky steps, the plan may add a fresh Luna/max adversary that independently attacks the resulting code/effects.
+Each session binds to one `run-id`. New tasks get a short semantic slug; named resumes bind directly to the requested run. There is intentionally no `CURRENT_RUN` pointer or registry database—the run directories and their tiny state files are enough.
 
-At the end of a nontrivial phase, a fresh Luna/max **gate scout** reads the integrated change and phase evidence and produces a small navigation/risk pack. The scout does not approve the phase. It tells the orchestrator where its expensive attention is most useful. The orchestrator then inspects targeted **actual code/diff/behavior** and makes the hard-gate decision against the phase goal, architecture, project ethos, integration risk, and complexity proportionality.
+Each run records a concise `Workspace` and `Ownership` boundary. Before simultaneous implementation, the orchestrator compares only the tiny state files of other ACTIVE runs. Independent runs can proceed concurrently; overlapping surfaces/shared contracts or unsafe shared checkout state are serialized or isolated/replanned. Separate worktrees/branches are preferred for simultaneous runs when available.
 
-A phase can therefore fail a gate even if it works functionally when it introduces unjustified duplicate mechanisms, speculative abstractions, unnecessary layers, or maintenance burden.
+Isolation prevents direct write races; it does not magically make overlapping architectural work independent.
 
-## Project ethos is authority
+Older single-run `Lunacy/PLAN.md` / `STATE.md` layouts are migrated once into a `runs/<run-id>/` directory rather than maintained as duplicate authority.
 
-`Lunacy/PLAN.md` contains a compact digest of:
+## Durable user memory
 
-- project goal;
-- ethos and core principles;
-- non-negotiable contracts;
-- authoritative sources;
-- phase/gate map.
+`Lunacy/PROJECT_NOTES.md` stores **project-wide** user-originated constraints/preferences/requests. Each run may also have `USER_NOTES.md` for **run-specific** notes.
 
-Large plans or architecture sets can first be read by a Luna/max intake scout. The orchestrator reviews and spot-checks the cited digest and still owns the final plan and decisions. This avoids loading large document sets into parent context merely to extract durable facts once.
+These are deliberately tiny current-memory files, not chat logs. New user input is evaluated immediately; if it changes execution, the authoritative plan/state is updated too. Relevant notes are reread on fresh/restarted sessions, after context loss/compaction, and at the final gate—not on every worker cycle.
 
-`Lunacy/USER_NOTES.md` separately keeps a **tiny current memory of user-originated constraints, requests, corrections, preferences, and deliberately deferred items**. It is reread on fresh/restarted sessions, known context loss/compaction, and the final gate—not on every normal step. Execution-critical changes are promoted immediately into `PLAN.md`/`STATE.md`/`STEPS.md`; the notes file is memory, not a second execution authority.
+## Quiet workers and terminal reports
+
+Workers emit no intermediate mailbox/progress messages unless blocked or requesting a real orchestrator decision.
+
+The verification written in a PASS Control Block is the **terminal verification snapshot for the exact repository state being reported**. After writing it, the worker freezes changes and finalizes immediately: no post-PASS cleanup, polish, reruns just to update counts, or revised completion messages. If anything material changes, the prior PASS is invalid and must be reverified once for the new final state.
+
+The orchestrator normally reads only those small Control Blocks and reconciles concurrent workers at batch level.
+
+## Engineering discipline
+
+Luna workers follow `worker/ENGINEERING.md`: understand before writing, search for reuse/extension, prefer clean cohesive abstractions, use polymorphism where it removes real variation/branching, prove complete migration/caller coverage, and reject ceremonial OOP or speculative machinery.
+
+The orchestrator follows `orchestrator/PLANNING.md` when planning/materially replanning and keeps the same simplicity/reuse/OOP bias alive during execution-time decisions.
+
+A green selected test matrix is verification evidence, **not scope authority**. Maintained callers/tests cannot be dismissed as “historical” without explicit authority.
+
+## Phase hard gates
+
+The parent normally reviews at phase boundaries, not after every step. A fresh Luna gate scout may compress a nontrivial phase into changed surfaces, cross-step integration, verification, risks, and exact inspection targets; the scout cannot approve the phase.
+
+The parent then inspects targeted **actual code/diff/behavior** and judges correctness, architecture, project ethos, integration risk, user constraints, and complexity proportionality. A functionally correct phase can still fail if it introduces unjustified duplicate mechanisms, speculative abstractions, unnecessary layers, or maintenance burden.
 
 ## Durable structure
 
 ```text
 Lunacy/
-  PLAN.md
-  STATE.md
-  USER_NOTES.md
-  DECISIONS.md
-  intake.md                  # optional
-  phases/
-    <phase-id>/
-      STEPS.md
-      reports/
-        <step>-worker-01.md
-        <step>-adversary-01.md
-      gate-pack-01.md
-      hard-gate-01.md
+  PROJECT_NOTES.md                 # optional project-wide user memory
+  runs/
+    <run-id>/
+      PLAN.md
+      STATE.md
+      USER_NOTES.md                # optional run-specific user memory
+      DECISIONS.md
+      intake.md                    # optional
+      phases/
+        <phase-id>/
+          STEPS.md
+          reports/
+            <step>-worker-01.md
+            <step>-adversary-01.md
+          gate-pack-01.md
+          hard-gate-01.md
 ```
 
-There is intentionally no mandatory `HANDOVER.md`. `STATE.md + PLAN.md + USER_NOTES.md + current STEPS.md` already contain what a fresh orchestrator needs to resume, and duplicate handover prose costs tokens and can drift.
-
-`STATE.md` stays tiny, can record multiple in-flight steps/workers, and always contains one exact `Next action`. Worker reports put an 8–12-line Control Block first; deeper evidence is optional and read only when needed.
-
-Workers stay quiet during normal execution: no progress narration unless blocked or a real orchestrator decision is needed, and they finalize immediately after the durable report. The orchestrator prefers event-driven/blocking completion waits over repeated short timeout polling when the host supports it.
-
-A fresh/restarted orchestrator reads project-level instructions, `STATE.md`, `PLAN.md`, `USER_NOTES.md`, current `STEPS.md`, and only the artifact(s) named by `Next action`. It does not replay chats, reread all reports, or reload planning/workspace doctrine during normal resume.
+There is intentionally no mandatory `HANDOVER.md`. A resumed orchestrator reads project instructions, project/run user notes, the selected run's `STATE.md`, `PLAN.md`, current `STEPS.md`, and only the artifact(s) named by `Next action`. It does not replay chats or reread all history.
 
 ## Worker invariant
 
@@ -98,9 +131,7 @@ model: gpt-5.6-luna
 reasoning_effort: max
 ```
 
-There is no silent fallback.
-
-The **first real worker spawn** doubles as the Luna capability check; Lunacy does not spend a separate agent call on a dummy probe.
+There is no silent fallback. The **first real worker spawn** doubles as the Luna capability check.
 
 ## Install
 
@@ -121,19 +152,25 @@ or:
 Use $lunacy for this task. Minimize parent tokens; plan phases/steps first and delegate repository-heavy work to Luna/max.
 ```
 
+For an existing run, name it explicitly when useful:
+
+```text
+Use $lunacy to resume the auth-refactor run.
+```
+
 ## Codex Luna compatibility
 
-If Codex rejects Luna as a subagent because of the known cached multi-agent catalog mismatch, the skill reads `references/CODEX_LUNA_COMPAT.md` and applies only that narrow compatibility procedure. It never silently downgrades.
+If Codex rejects Luna as a subagent because of the known cached multi-agent catalog mismatch, Lunacy reads `references/CODEX_LUNA_COMPAT.md` and applies only that narrow compatibility procedure. It never silently downgrades.
 
-If the override is installed or changed, **close and relaunch Codex and open a new task**. The already-open task cannot refresh its model-selection schema.
+If the override is installed or changed, persist the current run/worker resume point, then **close and relaunch Codex and open a new task**. The already-open task cannot refresh its model-selection schema.
 
 ## Files
 
 ```text
 SKILL.md                         Always-loaded core orchestration protocol.
-orchestrator/PLANNING.md        Parent-side reuse/OOP/polymorphism/YAGNI planning doctrine; read when planning/replanning.
-WORKSPACE.md                     Read on new-run setup or recovery, not every resume.
-worker/ENGINEERING.md            Luna-side clean-code/reuse/OOP/polymorphism/concurrency/YAGNI doctrine.
+orchestrator/PLANNING.md        Parent-side planning/reuse/OOP/polymorphism/YAGNI/multi-run doctrine.
+WORKSPACE.md                     Durable multi-run workspace and resume contract.
+worker/ENGINEERING.md            Luna-side clean-code/reuse/OOP/polymorphism/concurrency/YAGNI/terminal-report doctrine.
 references/CODEX_LUNA_COMPAT.md Conditional compatibility procedure.
 README.md                        Human-facing overview.
 ```
