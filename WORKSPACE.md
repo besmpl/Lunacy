@@ -73,7 +73,7 @@ Updated: <timestamp>
 
 State describes reality, not intention. Update before worker launch and after material worker completion, decision, adversarial review, repair, gate, phase transition, blocker, or plan change.
 
-The exact `Next action` is the main resume primitive.
+The exact `Next action` is the main resume primitive. If a Codex compatibility change requires restart, persist that fact and the exact worker/step to retry after restart before telling the user to relaunch.
 
 ## phases/<phase>/STEPS.md
 
@@ -95,6 +95,20 @@ Statuses: `READY`, `ACTIVE`, `NEEDS-DECISION`, `REPAIR`, `DONE`, `BLOCKED`, `SUP
 `DONE` means the step worker completed its own implementation/self-review/verification loop. The phase is not accepted until its hard gate passes.
 
 One step normally maps to one implementation Luna/max worker. Replan when real facts justify it; preserve project intent and phase goals, not a bad initial split.
+
+## Worker handoff
+
+Default to a **path-based handoff**, not a rewritten task specification. Normally the parent only needs to tell the worker:
+
+```text
+Own <step-id> end-to-end.
+Authority: LunaMaxing/PLAN.md + applicable project instructions.
+Step contract: LunaMaxing/phases/<phase>/STEPS.md (<step-id> row).
+Report: <report-path>.
+Complete implement → verify → self-review → fix → reverify. Escalate only a genuine orchestrator decision.
+```
+
+Inline only exceptions or facts not already durable. This keeps repeated parent output small even across many steps.
 
 ## Worker report
 
@@ -195,6 +209,18 @@ Repair steps: <ids or NONE>
 ```
 
 This records the parent's judgment; it does not need to reproduce the gate scout or worker reports.
+
+## Interrupted active step
+
+On resume, if `STATE.md`/`STEPS.md` says a step is `ACTIVE`:
+
+1. read only its report Control Block if present;
+2. if it records a completed PASS/decision/blocker, reconcile state from that result;
+3. otherwise treat the prior attempt as interrupted—do not make the parent inspect partial implementation;
+4. create a new attempt/report path and spawn a fresh Luna/max continuation worker for the same step against the **current repository state**;
+5. tell that worker to inspect existing partial changes, keep/fix/rework them as appropriate, and finish the normal full step loop.
+
+This makes interruption recovery a worker problem, not an orchestrator context sink.
 
 ## Resume contract
 
