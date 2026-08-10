@@ -171,9 +171,16 @@ Resume a named run when useful:
 Use $lunacy to resume the auth-refactor run.
 ```
 
+## License
+
+Lunacy is open source under the **Apache License 2.0**. See [`LICENSE`](LICENSE) for the complete license terms.
+
+SPDX-License-Identifier: `Apache-2.0`
+
 ## Files
 
 ```text
+LICENSE                          Apache License 2.0 terms.
 SKILL.md                         Always-loaded orchestration protocol.
 orchestrator/PLANNING.md        Parent planning/reuse/OOP/YAGNI/effort/verification doctrine.
 WORKSPACE.md                     Multi-run state, immutable evidence, report/gate/decision limits.
