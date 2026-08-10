@@ -91,7 +91,7 @@ Resolve genuine hard questions in this order:
 4. established project evidence/accepted behavior;
 5. conservative engineering judgment preserving intent.
 
-When several designs satisfy the authority equally, prefer the one with less new machinery and lower maintenance burden. Read the minimum evidence needed, record consequential decisions, and delegate implementation consequences back to Luna/max.
+During execution-time decisions, keep the same design bias: **reuse or extend sound existing abstractions first; use OOP/polymorphism only when they simplify real current variation or repeated branching; otherwise prefer the simpler direct design and reject speculative machinery.** When several designs satisfy the authority equally, prefer the one with less new machinery and lower maintenance burden. Read the minimum evidence needed, record consequential decisions, and delegate implementation consequences back to Luna/max.
 
 ## 5. Phase hard gate
 
