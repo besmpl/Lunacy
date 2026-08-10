@@ -79,7 +79,7 @@ Configuration/catalog proof is not live-subagent proof.
 
 ## Mandatory process boundary
 
-If you installed or changed this override during a Lunacy run, first persist the exact interrupted worker/step and set `Lunacy/STATE.md` `Next action` to retry that Luna/max worker after restart.
+If you installed or changed this override during a Lunacy run, first persist the exact interrupted worker/step and set that run's `<run-root>/STATE.md` `Next action` to retry the intended Luna/max worker after restart. `<run-root>` is `Lunacy/runs/<run-id>`.
 
 Then tell the user plainly:
 
@@ -89,7 +89,7 @@ The already-open task cannot replace its model-selection/subagent tool schema mi
 
 ## Proof after restart
 
-In the new task, retry the intended real worker explicitly with:
+In the new task, bind back to the same Lunacy run and retry the intended real worker explicitly with:
 
 ```text
 model: gpt-5.6-luna
