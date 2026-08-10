@@ -8,7 +8,8 @@ The design is simple:
 - hand coherent work units to Luna/max agents instead of micromanaging them;
 - require each worker to implement, verify, self-review, and fix its own work;
 - let the orchestrator decide when a meaningful hard review is warranted;
-- perform hard reviews with a **fresh Luna/max context** that judges the resulting code, behavior, diff, tests, and task goals—not the implementer's conversation or reasoning.
+- make that hard review **orchestrator-owned and effect-based**: inspect the resulting code, behavior, diff, tests, and task/phase goals without importing the workers' conversation or reasoning context;
+- send any hard-review findings back to Luna/max for end-to-end repair and worker self-review, then re-gate from the resulting state.
 
 ## Install
 
