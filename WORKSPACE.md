@@ -8,6 +8,7 @@ Create in the project root unless project instructions require another location:
 Lunacy/
   PLAN.md
   STATE.md
+  USER_NOTES.md
   DECISIONS.md
   intake.md                  # optional, large-authority scout only
   phases/
@@ -20,7 +21,7 @@ Lunacy/
       hard-gate-01.md
 ```
 
-No mandatory `HANDOVER.md`: `STATE.md + PLAN.md + current STEPS.md` are the resume packet. Avoid duplicate sources of truth.
+No mandatory `HANDOVER.md`: `STATE.md + PLAN.md + USER_NOTES.md + current STEPS.md` are the fresh-session resume packet. Avoid duplicate sources of truth.
 
 ## PLAN.md
 
@@ -52,6 +53,39 @@ Final gate: <whole-task completion standard>
 Ethos/principles are decision authority, not decoration. Keep only durable, high-leverage principles. Source pointers let the orchestrator spot-check omitted detail without rereading entire documents.
 
 For very large plan/architecture sets, an intake Luna/max scout may draft `intake.md` with a concise cited authority map. The orchestrator reviews it, spot-checks important sources, and writes/approves `PLAN.md`. `intake.md` is not normally reread after planning.
+
+## USER_NOTES.md
+
+Tiny durable memory for **user-originated** project/run information that should survive context loss: constraints, preferences, corrections, additional requests, reminders, and intentionally deferred/future items.
+
+```markdown
+# Lunacy User Notes
+
+## Current
+- <concise user-originated constraint/request/preference>
+
+## Deferred / future
+- <item explicitly not part of current execution, if any>
+```
+
+Keep this file current, not chronological:
+
+- update or replace bullets when the user changes a requirement;
+- remove superseded/no-longer-relevant items rather than preserving chat history;
+- move deliberately postponed items to `Deferred / future`;
+- do **not** store worker progress, implementation status, evidence, orchestrator decisions, or conversation transcripts here;
+- keep wording concise and faithful to the user's intent rather than expanding it into speculative requirements.
+
+`USER_NOTES.md` is memory, **not execution authority**. When a user note affects the active goal, contracts, acceptance criteria, scope, dependencies, sequencing, or next action, immediately update `PLAN.md`, `STATE.md`, `STEPS.md`, and/or `DECISIONS.md` as appropriate. Do not leave an execution-critical requirement only in notes.
+
+Read/evaluate it:
+
+1. during initial run setup;
+2. whenever the user adds, corrects, or defers something material;
+3. on a fresh/restarted orchestrator session or known context compaction/loss;
+4. at the final gate.
+
+Do **not** reread it for every normal step/batch in uninterrupted context.
 
 ## STATE.md
 
@@ -269,13 +303,14 @@ This makes interruption recovery a worker problem, not an orchestrator context s
 
 ## Resume contract
 
-A fresh orchestrator reads only:
+A fresh/restarted orchestrator or one recovering from known context compaction/loss reads only:
 
 1. applicable project-level instructions;
 2. `Lunacy/STATE.md`;
 3. `Lunacy/PLAN.md`;
-4. current phase `STEPS.md`;
-5. only the artifact(s) explicitly required by `Next action`.
+4. `Lunacy/USER_NOTES.md`;
+5. current phase `STEPS.md`;
+6. only the artifact(s) explicitly required by `Next action`.
 
 Then execute `Next action`.
 
