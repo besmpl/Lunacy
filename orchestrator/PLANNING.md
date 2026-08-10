@@ -37,6 +37,12 @@ Do not add phases, abstractions, services, managers, factories, wrappers, adapte
 
 Avoid speculative future-proofing, abstractions before real variation/reuse, duplicate compatibility layers, unrelated cleanup, micro-step explosions, combining nearby unrelated work, distorting boundaries for concurrency, and elaborate proof machinery when existing checks suffice.
 
+## Adversary selection
+
+`Adversary` defaults to **NO**. Set it to YES only for a named risk that benefits from an independent attack: tricky invariant/identity/security behavior, broad migration, concurrency/state integrity, subtle compatibility, or another genuinely high-cost failure mode.
+
+Do not mark every implementation step adversarial by habit. If more than one adversary is planned in a phase, each must attack a materially different risk or a later repaired state; otherwise consolidate/skip it.
+
 ## Verification ownership
 
 Plan proof so each expensive layer has a clear owner rather than being replayed everywhere.
@@ -46,7 +52,9 @@ Plan proof so each expensive layer has a clear owner rather than being replayed 
 - Gate scout: read-only compression/navigation; no broad suite replay.
 - Parent gate: one bounded acceptance sample chosen for integration risk.
 
-Do not assign the same expensive/global matrix to implementer, adversary, scout, and parent merely because more repetition feels safer. A later code change that invalidates earlier evidence is the reason to rerun it.
+**Authoritative acceptance requirements always win.** If project authority requires a full matrix, independent repetition, live proof, or a specific gate command, run it exactly as required—assign it to the appropriate layer rather than silently dropping it. Deduplicate only redundant proof beyond the authoritative contract.
+
+Do not assign the same expensive/global matrix to implementer, adversary, scout, and parent merely because more repetition feels safer. A later code change that invalidates earlier evidence is the other reason to rerun it.
 
 ## Decision surfaces
 
@@ -79,8 +87,8 @@ Before approving the plan, ask:
 4. Are we solving the stated task rather than hypothetical future work?
 5. Are established project style/contracts preserved where sound?
 6. Is there a materially simpler design with the same required correctness/maintainability/extensibility?
-7. Is verification owned once per layer rather than duplicated?
-8. Does any planned scout/adversary/decision artifact actually earn its cost?
+7. Is verification owned once per layer while still satisfying every authoritative acceptance requirement?
+8. Does each planned scout/adversary/decision artifact actually earn its cost?
 9. Is this run safely independent of other ACTIVE run ownership?
 
 If #6 is yes, choose the simpler design.
