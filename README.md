@@ -1,12 +1,22 @@
 # Lunacy
 
-A compact execution skill for using **Codex, GPT-5.6 Sol, or GPT-5.6 Terra as a token-frugal expert orchestrator** while **GPT-5.6 Luna at max reasoning owns repository-heavy work**.
+A compact execution skill for using **Codex, GPT-5.6 Sol, or GPT-5.6 Terra as a token-frugal expert orchestrator** while **GPT-5.6 Luna owns repository-heavy work at dynamically selected `xhigh` or `max` reasoning**.
 
 The core idea is simple: **spend expensive parent context on judgment, not repository ingestion, worker narration, repeated verification, or orchestration paperwork.**
 
-The parent understands project intent/architecture, plans work, resolves hard decisions, schedules safe parallelism, preserves user constraints, and owns phase gates. Luna/max workers inspect, implement, test, self-review, repair, and leave bounded durable evidence.
+The parent understands project intent/architecture, plans work, resolves hard decisions, schedules safe parallelism, preserves user constraints, chooses worker effort, and owns phase gates. Luna workers inspect, implement, test, self-review, repair, and leave bounded durable evidence.
 
 Both sides use a complexity budget: reuse/extend sound mechanisms first, use OOP/polymorphism where they model real variation, and reject speculative layers/frameworks/process ceremony.
+
+## Luna effort routing
+
+Lunacy uses **`xhigh` by default**. `max` is an escalation, not the standard tax on every worker.
+
+Typical `xhigh` work includes bounded implementation, repository surveys/inventory, migrations after design is settled, focused repairs, tests, documentation, read-only scouts, and most adversarial reviews.
+
+The parent selects `max` when extra exploration has a concrete expected payoff: high-blast-radius architecture ambiguity, subtle integrity/security/concurrency/replay/finality invariants, genuinely difficult cross-cutting interaction reasoning, a failed `xhigh` attempt stuck on the same hard reasoning boundary, a critical named adversarial risk, or explicit project/user authority.
+
+Step size or role name alone never justifies `max`. Different workers in the same concurrent batch may use different efforts.
 
 ## Mechanical context controls
 
@@ -18,6 +28,7 @@ Lunacy does not rely only on “be concise.” It enforces boundaries:
 - parent decision briefs are ≤30 lines / ~4 KB;
 - gate packs are ≤30 lines / ~4 KB;
 - long command output, broad surveys, inventories, and raw evidence stay in evidence/log files rather than parent context;
+- unchanged residual/root-status/inventory lists are referenced from one authority/evidence location instead of recopied into every artifact;
 - per-file hash catalogs are avoided unless project authority requires them;
 - finalized reports/gate packs/gates are immutable—repairs create new numbered evidence instead of reopening old artifacts;
 - the parent normally reads Control Blocks, tiny decision briefs, gate packs, and exact named code/report slices only;
@@ -37,7 +48,7 @@ compact PLAN.md
         ↓
 dependency-ready steps
    ↙       ↓       ↘
- Luna     Luna     Luna    ← concurrent when safely independent
+ Luna     Luna     Luna    ← safe concurrency; xhigh/max per step
    ↘       ↓       ↙
  immutable terminal Control Blocks
         ↓
@@ -48,7 +59,9 @@ optional read-only gate scout if integration earns it
 orchestrator hard gate
 ```
 
-A phase is an integrated milestone. A step is the **largest coherent unit** one Luna/max worker can safely own end-to-end. Lunacy avoids micro-decomposition merely to create more agents.
+A phase is an integrated milestone. A step is the **largest coherent unit** one Luna worker can safely own end-to-end. Lunacy avoids micro-decomposition merely to create more agents.
+
+If deeper inspection discovers material work outside the durable step contract, the worker stops before the out-of-contract edit and sends one consolidated decision brief. The parent updates the durable scope or creates a repair/new step before implementation continues. Lunacy does not accumulate chains of ad-hoc “overlap” amendments while one worker keeps expanding its write set.
 
 ## Verification without proof multiplication
 
@@ -123,14 +136,15 @@ The parent inspects targeted actual code/diff/behavior and judges correctness, a
 
 ## Worker invariant
 
-Every technical subagent must use:
+Every technical subagent uses:
 
 ```text
 model: gpt-5.6-luna
-reasoning_effort: max
+reasoning_effort: xhigh   # default
+# or max when the orchestrator's routing rule justifies escalation
 ```
 
-There is no silent fallback. The first real worker spawn doubles as the Luna capability check.
+There is no silent model fallback and no effort below `xhigh`. The first real Luna worker spawn doubles as the capability check.
 
 ## Install
 
@@ -142,7 +156,7 @@ git clone https://github.com/frozenpepper/Lunacy.git ~/.agents/skills/lunacy
 ## Use
 
 ```text
-Use $lunacy for this task. Minimize parent context; plan phases/steps first and delegate repository-heavy work to Luna/max.
+Use $lunacy for this task. Minimize parent context; plan phases/steps first and delegate repository-heavy work to Luna.
 ```
 
 Resume a named run when useful:
@@ -155,7 +169,7 @@ Use $lunacy to resume the auth-refactor run.
 
 ```text
 SKILL.md                         Always-loaded orchestration protocol.
-orchestrator/PLANNING.md        Parent planning/reuse/OOP/YAGNI/verification doctrine.
+orchestrator/PLANNING.md        Parent planning/reuse/OOP/YAGNI/effort/verification doctrine.
 WORKSPACE.md                     Multi-run state, immutable evidence, report/gate/decision limits.
 worker/ENGINEERING.md            Luna engineering + bounded output/terminal evidence doctrine.
 references/CODEX_LUNA_COMPAT.md Conditional Luna compatibility procedure.
