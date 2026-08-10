@@ -4,7 +4,9 @@ Read this for implementation, repair, recovery, and adversarial-review work. Pro
 
 ## Core rule
 
-**Understand and reuse the existing system before inventing another one.** Prefer the smallest coherent design that fits the project's architecture, not merely the smallest patch.
+**Understand and reuse the existing system before inventing another one. Prefer the simplest coherent design that fully solves the actual task and fits the project's architecture. Complexity must earn its cost.**
+
+Do not confuse sophistication with quality. Prefer modifying, reusing, deleting, or extending sound existing mechanisms over adding new layers or parallel systems.
 
 ## Before writing code
 
@@ -44,7 +46,25 @@ Conversely, do not avoid required in-scope work merely because it touches many f
 - Favor testable seams and dependency injection where they materially improve isolation or replace hidden coupling.
 - Preserve public contracts and compatibility unless the authoritative task intentionally changes them.
 
-**OOP is a tool, not a quota.** Do not manufacture classes, inheritance, factories, or interfaces where a simpler functional/data-oriented design is clearer and consistent with the project.
+**OOP is a tool, not a quota.** Do not manufacture classes, inheritance, factories, managers, services, wrappers, adapters, registries, or interfaces where a simpler functional/data-oriented or existing design is clearer.
+
+## Anti-overengineering guardrails
+
+Do **not** introduce machinery merely because it could be useful later. New abstractions and infrastructure must be justified by the current task, a real existing variation/reuse problem, or authoritative architecture.
+
+Avoid:
+
+- speculative future-proofing for hypothetical requirements;
+- generalized frameworks where a small direct change is sufficient;
+- new managers/services/factories/wrappers/config layers for one simple behavior;
+- compatibility or migration layers when a direct safe migration is the actual requirement;
+- feature flags or persistent state with no present need;
+- broad cleanup or architectural rewrites unrelated to the step;
+- adding extension points before there is something real to extend;
+- elaborate test harnesses when existing tests/checks can prove the required contract;
+- preserving obsolete complexity after the new path makes it unnecessary and safe removal is in scope.
+
+Do not optimize for the imagined next five requirements. Optimize for correctness, clarity, maintainability, and reasonable extension of the requirements that actually exist.
 
 ## Implementation
 
@@ -53,6 +73,7 @@ Conversely, do not avoid required in-scope work merely because it touches many f
 - If new behavior makes an existing abstraction obviously incomplete, improve that abstraction within step scope rather than bolt on a parallel path.
 - Remove obsolete/duplicated paths made unnecessary by the change when safe and in scope.
 - Do not broaden into unrelated cleanup or architectural rewrites without authority.
+- Prefer the smallest coherent diff/design that preserves clarity and architectural integrity; smallest line count is not the goal, but neither is architectural ceremony.
 
 ## Verification and self-review
 
@@ -67,9 +88,12 @@ Before PASS, inspect the resulting diff and ask:
 - Did I introduce a second way to do the same thing?
 - Could this cleanly reuse/extend an existing abstraction instead?
 - Is repeated branching hiding a polymorphic extension point?
+- Is every new abstraction/layer justified by a current requirement or real existing variation?
+- Did I add machinery mainly for hypothetical future use?
+- Is there a materially simpler design with the same correctness and maintainability?
 - Is the new abstraction genuinely useful, or ceremony?
 - Are responsibilities and dependencies clearer after the change?
 - Do tests verify behavior and integration, not just implementation details?
 - Did I preserve project contracts and avoid regressions?
 
-Fix every issue found, re-run relevant verification, then write the concise Lunacy Control Block and finalize immediately.
+If a simpler design preserves the required behavior, maintainability, and project architecture, simplify it. Fix every issue found, re-run relevant verification, then write the concise Lunacy Control Block and finalize immediately.
