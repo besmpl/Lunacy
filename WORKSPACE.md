@@ -13,7 +13,7 @@ Lunacy/
       STATE.md
       USER_NOTES.md                # optional run-local user memory
       DECISIONS.md                 # append-only parent decisions
-      intake.md                    # optional large-authority digest
+      intake.md                    # optional bounded large-authority digest
       phases/
         <phase-id>/
           STEPS.md
@@ -32,15 +32,7 @@ Legacy root-level `Lunacy/PLAN.md`, `STATE.md`, `phases/`, etc. migrate once int
 
 ## Artifact mutability contract
 
-This distinction is critical.
-
-**Mutable current-control files:**
-
-- `PLAN.md`
-- `STATE.md`
-- phase `STEPS.md`
-- `PROJECT_NOTES.md`
-- run `USER_NOTES.md`
+**Mutable current-control files:** `PLAN.md`, `STATE.md`, phase `STEPS.md`, `PROJECT_NOTES.md`, run `USER_NOTES.md`.
 
 **Append-only:** `DECISIONS.md`. Supersede a prior decision with a new entry; do not rewrite history.
 
@@ -75,9 +67,9 @@ Do not put worker progress, logs, or parent decisions here. Evaluate new user in
 
 Read relevant notes on run creation, fresh/restarted parent context, known compaction/loss, when the user changes requirements, and the final gate—not every worker cycle.
 
-## PLAN.md
+## PLAN.md / intake.md
 
-Compact authority/execution digest. Target well under ~800 words unless genuinely necessary.
+`PLAN.md` is the compact authority/execution digest. Target well under ~800 words unless genuinely necessary.
 
 ```markdown
 # Lunacy Execution Plan
@@ -101,7 +93,7 @@ Optional adversaries: <ids or NONE>
 Final gate: <whole-run standard>
 ```
 
-For large authority sets an intake Luna may create `intake.md`; the parent spot-checks it and owns the final plan.
+For very large authority sets an intake Luna may create `intake.md`; the parent spot-checks it and owns the final plan. **`intake.md` is parent-facing compression, not a replacement dossier: target ≤80 lines / ~8 KB.** Put larger surveys/extracts under evidence and cite exact pointers.
 
 Plan verification ownership too: do not make every step/adversary/scout/parent rerun the same expensive global suite unless a later change genuinely invalidates earlier evidence. **Never omit verification required by authoritative project/plan acceptance; assign required proof to one clear layer and deduplicate only redundant proof beyond it.**
 
@@ -168,6 +160,8 @@ fork_turns: "none"
 
 Any inheritance exception must have a specific reason recorded in run `DECISIONS.md`.
 
+The parent chooses Luna reasoning effort per `SKILL.md`: **`xhigh` normally; `max` only for a concrete hard-reasoning trigger.** No permanent effort column is required. If an otherwise ordinary-looking step uses `max`, a one-line rationale in the handoff is enough.
+
 Default handoff:
 
 ```text
@@ -177,11 +171,23 @@ Engineering: <lunacy-skill-root>/worker/ENGINEERING.md.
 Step: <run-root>/phases/<phase>/STEPS.md (<step-id> row).
 Report: <report-path>.
 Inspect/reuse first; implement → verify → self-review → fix → terminal reverify.
-If active step/run ownership overlaps, stop before conflicting edits.
+If active ownership or material durable scope would be exceeded, stop before the edit.
 Mailbox only BLOCKED / DECISION_REQUIRED / FINAL.
 ```
 
 Do not paste parent conversation/history into the handoff. Durable files carry the required context.
+
+## Scope changes
+
+Discovery is not authorization. If a worker finds materially required work outside its durable step contract, it stops before that out-of-contract edit and produces one consolidated decision brief.
+
+The parent then chooses one of:
+
+- amend `STEPS.md`/`PLAN.md` before work resumes;
+- create a new/repair step;
+- reject/defer the discovered work with authority.
+
+Do not let one worker accumulate a sequence of tiny “overlap” or scope amendments while continuously expanding its write set. Materially amended work should resume against the updated durable contract, using a new attempt/report when needed for clean evidence provenance.
 
 ## Worker mailbox
 
@@ -228,7 +234,7 @@ Evidence: <optional exact evidence/log/source pointers>
 <optional worker/later-review detail>
 ```
 
-Control is at most ~12 lines. The **whole report should normally stay within 60 lines / ~6 KB**. If evidence would exceed that, move it to `evidence/` (or an existing project evidence/log location) and cite exact pointers. Large caller inventories, raw surveys, long test output, and hash tables do not belong in the parent report.
+Control is at most ~12 lines. The **whole report should normally stay within 60 lines / ~6 KB**. If evidence would exceed that, move it to `evidence/` (or an existing project evidence/log location) and cite exact pointers. Large caller inventories, raw surveys, long test output, repeated unchanged residual lists, and hash tables do not belong in the parent report.
 
 The parent reads the Control Block by default; Detail is not part of normal progress control.
 
@@ -254,6 +260,8 @@ Long command output must not enter parent chat or normal reports. Redirect it to
 - exact log/evidence path if deeper inspection is needed.
 
 Do not preserve huge PASS logs merely because they exist. Use durable logs when they are acceptance evidence or useful for recovery; otherwise temporary logs are fine.
+
+Do not recopy unchanged known-red, residual, root-status, caller-inventory, or acceptance-boundary lists across reports/gates. Cite their authoritative project/run artifact or store the detailed inventory once under `evidence/` and reference it.
 
 Do not emit per-file SHA catalogs unless the project itself requires that provenance. If Lunacy needs drift/freeze identity, prefer one aggregate phase/worktree fingerprint where cheaply available.
 
@@ -281,11 +289,11 @@ Consolidate related contradictions discovered in the same bounded investigation 
 
 ## Adversary
 
-Use a fresh Luna/max adversary only for a named unusually risky surface, not by default for every step. Give it durable authority, engineering doctrine, actual code/diff, and verification entry points—not implementer chat.
+Use a fresh Luna adversary only for a named unusually risky surface, not by default for every step. Give it durable authority, engineering doctrine, actual code/diff, and verification entry points—not implementer chat.
 
 It attacks new assumptions/risks. If it repairs something, it verifies the impacted surface. It should not replay the entire implementer matrix unless its repair makes that broad evidence stale **or authoritative acceptance explicitly requires the repetition**.
 
-Its report follows the same size, mailbox, immutability, and terminal-snapshot rules.
+Its report follows the same size, mailbox, immutability, and terminal-snapshot rules. Adversary role alone does not imply `max`; use the normal effort-routing rule.
 
 ## Verification layers
 
@@ -355,24 +363,24 @@ Basis: <key evidence>
 Impact: <steps/contracts>
 ```
 
-Do not reread the ledger on normal resume. Active consequences belong in PLAN/STATE.
+Keep each entry concise; cite evidence instead of copying inventories/surveys. Do not reread the ledger on normal resume. Active consequences belong in PLAN/STATE.
 
 ## Hard-gate record
 
-Hard-gate artifacts are immutable and numbered:
+Hard-gate artifacts are immutable, numbered, and **target ≤25 lines / ~4 KB**:
 
 ```markdown
 # P1 Hard Gate 01
 Goal/principles checked: <compact list>
 Actual state inspected: <exact paths/symbols/diff regions>
-Acceptance sample: <bounded checks>
+Acceptance proof/sample: <required gate proof + bounded checks>
 Findings: NONE | <concise findings>
 Disposition: PASS | REPAIR REQUIRED
 Repair steps: <ids or NONE>
 Barrier/snapshot: <identifier if available>
 ```
 
-After repair, create `hard-gate-02.md`; do not edit gate 01 into a different historical result.
+Do not copy worker verification matrices, known-red inventories, or gate-pack detail into the hard-gate record. Reference them. After repair, create `hard-gate-02.md`; do not edit gate 01 into a different historical result.
 
 ## Resume
 
