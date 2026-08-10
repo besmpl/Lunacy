@@ -10,7 +10,7 @@ Both sides use a complexity budget: reuse/extend sound mechanisms first, use OOP
 
 ## Mechanical context controls
 
-Lunacy does not rely only on “be concise.” It now enforces boundaries:
+Lunacy does not rely only on “be concise.” It enforces boundaries:
 
 - when supported, every Luna spawn uses `fork_turns: "none"` so workers do not inherit the parent conversation by default;
 - worker mailbox messages are only `BLOCKED`, `DECISION_REQUIRED`, or `FINAL`, at most three short lines;
@@ -41,11 +41,11 @@ dependency-ready steps
    ↘       ↓       ↙
  immutable terminal Control Blocks
         ↓
-optional adversary if risk earns it
+optional adversary if a named risk earns it
         ↓
 optional read-only gate scout if integration earns it
         ↓
-orchestrator hard gate + one bounded acceptance sample
+orchestrator hard gate
 ```
 
 A phase is an integrated milestone. A step is the **largest coherent unit** one Luna/max worker can safely own end-to-end. Lunacy avoids micro-decomposition merely to create more agents.
@@ -55,11 +55,13 @@ A phase is an integrated milestone. A step is the **largest coherent unit** one 
 Each layer has a different job:
 
 1. **Implementer:** terminal verification after its final code change.
-2. **Adversary, when justified:** attack new risks/assumptions and verify only the impacted delta after repairs unless broader proof became stale.
+2. **Adversary, when justified:** attack new risks/assumptions and verify the impacted delta after repairs unless broader proof became stale.
 3. **Gate scout, when justified:** read-only compression/navigation; no broad suite rerun.
-4. **Parent gate:** inspect actual targeted code/diff/behavior and run one bounded acceptance sample selected for integration risk.
+4. **Parent gate:** inspect actual targeted code/diff/behavior and perform the authoritative required gate proof plus only the additional bounded acceptance sample useful for integration judgment.
 
-The same expensive global matrix is not replayed by every layer just to create another PASS count.
+Project/plan acceptance authority always wins: required full matrices, independent repetitions, live proof, or exact gate commands still run exactly as required. Lunacy removes only redundant proof beyond that contract.
+
+Adversary defaults to NO rather than being stamped onto every step. Multiple adversaries in one phase should attack distinct risks or a newly repaired state.
 
 ## Immutable evidence / gate write barrier
 
