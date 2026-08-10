@@ -6,7 +6,7 @@ This is a narrow compatibility override for the known catalog mismatch where Lun
 
 ## First: prove the override is needed
 
-Attempt a fresh Luna/max subagent first. If native Luna/max spawning works, do nothing here.
+Attempt the intended real Luna/max worker first. If native Luna/max spawning works, do nothing here.
 
 Do not apply this procedure when the catalog shape or failure is materially different. Do not downgrade to another worker model.
 
@@ -79,7 +79,9 @@ Configuration/catalog proof is not live-subagent proof.
 
 ## Mandatory process boundary
 
-If you installed or changed this override during the current task, tell the user plainly:
+If you installed or changed this override during a Luna Maxing run, first persist the exact interrupted worker/step and set `LunaMaxing/STATE.md` `Next action` to retry that Luna/max worker after restart.
+
+Then tell the user plainly:
 
 **Close and relaunch Codex, then open a new task.**
 
@@ -87,16 +89,16 @@ The already-open task cannot replace its model-selection/subagent tool schema mi
 
 ## Proof after restart
 
-In the new task, spawn a tiny fresh subagent explicitly with:
+In the new task, retry the intended real worker explicitly with:
 
 ```text
 model: gpt-5.6-luna
 reasoning_effort: max
 ```
 
-Confirm the spawned agent actually reports/uses Luna at max reasoning. Only then continue Luna Maxing execution.
+A successful real worker spawn is the live proof; a separate dummy probe is unnecessary.
 
-If the native spawn still fails, preserve the evidence and report the blocker. Do not silently fall back to Sol, Terra, or another effort.
+If the spawn still fails, preserve the evidence and report the blocker. Do not silently fall back to Sol, Terra, or another effort.
 
 ## Maintenance
 
@@ -106,7 +108,7 @@ Therefore:
 
 - always try native Luna/max before installing this override;
 - when upstream Codex exposes Luna with the required multi-agent protocol natively, remove `model_catalog_json` and return to the managed catalog;
-- after removing the override, restart Codex and prove a native Luna/max spawn again.
+- after removing the override, restart Codex and prove native Luna/max by starting the intended real worker again.
 
 ## Rollback
 
