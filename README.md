@@ -28,7 +28,9 @@ A phase is an integrated milestone. A step is the largest coherent unit one Luna
 
 For vague requests, the orchestrator first creates the minimum useful phase/step plan. For already-structured plans, it preserves the meaningful hierarchy.
 
-Each step owner performs the full local loop: inspect → implement → verify → self-review → fix → reverify → concise report. The orchestrator normally reads only the report's tiny Control Block and moves on; it does **not** review code after every step.
+Each step owner performs the full local loop: inspect affected callers/surfaces → implement → verify → self-review → fix → reverify → concise report. The orchestrator normally reads only the report's tiny Control Block and moves on; it does **not** review code after every step.
+
+Workers are intentionally quiet: no routine progress narration, only blocker/decision messages plus final completion. Once the durable report is written, the worker finalizes immediately. Where the host supports it, Lunacy prefers event-driven/blocking completion over short timeout polling so long-running workers do not repeatedly wake the expensive orchestrator.
 
 For unusually risky steps, the plan may add a fresh Luna/max adversary that independently attacks the resulting code/effects.
 
