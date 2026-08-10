@@ -16,6 +16,21 @@ Do not confuse sophistication with quality. Prefer modifying, reusing, deleting,
 - Do not force OOP onto a project or problem where a simpler functional/data-oriented design is clearer.
 - Do not redesign healthy architecture merely because another design is theoretically cleaner.
 
+## Multi-run boundary
+
+A Lunacy run should own one coherent plan/scope. Multiple runs may exist in the same project and may execute concurrently when their repository ownership is safely independent.
+
+When creating or materially replanning a run:
+
+- give it a short semantic run id;
+- keep its durable execution state under `Lunacy/runs/<run-id>/`;
+- record a concise `Ownership` boundary in that run's `STATE.md` describing the subsystem/surfaces/shared contracts it expects to change;
+- compare that boundary with the tiny `STATE.md` files of other `ACTIVE` runs before implementation;
+- prefer isolated worktrees/branches for simultaneous runs when the host supports them;
+- serialize or explicitly replan if another active run owns overlapping surfaces/shared contracts or if isolation is insufficient.
+
+Do not add a global run registry, scheduler, lock service, or `CURRENT_RUN` pointer merely to support this. The `runs/` directories and their tiny state files are the registry.
+
 ## Anti-overengineering guardrails
 
 Do **not** add phases, abstractions, services, managers, factories, wrappers, adapters, configuration layers, migration machinery, feature flags, extension systems, generalized frameworks, or new persistent state unless the current task or authoritative architecture materially requires them.
@@ -43,6 +58,7 @@ Before approving the plan, ask:
 4. Are we solving the stated task rather than hypothetical future tasks?
 5. Are we preserving the project's established style and contracts where they remain sound?
 6. Is there a materially simpler design with the same correctness, maintainability, and extensibility for the requirements actually in scope?
+7. Does this run's ownership boundary stay independent of other active runs, or do we need isolation/serialization/replanning?
 
 If yes to #6, choose the simpler design.
 
