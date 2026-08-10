@@ -89,12 +89,15 @@ The already-open task cannot replace its model-selection/subagent tool schema mi
 
 ## Proof after restart
 
-In the new task, bind back to the same Lunacy run and retry the intended real worker explicitly with:
+In the new task, bind back to the same Lunacy run and retry the intended real worker with the normal Lunacy fresh-context/path-only handoff:
 
 ```text
 model: gpt-5.6-luna
 reasoning_effort: max
+fork_turns: "none"   # when exposed by the current spawn API
 ```
+
+Do not reattach the old parent conversation merely because this is a retry. The durable run files are the worker context.
 
 A successful real worker spawn is the live proof; a separate dummy probe is unnecessary.
 
