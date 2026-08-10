@@ -1,59 +1,104 @@
 # Luna Maxing
 
-A compact plan/task execution skill for using **Codex, GPT-5.6 Sol, or GPT-5.6 Terra as a lean expert orchestrator** while **GPT-5.6 Luna at max reasoning owns implementation work**.
+A compact execution skill for using **Codex, GPT-5.6 Sol, or GPT-5.6 Terra as a token-frugal expert orchestrator** while **GPT-5.6 Luna at max reasoning owns implementation work**.
 
-The orchestrator deliberately minimizes its own token use, but it is not reduced to a dumb router. Its expensive reasoning is reserved for the places where it has leverage: decomposition, dependency/order choices, difficult plan interpretation, architecture/integration tradeoffs, conflicting evidence, blocker disposition, and hard reviews.
+The central optimization is simple: **minimize orchestrator token usage aggressively so its expensive context and reasoning remain available for the decisions that actually need them.**
 
-Luna/max workers own the rest end-to-end:
+The orchestrator therefore:
 
-- inspect the necessary repository context;
-- implement the assigned work;
-- verify it;
-- review their own resulting code and behavior;
-- fix every issue they find;
-- rerun verification;
-- write a concise durable report for the orchestrator.
+- first understands the project's goal, ethos, core principles, architecture, and non-negotiable contracts;
+- converts the requested work into a durable **plan → phases → steps** structure when one is not already supplied;
+- assigns each implementation step to one Luna/max worker;
+- reads concise worker reports rather than worker transcripts;
+- normally does **not** inspect/review code after every step;
+- spends its own expertise at genuine hard decisions and predefined **phase-end hard gates**;
+- may schedule a **fresh Luna/max adversarial reviewer** for an unusually complex or high-risk step;
+- persists enough state that execution can stop and resume without reconstructing history from chat context.
 
-The orchestrator does not micromanage those implementation choices.
+## Project ethos drives execution
 
-## Durable work structure
+Project principles are not decorative context. During intake the orchestrator extracts a concise durable authority digest containing:
 
-Luna Maxing borrows the useful continuity pattern from DeepSeek and Destroy, but intentionally removes most of its heavier review/proof bureaucracy.
+- the project goal;
+- ethos and core principles;
+- non-negotiable architecture/behavior contracts;
+- authoritative plan/task and design sources;
+- important acceptance boundaries.
 
-Each project run gets a small workspace:
+Those principles drive decomposition, worker instructions, ambiguity resolution, architecture/integration tradeoffs, and phase-gate reviews.
+
+The digest is stored in `LunaMaxing/PLAN.md`, allowing both workers and a resumed orchestrator to reuse a compact authoritative summary instead of repeatedly loading large design documents.
+
+## Plan → phases → steps
+
+If the supplied plan already has meaningful phases, Luna Maxing preserves them and maps implementation work into steps.
+
+If the request is vague, the orchestrator first creates the minimum useful execution plan itself. A phase is an integrated milestone; a step is the largest coherent unit one Luna/max worker can safely own end-to-end.
+
+Each step worker must:
+
+1. inspect the necessary repository context;
+2. implement the goal completely;
+3. verify it;
+4. review its own resulting code and behavior;
+5. fix every issue it finds;
+6. reverify;
+7. write a short durable report.
+
+The orchestrator does not micromanage ordinary implementation choices.
+
+## Review cadence
+
+**The default orchestrator hard-review cadence is phase end, not every step.**
+
+Step reports are progress/control inputs. Once all required steps of a phase are complete, the orchestrator reviews the integrated result against:
+
+- project ethos/core principles;
+- phase goal and authoritative plan;
+- architecture/contracts;
+- actual current code and integrated diff;
+- surrounding integration paths;
+- runtime behavior and verification needed to judge correctness.
+
+This is an intentional use of the orchestrator's preserved context.
+
+For a particularly risky step, the orchestrator may additionally spawn a **fresh Luna/max adversary** that did not implement the step. That agent independently attacks the resulting code/effects, can repair in-scope defects it finds, verifies the repaired result, and writes a concise report. This is optional, not a mandatory per-step ceremony.
+
+## Durable resumable work structure
 
 ```text
 LunaMaxing/
+  PLAN.md
   STATE.md
   DECISIONS.md
   HANDOVER.md
   phases/
     <phase-id>/
-      TASKS.md
+      STEPS.md
       reports/
-        <task-id>-01.md
-      hard-review-01.md
+        <step-id>-worker-01.md
+        <step-id>-adversary-01.md
+      hard-gate-01.md
 ```
 
-`STATE.md` records current reality and one exact next action. `TASKS.md` records the current decomposition and worker/report paths. Workers write concise reports instead of making the parent consume their full context. `DECISIONS.md` contains only consequential decisions where the orchestrator actually used its expertise. `HANDOVER.md` is a compact resume packet, not a second execution log.
+`PLAN.md` contains the authority/ethos digest plus phases, steps, and planned gates. `STATE.md` contains current reality and one exact next action. `STEPS.md` records phase-local progress and report paths. `DECISIONS.md` contains only consequential orchestrator decisions. `HANDOVER.md` is a compact restart packet.
 
-See `WORKSPACE.md` for the exact lightweight contract and report format.
+Workers normally keep reports to roughly 25 lines. The parent should consume these durable summaries instead of full agent conversations.
 
-## Hard reviews
+On resume, the orchestrator reads only project instructions, `HANDOVER.md`, `STATE.md`, `PLAN.md`, the current phase `STEPS.md`, and whatever report/decision/gate is needed for the persisted next action. It does not replay historical worker chats.
 
-The orchestrator decides when a meaningful hard review is warranted. This is where it is expected to spend its own reasoning and tokens.
+See `WORKSPACE.md` for the exact formats.
 
-The review is based on:
+## Worker invariant
 
-- the actual task or phase goals;
-- project/architecture authority;
-- the real repository diff/current code;
-- enough surrounding integration code to judge effects;
-- actual behavior and verification.
+Every technical subagent must use:
 
-It does **not** judge correctness from worker chat history, private reasoning, or self-justifying narratives. A worker report may tell it what changed, but the hard review evaluates the resulting state directly.
+```text
+model: gpt-5.6-luna
+reasoning_effort: max
+```
 
-If the orchestrator finds problems, it sends the findings back to Luna/max. The worker owns the full repair, verification, self-review, additional fixes, and re-verification loop; the orchestrator then re-gates the result when needed.
+There is no silent fallback.
 
 ## Install
 
@@ -75,41 +120,30 @@ Use $luna-maxing to execute the authoritative plan at PLAN.md.
 or:
 
 ```text
-Use $luna-maxing for this task. Keep the parent context lean and let Luna/max workers own implementation and self-review/fix loops.
+Use $luna-maxing for this task. Preserve orchestrator context; plan phases/steps first, then delegate each step to Luna/max.
 ```
 
-## Worker invariant
+## Codex Luna compatibility
 
-Every spawned technical worker must use:
+Some Codex installations may expose Luna in the model catalog but not allow it as a subagent because Luna's cached `multi_agent_version` is still `v1` while the active multi-agent protocol is `v2`.
 
-```text
-model: gpt-5.6-luna
-reasoning_effort: max
-```
-
-There is no silent fallback to another model or reasoning effort.
-
-## Codex compatibility note
-
-Some Codex installations may expose Luna in the model catalog but not allow it to be selected as a subagent because Luna's cached `multi_agent_version` is still `v1` while the active multi-agent protocol is `v2`.
-
-The skill first attempts native Luna/max spawning. Only if that fails for this known eligibility reason does it use:
+The skill first attempts native Luna/max spawning. Only for that known eligibility failure does it use:
 
 ```text
 references/CODEX_LUNA_COMPAT.md
 ```
 
-That procedure copies the current catalog and changes **only** Luna's multi-agent version from `v1` to `v2`. It does not change Luna's model identity or add unsupported reasoning levels. Luna retains `max` and does **not** gain Sol/Terra-only `ultra` support.
+The compatibility procedure preserves the current catalog and changes **only** Luna's multi-agent version from `v1` to `v2`. Luna retains `max`; it does **not** gain Sol/Terra-only `ultra` support.
 
-If the compatibility override is installed or changed, **Codex must be closed and relaunched and a new task opened** before Luna subagents can be tested. The already-open task cannot refresh its model-selection tool schema.
+If that override is installed or changed, **close and relaunch Codex and open a new task** before testing Luna subagents. An already-open task cannot refresh its model-selection tool schema.
 
-The override pins Codex to a local catalog snapshot and should be removed once upstream Codex exposes Luna natively with the required multi-agent protocol.
+The local catalog override should be removed once upstream Codex exposes Luna natively with the required protocol.
 
 ## Files
 
 ```text
 SKILL.md                         Core orchestration protocol.
-WORKSPACE.md                     Lightweight durable run state and worker-report contract.
-references/CODEX_LUNA_COMPAT.md Narrow Codex compatibility setup, validation, restart, maintenance, and rollback.
-README.md                        Installation and usage.
+WORKSPACE.md                     Durable plan/state/report/gate/resume contract.
+references/CODEX_LUNA_COMPAT.md Narrow Codex compatibility procedure.
+README.md                        Installation and execution model.
 ```
