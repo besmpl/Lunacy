@@ -48,13 +48,15 @@ Use the companion `WORKSPACE.md` located beside this `SKILL.md` for durable file
 
 Before implementation define phase goals, step dependencies, phase-end hard gates, any exceptional extra gates, selected adversarial reviews, and the final gate. Replan when real facts justify it; persist consequential decisions.
 
+For any **migration, replacement, compatibility cleanup, or removal** step, the step contract must make coverage unambiguous. Default coverage is every maintained affected caller/surface in the repository—including production code, tests, fixtures, adapters, examples, and indirect or variable-mediated construction—unless authoritative project material explicitly excludes something. Do not let workers infer that an uncovered surface is `legacy`/`historical` merely because a selected test matrix is green or does not include it.
+
 ## 2. Execute steps with Luna/max
 
 The first **real** Luna/max worker spawn doubles as the capability check; do not spend an extra agent call on a dummy probe.
 
 For each dependency-ready step, persist current state and launch one Luna/max owner. The normal handoff can be only a few lines: identify the step, point to durable authority/step/doctrine/report paths, require the full implementation→verification→self-review→fix→reverify loop, require silence unless blocked/decision-needed, and tell it to finalize immediately after its durable report.
 
-The worker must inspect the existing system before editing: identify relevant callers, sibling paths, objects/types/interfaces, helpers, tests, lifecycle/persistence boundaries, and safe reuse/extension points. This repository-scale inventory belongs to Luna, not the parent.
+The worker must inspect the existing system before editing: identify relevant callers, sibling paths, objects/types/interfaces, helpers, tests, lifecycle/persistence boundaries, and safe reuse/extension points. For migration/replacement/removal work it must prove the full contract coverage, including indirect/variable-mediated uses; this repository-scale inventory belongs to Luna, not the parent.
 
 After an ordinary PASS, read only the report's Control Block, update `STATE.md`/`STEPS.md`, and continue. Read deeper only for a decision request, contradiction, blocker, planned adversary, recovery, or gate.
 
@@ -64,7 +66,7 @@ If Codex rejects Luna/max because of the known multi-agent catalog mismatch, do 
 
 For a selected risky step, use a fresh Luna/max agent that did not implement it. Point it to the durable principles/step contract, `worker/ENGINEERING.md`, actual code/diff, and verification entry points; do not give it implementer chat/reasoning.
 
-It independently attacks correctness, integration, assumptions, regressions, principle compliance, missed reuse opportunities, duplicated mechanisms, and poor abstractions. It may repair in-scope findings and reverify. Broader design questions return to the orchestrator.
+It independently attacks correctness, integration, assumptions, regressions, principle compliance, missed reuse opportunities, duplicated mechanisms, poor abstractions, and incomplete caller/surface coverage. It may repair in-scope findings and reverify. Broader design questions return to the orchestrator.
 
 ## 4. Hard decisions
 
