@@ -10,9 +10,11 @@ Read this for implementation, repair, recovery, and adversarial-review work. Pro
 
 1. Inspect the relevant existing architecture, nearby implementations, types/classes/interfaces, helpers, factories/registries, tests, and call sites.
 2. Build a quick mental inventory of affected callers, sibling paths, persistence/runtime boundaries, and extension points.
-3. Search explicitly for something that can be **reused, extended, composed, specialized, or generalized safely** before creating a parallel mechanism.
-4. Understand ownership, lifecycle, invariants, and data flow around the change; do not patch one visible caller while ignoring the system around it.
-5. When external behavior/library semantics are uncertain and research is available, check authoritative/primary documentation rather than guessing.
+3. For migrations/replacements/removals, treat the inventory as **complete-by-default**: include maintained production callers, tests, fixtures, adapters, examples, and indirect or variable-mediated construction. Do not label something `legacy`, `historical`, or out-of-scope unless project authority explicitly supports that classification.
+4. A green test matrix is verification evidence, **not scope authority**. Absence from a selected matrix does not make a maintained caller/test obsolete.
+5. Search explicitly for something that can be **reused, extended, composed, specialized, or generalized safely** before creating a parallel mechanism.
+6. Understand ownership, lifecycle, invariants, and data flow around the change; do not patch one visible caller while ignoring the system around it.
+7. When external behavior/library semantics are uncertain and research is available, check authoritative/primary documentation rather than guessing.
 
 ## Design preferences
 
@@ -40,6 +42,9 @@ Read this for implementation, repair, recovery, and adversarial-review work. Pro
 
 Before PASS, inspect the resulting diff and ask:
 
+- Did I satisfy the step's full inventory/coverage criterion, including indirect and variable-mediated uses?
+- Did I exclude any caller/test as legacy or historical without explicit authority?
+- Did I mistake a green selected test matrix for proof that uncovered maintained surfaces are irrelevant?
 - Did I miss any caller, sibling path, lifecycle edge, persistence boundary, or integration surface?
 - Did I create something the repository already had?
 - Did I introduce a second way to do the same thing?
