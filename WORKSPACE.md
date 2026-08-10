@@ -103,7 +103,9 @@ Final gate: <whole-run standard>
 
 For large authority sets an intake Luna may create `intake.md`; the parent spot-checks it and owns the final plan.
 
-Plan verification ownership too: do not make every step/adversary/scout/parent rerun the same expensive global suite unless a later change genuinely invalidates earlier evidence.
+Plan verification ownership too: do not make every step/adversary/scout/parent rerun the same expensive global suite unless a later change genuinely invalidates earlier evidence. **Never omit verification required by authoritative project/plan acceptance; assign required proof to one clear layer and deduplicate only redundant proof beyond it.**
+
+Adversary defaults to **NO**. Mark a step adversarial only when a named independent risk earns the extra review. Multiple adversaries in one phase should attack distinct risks or a newly repaired state, not duplicate the same evidence.
 
 ## STATE.md
 
@@ -279,9 +281,9 @@ Consolidate related contradictions discovered in the same bounded investigation 
 
 ## Adversary
 
-Use a fresh Luna/max adversary only for unusually risky work, not by default for every step. Give it durable authority, engineering doctrine, actual code/diff, and verification entry points—not implementer chat.
+Use a fresh Luna/max adversary only for a named unusually risky surface, not by default for every step. Give it durable authority, engineering doctrine, actual code/diff, and verification entry points—not implementer chat.
 
-It attacks new assumptions/risks. If it repairs something, it verifies the impacted surface. It should not replay the entire implementer matrix unless its repair makes that broad evidence stale.
+It attacks new assumptions/risks. If it repairs something, it verifies the impacted surface. It should not replay the entire implementer matrix unless its repair makes that broad evidence stale **or authoritative acceptance explicitly requires the repetition**.
 
 Its report follows the same size, mailbox, immutability, and terminal-snapshot rules.
 
@@ -290,7 +292,9 @@ Its report follows the same size, mailbox, immutability, and terminal-snapshot r
 1. **Implementer owns terminal step verification** after its final code change.
 2. **Adversary, if used, owns adversarial delta verification** and impacted rechecks after its fixes.
 3. **Gate scout does not run broad suites.** It is a read-only compression/navigation role.
-4. **Parent gate runs one bounded acceptance sample/check set** selected for integration risk; it does not replay every worker suite.
+4. **Parent gate runs the authoritative required gate proof and one additional bounded acceptance sample only when useful for integration judgment.** It does not replay every worker suite without cause.
+
+Authoritative plan/project verification requirements always win. Deduplicate only proof beyond that contract.
 
 Do not rerun an unchanged expensive global matrix merely to create another evidence count. A later code change invalidating previous proof is the reason to rerun, not a new orchestration layer.
 
