@@ -51,6 +51,8 @@ Do **not** choose `max` merely because a step is large, a report could be long, 
 
 **No raw verification output in parent context.** Long output goes to a log/evidence file or temporary file. Parent-facing text contains command/check name, exit/result, counts when useful, and the first relevant red only.
 
+**No repeated residual ledgers.** If unchanged known reds, residuals, root status, inventories, or acceptance boundaries already exist in an authoritative project/run artifact, cite that exact path/slice instead of copying the list into each report/gate/brief. If no suitable authority exists, store the detailed inventory once under phase evidence and reference it.
+
 **No hash catalogs.** Do not list per-file hashes unless project authority specifically requires them. Prefer one aggregate snapshot/fingerprint when provenance needs one.
 
 **Never invent token usage.** Record exact host counters only when directly exposed. Otherwise report usage as unavailable; never estimate historical worker/parent tokens from output size, elapsed time, or intuition.
@@ -87,9 +89,11 @@ The handoff points to:
 - its `<run-root>/phases/<phase>/STEPS.md` row;
 - its report path.
 
-Require existing-system/reuse inventory first; full implement→verify→self-review→fix→terminal reverify; overlap escalation before conflicting edits; silence except `BLOCKED`/`DECISION_REQUIRED`/`FINAL`.
+Require existing-system/reuse inventory first; full implement→verify→self-review→fix→terminal reverify; overlap/scope escalation before unauthorized edits; silence except `BLOCKED`/`DECISION_REQUIRED`/`FINAL`.
 
 Luna owns repository-scale caller/surface/reuse discovery. Unexpected active-step/run overlap stops before conflicting edits and returns to the parent for serialization/replanning.
+
+**Material step-scope expansion also stops before the out-of-contract edit even when no concurrent worker is involved.** The worker consolidates the newly discovered scope/contradictions into one decision brief. The parent then updates `STEPS.md`/`PLAN.md` or creates a repair/new step before implementation continues. Do not accumulate a chain of ad-hoc overlap/scope amendments while one supposedly bounded worker keeps expanding its write set.
 
 After a batch settles, read each terminal Control Block **once**, reconcile run state **once**, then schedule the next batch. Do not reopen finalized reports to append later findings.
 
