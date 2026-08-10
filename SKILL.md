@@ -1,6 +1,6 @@
 ---
 name: luna-maxing
-description: Execute a concrete coding plan or task with Codex, GPT-5.6 Sol, or GPT-5.6 Terra as a lean orchestrator and only GPT-5.6 Luna subagents at max reasoning. Use when workers should own implementation, verification, self-review, and fixes while the parent preserves context for decomposition, decisions, and clean-context hard review gates.
+description: Execute a concrete coding plan or task with Codex, GPT-5.6 Sol, or GPT-5.6 Terra as a lean orchestrator and only GPT-5.6 Luna subagents at max reasoning. Use when workers should own implementation, verification, self-review, and fixes while the parent preserves context for decomposition, decisions, and occasional effect-based hard review gates.
 ---
 
 # Luna Maxing
@@ -9,13 +9,13 @@ Keep the parent thread small. The parent orchestrates; Luna workers do the techn
 
 ## Non-negotiable rules
 
-1. **Parent = orchestrator.** Understand the task/plan, dependencies, project authority, acceptance criteria, and integration risks. Decide work boundaries and when a hard review is warranted. Do not absorb routine implementation, repository exploration, testing, or review work.
+1. **Parent = orchestrator.** Understand the task/plan, dependencies, project authority, acceptance criteria, and integration risks. Decide work boundaries and when a hard review is warranted. Do not absorb routine implementation, repository exploration, testing, or worker-level review work.
 2. **Workers = Luna Max.** Every spawned technical agent MUST use `gpt-5.6-luna` with `model_reasoning_effort = "max"`. Never silently fall back to another model or effort.
-3. **Minimize parent tokens aggressively.** Read only what is needed to steer the work. Prefer compact worker results, diffs/statistics, and targeted evidence over logs, transcripts, or broad codebase rereads. Never duplicate investigation a worker can own.
+3. **Minimize parent tokens aggressively.** Read only what is needed to steer the work. Prefer compact worker results and targeted evidence over logs, transcripts, or broad codebase rereads. Never duplicate investigation a worker can own.
 4. **Delegate ownership, not keystrokes.** Give a worker the goal, scope, constraints, project rules, acceptance criteria, and verification boundary. Do not prescribe line-by-line implementation or repeatedly steer a competent worker unless it is blocked or materially off-course.
-5. **Each implementation worker finishes its own loop.** It must inspect enough context, implement completely, run relevant verification, review its own resulting diff/behavior, fix every issue it finds, and rerun verification before returning.
+5. **Each worker finishes its own loop.** It must inspect enough context, implement completely, run relevant verification, review its own resulting diff/behavior, fix every issue it finds, and rerun verification before returning.
 6. **No fake completion.** No stubs, hidden TODOs, test weakening, hard-coded test tricks, or skipped required integration. Preserve established architecture and accepted behavior unless the task explicitly changes them.
-7. **Hard reviews are clean-context and effect-based.** A hard review uses a fresh Luna/max agent that did not participate in the implementation. It judges the current repository state, changed code, observable behavior, verification, and task/phase goals. It MUST NOT read or receive implementer chat context, reasoning, transcripts, or self-justifying implementation reports.
+7. **Hard review = orchestrator judgment from effects.** When the parent chooses a hard gate, it reviews the actual resulting repository state, changed code, observable behavior, verification, and task/phase goals. It MUST NOT open, import, or rely on worker chat context, reasoning, transcripts, or self-justifying implementation reports for that review.
 
 ## Execution
 
@@ -52,23 +52,22 @@ Continue dependency-ready work. Do not force a hard review after every trivial e
 
 ### 5. Hard review gate
 
-The parent decides when accumulated work deserves a hard gate. Use one at least for meaningful phase/task completion and earlier when changes cross important interfaces, persistence/schema boundaries, concurrency/security boundaries, or several worker units must integrate.
+The parent decides when accumulated work deserves a hard review. Use one at least for meaningful phase/task completion and earlier when changes cross important interfaces, persistence/schema boundaries, concurrency/security boundaries, or several worker units must integrate.
 
-Spawn a **fresh** Luna/max reviewer. Give it only:
+For the hard review, **ignore worker-thread context**. Work from:
 
 - the task/phase goals and acceptance criteria;
 - applicable project/architecture rules;
-- the baseline/ref and current repository/diff;
-- observable outputs, tests, and verification commands needed to judge effects.
+- the baseline/ref and actual current repository/diff;
+- the changed code plus enough surrounding call paths to judge integration;
+- observable outputs and the verification needed to judge effects.
 
-Do **not** give it worker transcripts, worker reasoning, implementation chat history, or the implementer's narrative explanation.
+The orchestrator directly checks for substantive bugs, regressions, incomplete wiring, architectural violations, missed requirements, and behavior that does not achieve the goal. Run targeted or full verification when needed to establish the result rather than trusting worker claims.
 
-Hard-review instruction:
+If the hard review finds issues, do **not** micromanage the repair. Spawn a Luna/max worker with the findings, affected goal, relevant constraints, and required verification. Make it own the repair end-to-end: fix, test, self-review, fix anything else it finds, and verify again.
 
-> Independently review the current result from effects and code, not from prior-agent context. Trace the changed code and its integration against the stated goals and project rules. Run or inspect the verification needed to judge correctness. Find substantive bugs, regressions, incomplete wiring, architectural violations, and missed requirements. If you find issues, fix them completely, verify the fixes, and self-review the resulting state. Return a concise verdict with concrete evidence and any unresolved blocker.
-
-If the hard reviewer materially changes code, use another fresh clean-context Luna/max hard review before accepting the gate.
+Then hard-review the resulting state again when the changes are material or the gate remains unresolved. Again judge the code/effects against the goal, never the worker's internal context.
 
 ### 6. Finish
 
-At the final boundary, require a clean-context hard review plus the plan's required final verification. Complete only with no unresolved task-relevant findings. Report the delivered result, verification, and genuine remaining blockers concisely.
+At the final boundary, the orchestrator performs a clean effect-based hard review plus the plan's required final verification. Complete only with no unresolved task-relevant findings. Report the delivered result, verification, and genuine remaining blockers concisely.
