@@ -1,11 +1,11 @@
-# Luna Maxing Workspace
+# Lunacy Workspace
 
 This file defines the durable run format. **Read it when creating a run or recovering a damaged/ambiguous workspace; do not reread it on every resume.**
 
 Create in the project root unless project instructions require another location:
 
 ```text
-LunaMaxing/
+Lunacy/
   PLAN.md
   STATE.md
   DECISIONS.md
@@ -27,7 +27,7 @@ No mandatory `HANDOVER.md`: `STATE.md + PLAN.md + current STEPS.md` are the resu
 Compact durable understanding of what is being built and why. Target **well under ~800 words** unless project complexity genuinely requires more.
 
 ```markdown
-# Luna Maxing Execution Plan
+# Lunacy Execution Plan
 
 ## Authority
 Goal: <desired outcome>
@@ -58,7 +58,7 @@ For very large plan/architecture sets, an intake Luna/max scout may draft `intak
 Smallest current source of truth. Keep it extremely short.
 
 ```markdown
-# Luna Maxing State
+# Lunacy State
 Status: ACTIVE | BLOCKED | COMPLETE
 Plan revision: <hash/date/version if useful>
 Phase: <id/name>
@@ -102,8 +102,8 @@ Default to a **path-based handoff**, not a rewritten task specification. Normall
 
 ```text
 Own <step-id> end-to-end.
-Authority: LunaMaxing/PLAN.md + applicable project instructions.
-Step contract: LunaMaxing/phases/<phase>/STEPS.md (<step-id> row).
+Authority: Lunacy/PLAN.md + applicable project instructions.
+Step contract: Lunacy/phases/<phase>/STEPS.md (<step-id> row).
 Report: <report-path>.
 Complete implement → verify → self-review → fix → reverify. Escalate only a genuine orchestrator decision.
 ```
@@ -227,8 +227,8 @@ This makes interruption recovery a worker problem, not an orchestrator context s
 A fresh orchestrator reads only:
 
 1. applicable project-level instructions;
-2. `LunaMaxing/STATE.md`;
-3. `LunaMaxing/PLAN.md`;
+2. `Lunacy/STATE.md`;
+3. `Lunacy/PLAN.md`;
 4. current phase `STEPS.md`;
 5. only the artifact explicitly required by `Next action`.
 
