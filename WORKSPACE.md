@@ -93,6 +93,8 @@ Optional adversaries: <ids or NONE>
 Final gate: <whole-run standard>
 ```
 
+**PLAN is authority, not history.** After a phase passes, do not append its test matrices, hashes, repair narrative, or old residual inventories to PLAN. If completed-phase context remains useful, compress it to one line such as `P1 — PASS — gate: phases/p1/hard-gate-01.md`. The immutable gate/decisions own historical detail. Periodically remove superseded execution detail so every fresh resume pays only for current authority.
+
 For very large authority sets an intake Luna may create `intake.md`; the parent spot-checks it and owns the final plan. **`intake.md` is parent-facing compression, not a replacement dossier: target ≤80 lines / ~8 KB.** Put larger surveys/extracts under evidence and cite exact pointers.
 
 Plan verification ownership too: do not make every step/adversary/scout/parent rerun the same expensive global suite unless a later change genuinely invalidates earlier evidence. **Never omit verification required by authoritative project/plan acceptance; assign required proof to one clear layer and deduplicate only redundant proof beyond it.**
