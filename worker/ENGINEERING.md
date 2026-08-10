@@ -1,113 +1,114 @@
 # Lunacy Worker Engineering Doctrine
 
-Read this for implementation, repair, recovery, and adversarial-review work. Project-specific authority (`AGENTS.md`, architecture, contracts, the active Lunacy run `PLAN.md`) outranks this generic doctrine.
+Read this for implementation, repair, recovery, and adversarial work. Project-specific authority (`AGENTS.md`, architecture, contracts, active run `PLAN.md`) outranks this generic doctrine.
 
 ## Core rule
 
 **Understand and reuse the existing system before inventing another one. Prefer the simplest coherent design that fully solves the actual task and fits the project's architecture. Complexity must earn its cost.**
 
-Do not confuse sophistication with quality. Prefer modifying, reusing, deleting, or extending sound existing mechanisms over adding new layers or parallel systems.
+Prefer modifying, reusing, deleting, or extending sound mechanisms over adding layers or parallel systems.
 
 ## Before writing code
 
-1. Inspect the relevant existing architecture, nearby implementations, types/classes/interfaces, helpers, factories/registries, tests, and call sites.
-2. Build a quick mental inventory of affected callers, sibling paths, persistence/runtime boundaries, and extension points.
-3. For migrations/replacements/removals, treat the inventory as **complete-by-default**: include maintained production callers, tests, fixtures, adapters, examples, and indirect or variable-mediated construction. Do not label something `legacy`, `historical`, or out-of-scope unless project authority explicitly supports that classification.
-4. A green test matrix is verification evidence, **not scope authority**. Absence from a selected matrix does not make a maintained caller/test obsolete.
-5. Search explicitly for something that can be **reused, extended, composed, specialized, or generalized safely** before creating a parallel mechanism.
-6. Understand ownership, lifecycle, invariants, and data flow around the change; do not patch one visible caller while ignoring the system around it.
-7. When external behavior/library semantics are uncertain and research is available, check authoritative/primary documentation rather than guessing.
+1. Inspect relevant architecture, nearby implementations, types/classes/interfaces, helpers, factories/registries, tests, and call sites.
+2. Inventory affected callers, sibling paths, lifecycle/persistence boundaries, and extension points.
+3. For migrations/replacements/removals, inventory is **complete-by-default**: maintained production callers, tests, fixtures, adapters, examples, and indirect/variable-mediated construction are in scope unless explicit authority excludes them.
+4. A green selected test matrix is evidence, **not scope authority**. Do not label a maintained surface `legacy`/`historical` without explicit authority.
+5. Search for something that can be safely reused, extended, composed, specialized, or generalized before creating a parallel mechanism.
+6. Understand ownership, invariants, and data flow around the change; do not patch one visible caller while ignoring the system around it.
+7. When external/library semantics are uncertain and research is available, use authoritative/primary documentation rather than guessing.
 
 ## Concurrent ownership
 
-When other Lunacy steps or runs are active concurrently, **own your assigned scope and do not race neighboring workers**.
+When other Lunacy steps/runs are active, own your assigned scope and do not race neighbors.
 
-Your initial boundary is an independence assumption made by the orchestrator. Your deeper repository inspection must validate it. If correct completion unexpectedly requires any of the following, stop before making the conflicting edit and report the overlap/blocker:
+If deeper inspection shows correct completion requires editing another active owner's surface, changing a shared contract it depends on, consuming its unfinished result, mutating unsafe shared state, or making an architectural decision that invalidates its assumptions, **stop before the conflicting edit** and return `BLOCKED` or `DECISION_REQUIRED`.
 
-- editing a surface another active step/run owns or is likely editing;
-- changing a shared schema, protocol, API, abstraction, generated artifact, or behavioral contract another active worker/run depends on;
-- consuming another active worker's not-yet-durable result;
-- mutating shared state that is unsafe to modify concurrently;
-- making an architectural decision that invalidates another active step/run's assumptions.
-
-Do not quietly broaden scope across another active owner just because the edit seems easy. Preserve your non-conflicting work and let the orchestrator serialize or replan the overlap.
-
-Conversely, do not avoid required in-scope work merely because it touches many files. The issue is **conflicting active ownership**, not change size.
+Do not quietly broaden across active ownership. Conversely, do not avoid required in-scope work merely because it touches many files; the issue is conflicting ownership, not size.
 
 ## Design preferences
 
-- Preserve and strengthen the project's existing architecture when it is sound.
+- Preserve sound existing architecture.
 - Prefer clear responsibilities, strong interfaces, encapsulation, and explicit dependencies.
-- Prefer composition over inheritance unless a true substitutable abstraction/lifecycle relationship exists.
-- Use **polymorphism** when behavior genuinely varies behind a stable contract; prefer it to repeated type checks, mode switches, duplicated branches, or growing `if/else`/`switch` logic when an existing/new extension point cleanly fits.
-- Extend an existing abstraction when semantics match; do not contort an abstraction merely to avoid adding a justified new one.
-- Avoid god objects, duplicated subsystems, hidden global state, leaky layers, shotgun changes, and speculative abstraction.
-- Keep classes/functions/modules cohesive and names precise. Make invalid states difficult to represent when practical.
-- Favor testable seams and dependency injection where they materially improve isolation or replace hidden coupling.
-- Preserve public contracts and compatibility unless the authoritative task intentionally changes them.
+- Prefer composition unless inheritance expresses genuine substitutability/lifecycle.
+- Use polymorphism when real behavior varies behind a stable contract; prefer it to repeated type checks/mode branches when a clean extension point genuinely fits.
+- Extend existing abstractions when semantics match; do not contort them merely to avoid a justified new one.
+- Avoid god objects, duplicate subsystems, hidden global state, leaky layers, shotgun changes, and speculative abstraction.
+- Keep classes/functions/modules cohesive and names precise.
+- Favor testable seams/dependency injection only where they materially reduce coupling.
+- Preserve public contracts unless authority intentionally changes them.
 
-**OOP is a tool, not a quota.** Do not manufacture classes, inheritance, factories, managers, services, wrappers, adapters, registries, or interfaces where a simpler functional/data-oriented or existing design is clearer.
+**OOP is a tool, not a quota.** Do not manufacture classes, inheritance, factories, managers, services, wrappers, adapters, registries, or interfaces where a simpler existing/functional/data-oriented design is clearer.
 
-## Anti-overengineering guardrails
+## Anti-overengineering
 
-Do **not** introduce machinery merely because it could be useful later. New abstractions and infrastructure must be justified by the current task, a real existing variation/reuse problem, or authoritative architecture.
+Do not introduce machinery for hypothetical future needs. New abstraction/infrastructure needs a current requirement, real existing variation/reuse problem, or authoritative architectural direction.
 
-Avoid:
+Avoid speculative frameworks, one-use managers/services/factories, unnecessary compatibility layers, feature flags with no current need, unrelated cleanup, premature extension points, and elaborate test harnesses when existing checks prove the contract.
 
-- speculative future-proofing for hypothetical requirements;
-- generalized frameworks where a small direct change is sufficient;
-- new managers/services/factories/wrappers/config layers for one simple behavior;
-- compatibility or migration layers when a direct safe migration is the actual requirement;
-- feature flags or persistent state with no present need;
-- broad cleanup or architectural rewrites unrelated to the step;
-- adding extension points before there is something real to extend;
-- elaborate test harnesses when existing tests/checks can prove the required contract;
-- preserving obsolete complexity after the new path makes it unnecessary and safe removal is in scope.
-
-Do not optimize for the imagined next five requirements. Optimize for correctness, clarity, maintainability, and reasonable extension of the requirements that actually exist.
+Prefer the smallest coherent diff/design that preserves clarity and architecture—not the smallest line count, and not architectural ceremony.
 
 ## Implementation
 
-- Make the change end-to-end, including all affected callers/surfaces discovered during inspection.
-- Reuse existing utilities and domain objects where correct instead of cloning logic.
-- If new behavior makes an existing abstraction obviously incomplete, improve that abstraction within step scope rather than bolt on a parallel path.
-- Remove obsolete/duplicated paths made unnecessary by the change when safe and in scope.
-- Do not broaden into unrelated cleanup or architectural rewrites without authority.
-- Prefer the smallest coherent diff/design that preserves clarity and architectural integrity; smallest line count is not the goal, but neither is architectural ceremony.
+- Make the change end-to-end across the complete affected inventory.
+- Reuse domain objects/utilities when correct rather than cloning logic.
+- If behavior exposes a genuine hole in an existing abstraction, improve that abstraction within scope rather than bolt on a parallel path.
+- Remove obsolete duplicate paths made unnecessary when safe and in scope.
+- Do not broaden into unrelated cleanup/rewrite without authority.
 
-## Verification and self-review
+## Verification / self-review
 
-Before PASS, inspect the resulting diff and ask:
+Before terminal PASS, inspect the final diff and ask:
 
-- Did I satisfy the step's full inventory/coverage criterion, including indirect and variable-mediated uses?
-- Did I exclude any caller/test as legacy or historical without explicit authority?
-- Did I mistake a green selected test matrix for proof that uncovered maintained surfaces are irrelevant?
-- Did I miss any caller, sibling path, lifecycle edge, persistence boundary, or integration surface?
-- If other workers/runs were concurrent, did deeper inspection reveal any shared ownership/contract interaction that should have been escalated?
-- Did I create something the repository already had?
-- Did I introduce a second way to do the same thing?
-- Could this cleanly reuse/extend an existing abstraction instead?
-- Is repeated branching hiding a polymorphic extension point?
-- Is every new abstraction/layer justified by a current requirement or real existing variation?
-- Did I add machinery mainly for hypothetical future use?
-- Is there a materially simpler design with the same correctness and maintainability?
-- Is the new abstraction genuinely useful, or ceremony?
-- Are responsibilities and dependencies clearer after the change?
-- Do tests verify behavior and integration, not just implementation details?
+- Did I satisfy full coverage, including indirect/variable-mediated uses?
+- Did I exclude anything as historical without authority?
+- Did I miss a caller, sibling path, lifecycle edge, persistence boundary, or integration surface?
+- Did concurrent work reveal overlap I should have escalated?
+- Did I duplicate something already present or create a second way to do the same thing?
+- Could this reuse/extend an existing abstraction more cleanly?
+- Is repeated branching hiding a real polymorphic extension point?
+- Is every new abstraction/layer justified now?
+- Is there a materially simpler design with the same correctness/maintainability?
+- Do tests prove behavior/integration rather than implementation trivia?
 - Did I preserve project contracts and avoid regressions?
 
-If a simpler design preserves the required behavior, maintainability, and project architecture, simplify it. Fix every issue found and re-run relevant verification.
+Fix every issue found, then run the **terminal verification for the final code state once**. Development checks before the final state are working evidence, not parent-facing narrative.
 
-## Terminal verification/report boundary
+Do not rerun an unchanged expensive broad matrix merely to produce a newer count. If a later code change invalidates proof, rerun what that change makes stale.
 
-The verification recorded in the final Control Block is the **terminal verification snapshot** for the exact repository state being reported.
+## Output / evidence discipline
 
-After that snapshot passes and the Control Block is written:
+Do not send intermediate progress. Parent mailbox messages are only:
 
-- freeze code, tests, generated artifacts, and report counts/results;
-- make no further edits, cleanup, formatting, polish, or opportunistic fixes;
-- do not rerun verification merely to produce a newer count/status message;
-- do not emit revised post-completion progress or verification summaries;
+- `BLOCKED`
+- `DECISION_REQUIRED`
+- `FINAL`
+
+Each message is at most three short lines and points to durable evidence/report paths; never dump logs, inventories, hashes, or implementation narrative into chat.
+
+Long command output goes to a log/evidence file or temporary file. Your report records only check/command, exit/result, useful count, and first relevant failure/red. Cite exact log path when deeper evidence may matter.
+
+Do not create per-file hash catalogs unless project authority requires them. Prefer one aggregate fingerprint when drift identity is genuinely needed.
+
+### Terminal report size
+
+The parent-facing Control Block is at most ~12 lines. The entire worker/adversary report should normally stay within **60 lines / ~6 KB**. If evidence is larger, put it in an evidence file and cite exact pointers from the report.
+
+Large caller inventories, raw surveys, long test output, repeated path tables, and hash tables belong outside the parent-facing report.
+
+If a parent decision is required, stop the conflicting work and create one concise decision brief (target ≤30 lines / ~4 KB) with: question, authority, facts, options, recommendation, execution impact, and exact evidence pointers. Consolidate related contradictions from the same bounded investigation rather than sending serial amendments.
+
+## Terminal verification / immutability boundary
+
+The verification in the final Control Block is the terminal snapshot for the exact repository state reported.
+
+After `FINAL`:
+
+- freeze code, tests, generated artifacts, report, counts, and durable evidence referenced by it;
+- make no cleanup, formatting, polish, opportunistic fixes, or post-PASS reruns;
+- do not edit the report to append later parent/gate findings, newer hashes, or revised counts;
 - finalize immediately.
 
-If anything material changes after the supposed final snapshot, the prior PASS/report is invalid: perform the required verification again and rewrite the final Control Block once for the new terminal state.
+If anything material changes later, the old FINAL artifact remains immutable. Use a new attempt/repair report, perform the appropriate terminal verification for the new state, and FINAL that new artifact.
+
+An adversary follows the same rules. Attack the new risk/delta; if you repair something, verify the impacted surface. Do not blindly replay the implementer's entire broad matrix unless your repair actually invalidates it.
