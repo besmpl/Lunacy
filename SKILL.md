@@ -45,6 +45,16 @@ Do **not** choose `max` merely because a step is large, a report could be long, 
 
 **Worker mailbox has exactly three useful message types:** `BLOCKED`, `DECISION_REQUIRED`, `FINAL`. Each mailbox message is at most three short lines and contains no evidence dump. `FINAL` points to the immutable report; the parent reads the Control Block there.
 
+**Parent communication is event-driven too.** Routine resume/setup reads, control-plane migration, worker launch, unchanged waits, and timeout expiry are not user-visible events. Unless a higher-priority host instruction explicitly requires a progress update, do not narrate them. User-visible parent messages are reserved for a real `BLOCKED`/`DECISION_REQUIRED`, a material gate/result, direct user steering/status request, or final completion. If the host requires a startup/progress message, use the minimum message required and do not turn it into a journal.
+
+**Quiescent worker wait is mandatory.** Once a worker/batch is active and no parent decision is pending, the parent does no repository reads, report reads, `list_agents` heartbeat checks, state rewrites, or “still running” narration merely to observe liveness. Use `wait_agent` as the event boundary when available:
+
+- explicitly request the **longest supported wait**; on current Codex MultiAgentV2 prefer `timeout_ms: 3600000` (one hour); if the runtime rejects that because its configured maximum is lower, retry once with the reported maximum and reuse it thereafter;
+- mailbox activity or user steering ends the wait early and is actionable;
+- `timed_out:true` with no mailbox/user event is a **non-event**: emit no prose, inspect nothing, and immediately call the same long wait again;
+- do not use `list_agents` as periodic polling; use lifecycle diagnostics only after a real wait/tool error, inconsistent terminal signal, or explicit user request;
+- if a higher-priority host policy forces periodic user-visible updates despite the blocking wait, provide only the shortest required heartbeat, perform no status/repository inspection for that heartbeat, then re-enter the long wait immediately.
+
 **Parent reads slices, not dossiers.** Default parent inputs are run control files, terminal Control Blocks, concise decision briefs, and gate packs. Read only exact named source/report slices needed for the current decision. A full worker report may be read only to resolve a specific contradiction that cannot be resolved from its Control Block + cited slices.
 
 **Three-deep-read rule.** If one parent decision/gate would require more than three substantive detail/source slices, stop accumulating context: delegate a fresh Luna compression/decision brief or persist a checkpoint and continue in fresh parent context. Do not brute-force the repository into the parent.
@@ -56,8 +66,6 @@ Do **not** choose `max` merely because a step is large, a report could be long, 
 **No hash catalogs.** Do not list per-file hashes unless project authority specifically requires them. Prefer one aggregate snapshot/fingerprint when provenance needs one.
 
 **Never invent token usage.** Record exact host counters only when directly exposed. Otherwise report usage as unavailable; never estimate historical worker/parent tokens from output size, elapsed time, or intuition.
-
-Prefer event-driven/blocking waits. For concurrent workers, wait/reconcile at batch level. If the host forces polling/visible updates, use the coarsest practical cadence and never reread unchanged state because a timer fired.
 
 ## 1. Resolve/create the run, then plan
 
