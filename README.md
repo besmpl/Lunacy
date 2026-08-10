@@ -1,4 +1,4 @@
-# Luna Maxing
+# Lunacy
 
 A compact execution skill for using **Codex, GPT-5.6 Sol, or GPT-5.6 Terra as a token-frugal expert orchestrator** while **GPT-5.6 Luna at max reasoning owns repository-heavy work**.
 
@@ -38,7 +38,7 @@ This makes the parent gate a global architecture/integration judgment rather tha
 
 ## Project ethos is authority
 
-`LunaMaxing/PLAN.md` contains a compact digest of:
+`Lunacy/PLAN.md` contains a compact digest of:
 
 - project goal;
 - ethos and core principles;
@@ -51,7 +51,7 @@ Large plans or architecture sets can first be read by a Luna/max intake scout. T
 ## Durable structure
 
 ```text
-LunaMaxing/
+Lunacy/
   PLAN.md
   STATE.md
   DECISIONS.md
@@ -83,25 +83,25 @@ reasoning_effort: max
 
 There is no silent fallback.
 
-The **first real worker spawn** doubles as the Luna capability check; Luna Maxing does not spend a separate agent call on a dummy probe.
+The **first real worker spawn** doubles as the Luna capability check; Lunacy does not spend a separate agent call on a dummy probe.
 
 ## Install
 
 ```bash
 mkdir -p ~/.agents/skills
-git clone https://github.com/frozenpepper/Luna-Maxing.git ~/.agents/skills/luna-maxing
+git clone https://github.com/frozenpepper/Lunacy.git ~/.agents/skills/lunacy
 ```
 
 ## Use
 
 ```text
-Use $luna-maxing to execute the authoritative plan at PLAN.md.
+Use $lunacy to execute the authoritative plan at PLAN.md.
 ```
 
 or:
 
 ```text
-Use $luna-maxing for this task. Minimize parent tokens; plan phases/steps first and delegate repository-heavy work to Luna/max.
+Use $lunacy for this task. Minimize parent tokens; plan phases/steps first and delegate repository-heavy work to Luna/max.
 ```
 
 ## Codex Luna compatibility
