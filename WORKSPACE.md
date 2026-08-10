@@ -105,10 +105,34 @@ Own <step-id> end-to-end.
 Authority: Lunacy/PLAN.md + applicable project instructions.
 Step contract: Lunacy/phases/<phase>/STEPS.md (<step-id> row).
 Report: <report-path>.
-Complete implement → verify → self-review → fix → reverify. Escalate only a genuine orchestrator decision.
+Inspect affected callers/surfaces first; then implement → verify → self-review → fix → reverify.
+No intermediate progress messages unless BLOCKED or NEEDS-DECISION. Write the final Control Block/report and finalize immediately.
 ```
 
 Inline only exceptions or facts not already durable. This keeps repeated parent output small even across many steps.
+
+### Worker surface inventory
+
+Before editing, the worker should identify the callers, sibling paths, integration surfaces, and externally observable behavior plausibly affected by the step. This inventory belongs to the **worker**, not the orchestrator. During self-review, the worker revisits it and verifies that no affected caller/surface was missed.
+
+The inventory need not become a separate artifact. Include only consequential coverage/evidence in the report Detail when useful to a later adversary or gate scout.
+
+### Worker communication contract
+
+Normal workers are deliberately quiet:
+
+- no progress narration or routine mailbox messages;
+- message the orchestrator only for `BLOCKED` or `NEEDS-DECISION` conditions that cannot be resolved from project authority/evidence;
+- normal completion is the durable report plus one final completion signal;
+- after the final Control Block/report is written, **finalize immediately**—no post-completion polishing/status chatter unless specifically requested.
+
+This keeps a long-running worker from repeatedly waking the expensive orchestrator for information that does not change its next action.
+
+## Waiting for workers
+
+Prefer host-native **event-driven or blocking completion waits** when available. Avoid short fixed-timeout polling loops merely to learn that a worker is still running.
+
+If the host only exposes polling/timeouts, use the coarsest practical cadence consistent with host/user constraints. An unchanged timeout should not trigger repository inspection, report rereads, or status reconstruction. If the host requires periodic visible updates, emit the shortest useful heartbeat and return to waiting.
 
 ## Worker report
 
