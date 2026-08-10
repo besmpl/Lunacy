@@ -79,7 +79,7 @@ Configuration/catalog proof is not live-subagent proof.
 
 ## Mandatory process boundary
 
-If you installed or changed this override during a Luna Maxing run, first persist the exact interrupted worker/step and set `LunaMaxing/STATE.md` `Next action` to retry that Luna/max worker after restart.
+If you installed or changed this override during a Lunacy run, first persist the exact interrupted worker/step and set `Lunacy/STATE.md` `Next action` to retry that Luna/max worker after restart.
 
 Then tell the user plainly:
 
