@@ -103,36 +103,24 @@ Default to a **path-based handoff**, not a rewritten task specification. Normall
 ```text
 Own <step-id> end-to-end.
 Authority: Lunacy/PLAN.md + applicable project instructions.
+Engineering doctrine: <lunacy-skill-root>/worker/ENGINEERING.md.
 Step contract: Lunacy/phases/<phase>/STEPS.md (<step-id> row).
 Report: <report-path>.
-Inspect affected callers/surfaces first; then implement → verify → self-review → fix → reverify.
-No intermediate progress messages unless BLOCKED or NEEDS-DECISION. Write the final Control Block/report and finalize immediately.
+Inspect existing system/reuse points first; then implement → verify → self-review → fix → reverify.
+Stay silent unless blocked/decision-needed. Write the report, then finalize immediately.
 ```
 
-Inline only exceptions or facts not already durable. This keeps repeated parent output small even across many steps.
+Inline only exceptions or facts not already durable. The doctrine is read by Luna; do not paste or summarize it into every parent handoff.
 
-### Worker surface inventory
+Before editing, the worker itself should inventory relevant existing callers, sibling paths, objects/types/interfaces, helpers, tests, lifecycle/persistence boundaries, and potential reuse/extension points. Recheck that inventory during self-review. This discovery cost belongs to Luna rather than the orchestrator.
 
-Before editing, the worker should identify the callers, sibling paths, integration surfaces, and externally observable behavior plausibly affected by the step. This inventory belongs to the **worker**, not the orchestrator. During self-review, the worker revisits it and verifies that no affected caller/surface was missed.
+## Worker communication and waiting
 
-The inventory need not become a separate artifact. Include only consequential coverage/evidence in the report Detail when useful to a later adversary or gate scout.
+Workers should emit **no intermediate progress/mailbox messages** unless they are blocked or require a genuine orchestrator decision. Ordinary progress belongs in their own working context, not parent context.
 
-### Worker communication contract
+After the final Control Block/report is durable, the worker should **finalize immediately**. Do not send post-completion polish messages or continue narrating already-complete work.
 
-Normal workers are deliberately quiet:
-
-- no progress narration or routine mailbox messages;
-- message the orchestrator only for `BLOCKED` or `NEEDS-DECISION` conditions that cannot be resolved from project authority/evidence;
-- normal completion is the durable report plus one final completion signal;
-- after the final Control Block/report is written, **finalize immediately**—no post-completion polishing/status chatter unless specifically requested.
-
-This keeps a long-running worker from repeatedly waking the expensive orchestrator for information that does not change its next action.
-
-## Waiting for workers
-
-Prefer host-native **event-driven or blocking completion waits** when available. Avoid short fixed-timeout polling loops merely to learn that a worker is still running.
-
-If the host only exposes polling/timeouts, use the coarsest practical cadence consistent with host/user constraints. An unchanged timeout should not trigger repository inspection, report rereads, or status reconstruction. If the host requires periodic visible updates, emit the shortest useful heartbeat and return to waiting.
+The orchestrator should prefer event-driven/blocking worker completion waits when supported. If the host forces timeout polling or visible heartbeats, use the coarsest practical cadence, keep unchanged heartbeats minimal, and do not inspect unchanged state solely because a timer fired.
 
 ## Worker report
 
@@ -177,7 +165,7 @@ Remaining risk: NONE | <one line>
 <optional evidence pointers>
 ```
 
-The adversary reviews actual code/effects, not implementer reasoning. It may fix in-scope defects itself and reverify them.
+The adversary reviews actual code/effects, not implementer reasoning. It follows the same engineering doctrine, including searching for duplicated mechanisms, missed reuse/extension opportunities, and weak abstractions. It may fix in-scope defects itself and reverify them.
 
 ## Gate pack
 
