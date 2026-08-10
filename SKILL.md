@@ -15,14 +15,15 @@ Every technical subagent MUST be `gpt-5.6-luna` at reasoning effort `max`. Never
 2. **Prefer the simplest sound design.** Complexity must earn its cost. Do not confuse sophistication, hierarchy, or abstraction count with quality.
 3. **Plan → phases → steps.** A phase is an integrated milestone. A step is the largest coherent unit one Luna/max worker can safely own end-to-end. Do not over-decompose merely to create more agent work.
 4. **The orchestrator follows the planning doctrine.** Read `orchestrator/PLANNING.md` when creating or materially replanning a run; use existing architecture/reuse points, OOP/polymorphism where they genuinely fit, and explicit anti-overengineering/YAGNI guardrails.
-5. **Workers own the full local loop.** Inspect → implement → verify → self-review → fix → reverify → terse durable report.
-6. **Workers follow the companion engineering doctrine.** Point implementation/repair/recovery/adversary workers to `worker/ENGINEERING.md`; project-specific authority outranks the generic doctrine.
-7. **Do not micromanage.** Give goals, relevant principles/authority, boundaries, dependencies, acceptance boundary, doctrine path, and report path. Let Luna resolve ordinary engineering details.
-8. **Parallelize safe independent work.** At each scheduling point, launch the largest safe set of dependency-ready steps concurrently, up to host capacity. Serialize when steps overlap likely write surfaces, change a shared contract/abstraction, consume one another's output, share unsafe mutable state, or need the same unresolved architecture decision. If independence is uncertain, serialize. Never distort architecture or step boundaries merely to manufacture concurrency.
-9. **Parent review cadence is phase-end by default.** Step reports control progress; they do not trigger routine parent code review.
-10. **Use fresh adversaries selectively.** A fresh Luna/max agent may independently attack a completed high-risk step when the extra review is worth it.
-11. **Spend parent reasoning only at leverage points:** planning, genuine ambiguity, architecture/integration tradeoffs, conflicting evidence, scope/blocker decisions, and hard gates.
-12. **No fake completion:** no stubs, hidden TODOs, weakened tests, test-specific hard-coding, skipped integration, or unsupported PASS claims.
+5. **Preserve user intent durably.** Keep `Lunacy/USER_NOTES.md` as a tiny current record of user-originated project/run constraints, requests, corrections, preferences, and intentionally deferred items. Update it when the user adds or changes something material; immediately evaluate whether authoritative execution files also need changing.
+6. **Workers own the full local loop.** Inspect → implement → verify → self-review → fix → reverify → terse durable report.
+7. **Workers follow the companion engineering doctrine.** Point implementation/repair/recovery/adversary workers to `worker/ENGINEERING.md`; project-specific authority outranks the generic doctrine.
+8. **Do not micromanage.** Give goals, relevant principles/authority, boundaries, dependencies, acceptance boundary, doctrine path, and report path. Let Luna resolve ordinary engineering details.
+9. **Parallelize safe independent work.** At each scheduling point, launch the largest safe set of dependency-ready steps concurrently, up to host capacity. Serialize when steps overlap likely write surfaces, change a shared contract/abstraction, consume one another's output, share unsafe mutable state, or need the same unresolved architecture decision. If independence is uncertain, serialize. Never distort architecture or step boundaries merely to manufacture concurrency.
+10. **Parent review cadence is phase-end by default.** Step reports control progress; they do not trigger routine parent code review.
+11. **Use fresh adversaries selectively.** A fresh Luna/max agent may independently attack a completed high-risk step when the extra review is worth it.
+12. **Spend parent reasoning only at leverage points:** planning, genuine ambiguity, architecture/integration tradeoffs, conflicting evidence, scope/blocker decisions, and hard gates.
+13. **No fake completion:** no stubs, hidden TODOs, weakened tests, test-specific hard-coding, skipped integration, or unsupported PASS claims.
 
 ## Token discipline
 
@@ -46,10 +47,13 @@ Read the user request and high-value project authority. For large authority sets
 
 Read the companion `orchestrator/PLANNING.md` when creating the plan or materially changing its architecture/decomposition. Use the companion `WORKSPACE.md` located beside this `SKILL.md` for durable file formats:
 
-- **new run:** read both companions once and create `Lunacy/PLAN.md`, `STATE.md`, and phase `STEPS.md`;
-- **normal resume:** do not reread either companion unless recovering ambiguous/damaged state or materially replanning.
+- **new run:** read both companions once and create `Lunacy/PLAN.md`, `STATE.md`, `USER_NOTES.md`, and phase `STEPS.md`;
+- **normal uninterrupted execution:** do not reread either companion or `USER_NOTES.md` merely because another step starts;
+- **fresh/restarted orchestrator or known context compaction/loss:** reread the tiny `USER_NOTES.md` with the normal resume packet.
 
-`PLAN.md` is the compact durable authority/execution digest. Preserve a structured source plan's meaningful hierarchy. For vague work, create the minimum useful phases/steps yourself; small work may be one phase.
+Capture durable user-specific constraints/requests in `USER_NOTES.md` during setup. `PLAN.md` remains the compact durable authority/execution digest: anything from the notes that changes current goals, contracts, acceptance, scope, or sequencing must be reflected in the authoritative plan/state/step files rather than existing only as a note.
+
+Preserve a structured source plan's meaningful hierarchy. For vague work, create the minimum useful phases/steps yourself; small work may be one phase.
 
 Before implementation define phase goals, step dependencies, phase-end hard gates, any exceptional extra gates, selected adversarial reviews, and the final gate. Design steps so genuinely independent work can run concurrently without competing ownership, but do not reshape a clean architecture merely to expose parallelism. Each phase and step must earn its existence through ownership, dependency, risk, or a meaningful integration boundary.
 
@@ -70,6 +74,8 @@ For each launched step, persist current state first. The normal handoff can be o
 The worker must inspect the existing system before editing: identify relevant callers, sibling paths, objects/types/interfaces, helpers, tests, lifecycle/persistence boundaries, and safe reuse/extension points. For migration/replacement/removal work it must prove the full contract coverage, including indirect/variable-mediated uses; this repository-scale inventory belongs to Luna, not the parent.
 
 A worker in a concurrent batch owns only its step. If discovery shows that correct completion requires editing a surface owned by another active worker, consuming an uncommitted sibling result, or changing a shared contract in a way that invalidates the independence assumption, it must **stop before the conflicting edit and escalate the overlap**. The orchestrator then serializes/replans the affected work instead of allowing a race.
+
+When the user adds, corrects, or defers a material requirement during execution, update `USER_NOTES.md` immediately and evaluate impact before the next affected scheduling/decision point. If it changes current execution, update `PLAN.md`, `STATE.md`, `STEPS.md`, and/or `DECISIONS.md` as appropriate. User notes preserve intent across context loss; they do not replace execution authority.
 
 After a batch completes, read only each report's Control Block, reconcile `STATE.md`/`STEPS.md` once, then schedule the next safe batch. Read deeper only for a decision request, contradiction, blocker, planned adversary, recovery, or gate.
 
@@ -107,8 +113,8 @@ Persist the terse gate result. Concrete complexity/simplification findings becom
 
 `STATE.md` always describes reality and contains one exact `next_action`. It may name multiple active steps/workers when a safe batch is in flight.
 
-Resume by reading only project-level instructions, `STATE.md`, `PLAN.md`, current phase `STEPS.md`, and the artifact(s) explicitly required by `next_action`. Read historical decisions/reports only when explicitly relevant. Never reconstruct history from worker chats.
+A fresh/restarted orchestrator, or one recovering after known context compaction/loss, reads only project-level instructions, `STATE.md`, `PLAN.md`, the tiny `USER_NOTES.md`, current phase `STEPS.md`, and the artifact(s) explicitly required by `next_action`. Read historical decisions/reports only when explicitly relevant. Never reconstruct history from worker chats.
 
 If interruption leaves one or more steps `ACTIVE`, do not investigate their partial implementations yourself. Check only whether each active attempt's report/control block completed. Reconcile completed attempts. For each incomplete attempt, mark it interrupted and launch a fresh Luna/max continuation/recovery worker for that same step against the **current repository state**. Re-form a safe batch only after accounting for any surviving partial writes/overlap risk.
 
-At the final gate, judge the integrated result against the whole goal, project ethos/core principles, authoritative plan, architecture/contracts, required verification, and proportional complexity. Finish only with no unresolved task-relevant findings.
+At the final gate, reread `USER_NOTES.md` and ensure every current run-relevant user request/constraint is satisfied, deliberately deferred with user authority, or explicitly superseded. Then judge the integrated result against the whole goal, project ethos/core principles, authoritative plan, architecture/contracts, required verification, and proportional complexity. Finish only with no unresolved task-relevant findings.
