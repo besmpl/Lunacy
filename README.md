@@ -24,6 +24,10 @@ Lunacy does not rely only on “be concise.” It enforces boundaries:
 
 - when supported, every Luna spawn uses `fork_turns: "none"` so workers do not inherit the parent conversation by default;
 - worker mailbox messages are only `BLOCKED`, `DECISION_REQUIRED`, or `FINAL`, at most three short lines;
+- **the parent is event-driven too:** routine resume reads, migrations, worker launches, quiet waits, and timeout expiry are not user-facing status events;
+- while workers run, the parent enters a **quiescent wait**: use the longest supported `wait_agent` timeout, let mailbox/user activity wake it early, and treat a plain timeout as a non-event that immediately re-enters the wait;
+- no periodic `list_agents`, report/file reads, state rewrites, or “still running” prose merely to prove liveness;
+- if a higher-priority host policy requires a progress heartbeat, it is the shortest required heartbeat with no accompanying status/repository inspection;
 - workers write one immutable terminal report, normally ≤60 lines / ~6 KB;
 - parent decision briefs are ≤30 lines / ~4 KB;
 - gate packs are ≤30 lines / ~4 KB;
@@ -50,6 +54,8 @@ dependency-ready steps
    ↙       ↓       ↘
  Luna     Luna     Luna    ← safe concurrency; xhigh/max per step
    ↘       ↓       ↙
+ quiescent parent wait ← wakes only on mailbox/user event
+        ↓
  immutable terminal Control Blocks
         ↓
 optional adversary if a named risk earns it
