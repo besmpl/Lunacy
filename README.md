@@ -60,12 +60,15 @@ A phase can therefore fail a gate even if it works functionally when it introduc
 
 Large plans or architecture sets can first be read by a Luna/max intake scout. The orchestrator reviews and spot-checks the cited digest and still owns the final plan and decisions. This avoids loading large document sets into parent context merely to extract durable facts once.
 
+`Lunacy/USER_NOTES.md` separately keeps a **tiny current memory of user-originated constraints, requests, corrections, preferences, and deliberately deferred items**. It is reread on fresh/restarted sessions, known context loss/compaction, and the final gate—not on every normal step. Execution-critical changes are promoted immediately into `PLAN.md`/`STATE.md`/`STEPS.md`; the notes file is memory, not a second execution authority.
+
 ## Durable structure
 
 ```text
 Lunacy/
   PLAN.md
   STATE.md
+  USER_NOTES.md
   DECISIONS.md
   intake.md                  # optional
   phases/
@@ -78,13 +81,13 @@ Lunacy/
       hard-gate-01.md
 ```
 
-There is intentionally no mandatory `HANDOVER.md`. `STATE.md + PLAN.md + current STEPS.md` already contain everything needed to resume, and duplicate handover prose costs tokens and can drift.
+There is intentionally no mandatory `HANDOVER.md`. `STATE.md + PLAN.md + USER_NOTES.md + current STEPS.md` already contain what a fresh orchestrator needs to resume, and duplicate handover prose costs tokens and can drift.
 
 `STATE.md` stays tiny, can record multiple in-flight steps/workers, and always contains one exact `Next action`. Worker reports put an 8–12-line Control Block first; deeper evidence is optional and read only when needed.
 
 Workers stay quiet during normal execution: no progress narration unless blocked or a real orchestrator decision is needed, and they finalize immediately after the durable report. The orchestrator prefers event-driven/blocking completion waits over repeated short timeout polling when the host supports it.
 
-A resumed orchestrator reads project-level instructions, `STATE.md`, `PLAN.md`, current `STEPS.md`, and only the artifact(s) named by `Next action`. It does not replay chats, reread all reports, or reload planning/workspace doctrine during normal resume.
+A fresh/restarted orchestrator reads project-level instructions, `STATE.md`, `PLAN.md`, `USER_NOTES.md`, current `STEPS.md`, and only the artifact(s) named by `Next action`. It does not replay chats, reread all reports, or reload planning/workspace doctrine during normal resume.
 
 ## Worker invariant
 
