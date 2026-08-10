@@ -19,7 +19,7 @@ Every technical subagent MUST be `gpt-5.6-luna` at reasoning effort `max`. Never
 6. **Workers own the full local loop.** Inspect → implement → verify → self-review → fix → terminal reverify → one immutable durable report.
 7. **Parallelize only safe independent work.** Serialize overlapping writes/contracts/state/decisions; never distort architecture to manufacture concurrency.
 8. **Parent review cadence is phase-end by default.** Ordinary PASS steps do not trigger parent code review.
-9. **Adversaries and gate scouts are conditional, not ceremonial.** Use them only when risk/integration complexity earns the extra call.
+9. **Adversaries and gate scouts are conditional, not ceremonial.** Adversary defaults to NO; use one only for a named risk that earns an independent attack. Use scouts only when integration/risk earns the extra call.
 10. **No fake completion:** no stubs, hidden TODOs, weakened tests, test-specific hard-coding, skipped integration, or unsupported PASS claims.
 
 Read `orchestrator/PLANNING.md` when creating/materially replanning. Point implementation/repair/recovery/adversary workers to `worker/ENGINEERING.md`. Project-specific authority outranks both generic doctrines.
@@ -84,12 +84,14 @@ If Codex rejects Luna/max because of the known multi-agent catalog mismatch, nev
 
 ## 3. Verification ownership
 
-Avoid proof multiplication.
+Avoid proof multiplication **without weakening authoritative acceptance**.
 
 - **Implementer:** after its last code change, run the step's terminal verification once and report that final snapshot. Development checks before the final state need not be narrated.
 - **Adversary (when justified):** attack new risk/assumptions. If it fixes something, verify the impacted surface; do not blindly replay the implementer's entire broad matrix unless the repair invalidates it.
 - **Gate scout (when justified):** read-only compression/navigation. It does **not** rerun broad verification suites.
 - **Parent gate:** inspect actual targeted code/diff/behavior and run one bounded acceptance sample/check set chosen for integration risk. Do not replay every worker suite.
+
+**If project/plan authority requires a full matrix, independent repetition, live proof, or exact gate command, run it exactly as required.** Assign required proof to one appropriate layer; deduplicate only redundant proof beyond that contract.
 
 If code changes after any terminal verification, that verification is stale and the changing owner must produce a new terminal snapshot before acceptance.
 
@@ -115,7 +117,7 @@ Use a fresh Luna/max gate scout only when it materially compresses parent work�
 
 A scout starts only after the write barrier is closed, is read-only except for its small immutable gate pack, and must point the parent to exact source symbols/diff regions. It cannot approve the phase and cannot run broad verification suites.
 
-The parent then inspects targeted actual code/diff/behavior and performs one bounded acceptance sample. Judge goal, user notes, architecture/contracts, regressions, integration, and complexity proportionality. Findings become new Luna repair attempts/steps; never reopen or edit finalized worker reports/gate packs. Re-close the barrier and re-gate with new numbered evidence after repair.
+The parent then inspects targeted actual code/diff/behavior and performs the authoritative required gate proof plus only the additional bounded acceptance sample needed for integration judgment. Findings become new Luna repair attempts/steps; never reopen or edit finalized worker reports/gate packs. Re-close the barrier and re-gate with new numbered evidence after repair.
 
 ## 6. Resume and finish
 
