@@ -28,9 +28,9 @@ A phase is an integrated milestone. A step is the largest coherent unit one Luna
 
 For vague requests, the orchestrator first creates the minimum useful phase/step plan. For already-structured plans, it preserves the meaningful hierarchy.
 
-Each step owner performs the full local loop: inspect affected callers/surfaces → implement → verify → self-review → fix → reverify → concise report. The orchestrator normally reads only the report's tiny Control Block and moves on; it does **not** review code after every step.
+Each step owner performs the full local loop: inspect → implement → verify → self-review → fix → reverify → concise report. The orchestrator normally reads only the report's tiny Control Block and moves on; it does **not** review code after every step.
 
-Workers are intentionally quiet: no routine progress narration, only blocker/decision messages plus final completion. Once the durable report is written, the worker finalizes immediately. Where the host supports it, Lunacy prefers event-driven/blocking completion over short timeout polling so long-running workers do not repeatedly wake the expensive orchestrator.
+Workers also follow a compact engineering doctrine: **inspect and understand the existing system before writing**, search for safe reuse/extension points before inventing parallel mechanisms, favor clean cohesive abstractions and polymorphism where they genuinely fit, and avoid ceremonial OOP or unrelated refactoring. This repository-scale architectural hygiene is deliberately paid for with Luna tokens rather than parent tokens.
 
 For unusually risky steps, the plan may add a fresh Luna/max adversary that independently attacks the resulting code/effects.
 
@@ -71,6 +71,8 @@ Lunacy/
 There is intentionally no mandatory `HANDOVER.md`. `STATE.md + PLAN.md + current STEPS.md` already contain everything needed to resume, and duplicate handover prose costs tokens and can drift.
 
 `STATE.md` stays tiny and always contains one exact `Next action`. Worker reports put an 8–12-line Control Block first; deeper evidence is optional and read only when needed.
+
+Workers stay quiet during normal execution: no progress narration unless blocked or a real orchestrator decision is needed, and they finalize immediately after the durable report. The orchestrator prefers event-driven/blocking completion waits over repeated short timeout polling when the host supports it.
 
 A resumed orchestrator reads project-level instructions, `STATE.md`, `PLAN.md`, current `STEPS.md`, and only the artifact named by `Next action`. It does not replay chats, reread all reports, or reload `WORKSPACE.md` during normal resume.
 
@@ -117,6 +119,7 @@ If the override is installed or changed, **close and relaunch Codex and open a n
 ```text
 SKILL.md                         Always-loaded core orchestration protocol.
 WORKSPACE.md                     Read on new-run setup or recovery, not every resume.
+worker/ENGINEERING.md            Luna-side clean-code/reuse/OOP/polymorphism doctrine.
 references/CODEX_LUNA_COMPAT.md Conditional compatibility procedure.
 README.md                        Human-facing overview.
 ```
