@@ -26,6 +26,8 @@ Do not bulk-read repositories, long logs, worker chats, or historical reports. P
 
 If broad discovery or large-document ingestion would consume substantial parent context, delegate it to Luna/max and require a compact cited digest. The orchestrator still owns the resulting plan/decision and spot-checks important authority as needed.
 
+**Default worker handoffs are path-based and tiny.** Point the worker to `PLAN.md`, its phase `STEPS.md` row, project instructions, and its report path; inline only exceptions or facts not already durable. Do not restate the authority digest or plan in every spawn.
+
 At hard gates, worker summaries are navigation aids, not correctness authority. The parent reviews **actual effects/current code**, but this is global integrated judgment—not duplicate line-by-line implementation review. Inspect the smallest actual code/diff/behavior surface that can test architecture, ethos, integration, and risk; expand only when evidence warrants it.
 
 ## 1. Plan before implementation
@@ -45,15 +47,15 @@ Before implementation define phase goals, step dependencies, phase-end hard gate
 
 The first **real** Luna/max worker spawn doubles as the capability check; do not spend an extra agent call on a dummy probe.
 
-For each dependency-ready step, persist current state and launch one Luna/max owner with minimum-sufficient facts plus durable paths. Its instruction must require complete implementation, relevant verification, self-review, all discovered fixes, reverification, and the prescribed terse report. It should escalate only a genuine decision not resolvable from project authority/evidence.
+For each dependency-ready step, persist current state and launch one Luna/max owner. The normal handoff can be only a few lines: identify the step, point to durable authority/step/report paths, require the full implementation→verification→self-review→fix→reverify loop, and tell it to escalate only genuine orchestrator decisions.
 
 After an ordinary PASS, read only the report's Control Block, update `STATE.md`/`STEPS.md`, and continue. Read deeper only for a decision request, contradiction, blocker, planned adversary, recovery, or gate.
 
-If Codex rejects Luna/max because of the known multi-agent catalog mismatch, do not downgrade. Read the skill companion `references/CODEX_LUNA_COMPAT.md`, apply only that procedure, validate it, then tell the user to **close and relaunch Codex and open a new task**. Stop execution in the current task; its model-selection schema cannot refresh mid-task.
+If Codex rejects Luna/max because of the known multi-agent catalog mismatch, do not downgrade. Read the skill companion `references/CODEX_LUNA_COMPAT.md`, apply only that procedure, validate it, persist restart/resume state, then tell the user to **close and relaunch Codex and open a new task**. Stop execution in the current task; its model-selection schema cannot refresh mid-task.
 
 ## 3. Optional fresh-Luna adversary
 
-For a selected risky step, use a fresh Luna/max agent that did not implement it. Give it project principles, the step goal, actual code/diff, verification entry points, and its report path—not implementer chat/reasoning.
+For a selected risky step, use a fresh Luna/max agent that did not implement it. Point it to the durable principles/step contract plus actual code/diff and verification entry points; do not give it implementer chat/reasoning.
 
 It independently attacks correctness, integration, assumptions, regressions, and principle compliance. It may repair in-scope findings and reverify. Broader design questions return to the orchestrator.
 
@@ -84,5 +86,7 @@ Persist the terse gate result. Findings become Luna/max repair steps; repeat the
 `STATE.md` always describes reality and contains one exact `next_action`.
 
 Resume by reading only project-level instructions, `STATE.md`, `PLAN.md`, current phase `STEPS.md`, and the one artifact required by `next_action`. Read historical decisions/reports only when explicitly relevant. Never reconstruct history from worker chats.
+
+If interruption left a step `ACTIVE`, do not investigate its partial implementation yourself. Check only whether its report/control block completed. If not, mark the attempt interrupted and launch a fresh Luna/max continuation/recovery worker for the same step against the **current repository state**; it must inspect/adopt/fix partial changes and finish the normal step loop.
 
 At the final gate, judge the integrated result against the whole goal, project ethos/core principles, authoritative plan, architecture/contracts, and required verification. Finish only with no unresolved task-relevant findings.
