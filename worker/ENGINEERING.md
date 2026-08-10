@@ -18,13 +18,22 @@ Prefer modifying, reusing, deleting, or extending sound mechanisms over adding l
 6. Understand ownership, invariants, and data flow around the change; do not patch one visible caller while ignoring the system around it.
 7. When external/library semantics are uncertain and research is available, use authoritative/primary documentation rather than guessing.
 
-## Concurrent ownership
+## Scope / concurrent ownership
 
-When other Lunacy steps/runs are active, own your assigned scope and do not race neighbors.
+Own the durable step contract you were assigned. Do not silently turn discovery into authorization.
 
-If deeper inspection shows correct completion requires editing another active owner's surface, changing a shared contract it depends on, consuming its unfinished result, mutating unsafe shared state, or making an architectural decision that invalidates its assumptions, **stop before the conflicting edit** and return `BLOCKED` or `DECISION_REQUIRED`.
+If deeper inspection shows correct completion requires any of the following, stop before that edit and return `BLOCKED` or `DECISION_REQUIRED`:
 
-Do not quietly broaden across active ownership. Conversely, do not avoid required in-scope work merely because it touches many files; the issue is conflicting ownership, not size.
+- editing another active step/run's surface;
+- changing a shared contract another active owner depends on;
+- consuming another active worker's unfinished result;
+- mutating unsafe shared state;
+- making an architectural decision that invalidates another active assumption;
+- **materially expanding your own step beyond its durable contract**, even if no concurrent owner is involved.
+
+Consolidate related newly discovered scope/authority contradictions into one decision brief. Do not ask for or accumulate a sequence of tiny ad-hoc overlap amendments while continuing to broaden the same worker's write set.
+
+Do not quietly broaden because the edit seems easy. Conversely, do not avoid required in-scope work merely because it touches many files; the issue is authorization/ownership, not size.
 
 ## Design preferences
 
@@ -63,6 +72,7 @@ Before terminal PASS, inspect the final diff and ask:
 - Did I satisfy full coverage, including indirect/variable-mediated uses?
 - Did I exclude anything as historical without authority?
 - Did I miss a caller, sibling path, lifecycle edge, persistence boundary, or integration surface?
+- Did discovery reveal required work outside my durable step contract that I should have escalated instead of editing?
 - Did concurrent work reveal overlap I should have escalated?
 - Did I duplicate something already present or create a second way to do the same thing?
 - Could this reuse/extend an existing abstraction more cleanly?
@@ -89,6 +99,8 @@ Do not send intermediate progress. Parent mailbox messages are only:
 Each message is at most three short lines and points to durable evidence/report paths; never dump logs, inventories, hashes, or implementation narrative into chat.
 
 Long command output goes to a log/evidence file or temporary file. Your report records only check/command, exit/result, useful count, and first relevant failure/red. Cite exact log path when deeper evidence may matter.
+
+**Do not recopy unchanged known-red, residual, root-status, caller-inventory, or acceptance-boundary lists into each report.** Cite the authoritative project/run artifact or one evidence file containing the detailed inventory. Your parent-facing report states only what changed or what is newly relevant.
 
 Do not create per-file hash catalogs unless project authority requires them. Prefer one aggregate fingerprint when drift identity is genuinely needed.
 
