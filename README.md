@@ -4,7 +4,7 @@ A compact execution skill for using **Codex, GPT-5.6 Sol, or GPT-5.6 Terra as a 
 
 The main design rule is: **spend orchestrator tokens only where global judgment has leverage.**
 
-The orchestrator understands project intent and ethos, plans the work, resolves genuinely difficult decisions, and owns phase-end hard gates. Luna/max workers investigate, implement, verify, self-review, repair, adversarially review when selected, and prepare phase evidence.
+The orchestrator understands project intent and ethos, plans the work, resolves genuinely difficult decisions, schedules safe parallel work, and owns phase-end hard gates. Luna/max workers investigate, implement, verify, self-review, repair, adversarially review when selected, and prepare phase evidence.
 
 ## Execution model
 
@@ -15,7 +15,11 @@ compact PLAN.md
         ↓
       phases
         ↓
-       steps ── one Luna/max owner each
+dependency-ready steps
+   ↙       ↓       ↘
+ Luna     Luna     Luna    ← concurrent when safely independent
+   ↘       ↓       ↙
+ batch Control Blocks
         ↓
 optional fresh Luna adversary on selected risky steps
         ↓
@@ -28,9 +32,13 @@ A phase is an integrated milestone. A step is the largest coherent unit one Luna
 
 For vague requests, the orchestrator first creates the minimum useful phase/step plan. For already-structured plans, it preserves the meaningful hierarchy.
 
-Each step owner performs the full local loop: inspect → implement → verify → self-review → fix → reverify → concise report. The orchestrator normally reads only the report's tiny Control Block and moves on; it does **not** review code after every step.
+At each scheduling point Lunacy looks for the **largest safe set of dependency-ready steps** and launches them concurrently, up to host capacity. Work stays serialized when steps are likely to overlap write surfaces, change the same contract/abstraction, consume one another's outputs, share unsafe mutable state, or depend on the same unresolved architecture decision. If independence is uncertain, Lunacy serializes rather than gambling on a race.
+
+Each step owner performs the full local loop: inspect → implement → verify → self-review → fix → reverify → concise report. The orchestrator normally reads only the report's tiny Control Block and moves on; it does **not** review code after every step. For a parallel batch it waits/reconciles at batch level where the host allows it, reducing repeated parent wakeups.
 
 Workers also follow a compact engineering doctrine: **inspect and understand the existing system before writing**, search for safe reuse/extension points before inventing parallel mechanisms, favor clean cohesive abstractions and polymorphism where they genuinely fit, and avoid ceremonial OOP or unrelated refactoring. This repository-scale architectural hygiene is deliberately paid for with Luna tokens rather than parent tokens.
+
+Concurrent workers validate their assumed independence during that deeper inspection. If a worker discovers it really needs to edit another active step's surface or change a shared contract another worker depends on, it stops before the conflicting edit and escalates the overlap so the orchestrator can serialize/replan it.
 
 For unusually risky steps, the plan may add a fresh Luna/max adversary that independently attacks the resulting code/effects.
 
@@ -70,11 +78,11 @@ Lunacy/
 
 There is intentionally no mandatory `HANDOVER.md`. `STATE.md + PLAN.md + current STEPS.md` already contain everything needed to resume, and duplicate handover prose costs tokens and can drift.
 
-`STATE.md` stays tiny and always contains one exact `Next action`. Worker reports put an 8–12-line Control Block first; deeper evidence is optional and read only when needed.
+`STATE.md` stays tiny, can record multiple in-flight steps/workers, and always contains one exact `Next action`. Worker reports put an 8–12-line Control Block first; deeper evidence is optional and read only when needed.
 
 Workers stay quiet during normal execution: no progress narration unless blocked or a real orchestrator decision is needed, and they finalize immediately after the durable report. The orchestrator prefers event-driven/blocking completion waits over repeated short timeout polling when the host supports it.
 
-A resumed orchestrator reads project-level instructions, `STATE.md`, `PLAN.md`, current `STEPS.md`, and only the artifact named by `Next action`. It does not replay chats, reread all reports, or reload `WORKSPACE.md` during normal resume.
+A resumed orchestrator reads project-level instructions, `STATE.md`, `PLAN.md`, current `STEPS.md`, and only the artifact(s) named by `Next action`. It does not replay chats, reread all reports, or reload `WORKSPACE.md` during normal resume.
 
 ## Worker invariant
 
@@ -119,7 +127,7 @@ If the override is installed or changed, **close and relaunch Codex and open a n
 ```text
 SKILL.md                         Always-loaded core orchestration protocol.
 WORKSPACE.md                     Read on new-run setup or recovery, not every resume.
-worker/ENGINEERING.md            Luna-side clean-code/reuse/OOP/polymorphism doctrine.
+worker/ENGINEERING.md            Luna-side clean-code/reuse/OOP/polymorphism/concurrency doctrine.
 references/CODEX_LUNA_COMPAT.md Conditional compatibility procedure.
 README.md                        Human-facing overview.
 ```
