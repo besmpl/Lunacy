@@ -12,15 +12,17 @@ Every technical subagent MUST be `gpt-5.6-luna` at reasoning effort `max`. Never
 ## Rules
 
 1. **Project intent is authority.** Understand the goal, ethos, core principles, architecture, non-negotiable contracts, and authoritative plan well enough to let them drive planning and decisions.
-2. **Plan → phases → steps.** A phase is an integrated milestone. A step is the largest coherent unit one Luna/max worker can safely own end-to-end. One implementation worker owns each step.
-3. **Workers own the full local loop.** Inspect → implement → verify → self-review → fix → reverify → terse durable report.
-4. **Workers follow the companion engineering doctrine.** Point implementation/repair/recovery/adversary workers to `worker/ENGINEERING.md`; project-specific authority outranks the generic doctrine.
-5. **Do not micromanage.** Give goals, relevant principles/authority, boundaries, dependencies, acceptance boundary, doctrine path, and report path. Let Luna resolve ordinary engineering details.
-6. **Parallelize safe independent work.** At each scheduling point, launch the largest safe set of dependency-ready steps concurrently, up to host capacity. Serialize when steps overlap likely write surfaces, change a shared contract/abstraction, consume one another's output, share unsafe mutable state, or need the same unresolved architecture decision. If independence is uncertain, serialize.
-7. **Parent review cadence is phase-end by default.** Step reports control progress; they do not trigger routine parent code review.
-8. **Use fresh adversaries selectively.** A fresh Luna/max agent may independently attack a completed high-risk step when the extra review is worth it.
-9. **Spend parent reasoning only at leverage points:** planning, genuine ambiguity, architecture/integration tradeoffs, conflicting evidence, scope/blocker decisions, and hard gates.
-10. **No fake completion:** no stubs, hidden TODOs, weakened tests, test-specific hard-coding, skipped integration, or unsupported PASS claims.
+2. **Prefer the simplest sound design.** Complexity must earn its cost. Do not confuse sophistication, hierarchy, or abstraction count with quality.
+3. **Plan → phases → steps.** A phase is an integrated milestone. A step is the largest coherent unit one Luna/max worker can safely own end-to-end. Do not over-decompose merely to create more agent work.
+4. **The orchestrator follows the planning doctrine.** Read `orchestrator/PLANNING.md` when creating or materially replanning a run; use existing architecture/reuse points, OOP/polymorphism where they genuinely fit, and explicit anti-overengineering/YAGNI guardrails.
+5. **Workers own the full local loop.** Inspect → implement → verify → self-review → fix → reverify → terse durable report.
+6. **Workers follow the companion engineering doctrine.** Point implementation/repair/recovery/adversary workers to `worker/ENGINEERING.md`; project-specific authority outranks the generic doctrine.
+7. **Do not micromanage.** Give goals, relevant principles/authority, boundaries, dependencies, acceptance boundary, doctrine path, and report path. Let Luna resolve ordinary engineering details.
+8. **Parallelize safe independent work.** At each scheduling point, launch the largest safe set of dependency-ready steps concurrently, up to host capacity. Serialize when steps overlap likely write surfaces, change a shared contract/abstraction, consume one another's output, share unsafe mutable state, or need the same unresolved architecture decision. If independence is uncertain, serialize. Never distort architecture or step boundaries merely to manufacture concurrency.
+9. **Parent review cadence is phase-end by default.** Step reports control progress; they do not trigger routine parent code review.
+10. **Use fresh adversaries selectively.** A fresh Luna/max agent may independently attack a completed high-risk step when the extra review is worth it.
+11. **Spend parent reasoning only at leverage points:** planning, genuine ambiguity, architecture/integration tradeoffs, conflicting evidence, scope/blocker decisions, and hard gates.
+12. **No fake completion:** no stubs, hidden TODOs, weakened tests, test-specific hard-coding, skipped integration, or unsupported PASS claims.
 
 ## Token discipline
 
@@ -34,22 +36,28 @@ If broad discovery or large-document ingestion would consume substantial parent 
 
 **Minimize orchestrator wakeups.** Where the host supports event-driven or blocking completion waits, use them instead of repeated short timeout polling. For a concurrent batch, prefer one batch-level wait/reconciliation cycle over repeatedly waking for each worker. If polling or visible heartbeats are forced by the host, use the coarsest practical cadence, keep unchanged updates minimal, and do not reread unchanged worker/repository state merely because a timer fired.
 
-At hard gates, worker summaries are navigation aids, not correctness authority. The parent reviews **actual effects/current code**, but this is global integrated judgment—not duplicate line-by-line implementation review. Inspect the smallest actual code/diff/behavior surface that can test architecture, ethos, integration, and risk; expand only when evidence warrants it.
+**Minimize process ceremony too.** Do not add phases, micro-steps, scouts, adversaries, durable files, compatibility layers, or verification machinery unless they materially improve ownership, risk control, correctness, or resumability for this task.
+
+At hard gates, worker summaries are navigation aids, not correctness authority. The parent reviews **actual effects/current code**, but this is global integrated judgment—not duplicate line-by-line implementation review. Inspect the smallest actual code/diff/behavior surface that can test architecture, ethos, integration, risk, and unnecessary complexity; expand only when evidence warrants it.
 
 ## 1. Plan before implementation
 
 Read the user request and high-value project authority. For large authority sets, use a Luna/max intake scout to produce a cited digest, then review/adjust it yourself.
 
-Use the companion `WORKSPACE.md` located beside this `SKILL.md` for durable file formats:
+Read the companion `orchestrator/PLANNING.md` when creating the plan or materially changing its architecture/decomposition. Use the companion `WORKSPACE.md` located beside this `SKILL.md` for durable file formats:
 
-- **new run:** read that companion once and create `Lunacy/PLAN.md`, `STATE.md`, and phase `STEPS.md`;
-- **resume:** do not reread the companion unless recovering ambiguous/damaged state.
+- **new run:** read both companions once and create `Lunacy/PLAN.md`, `STATE.md`, and phase `STEPS.md`;
+- **normal resume:** do not reread either companion unless recovering ambiguous/damaged state or materially replanning.
 
 `PLAN.md` is the compact durable authority/execution digest. Preserve a structured source plan's meaningful hierarchy. For vague work, create the minimum useful phases/steps yourself; small work may be one phase.
 
-Before implementation define phase goals, step dependencies, phase-end hard gates, any exceptional extra gates, selected adversarial reviews, and the final gate. Design steps so genuinely independent work can run concurrently without competing ownership. Replan when real facts justify it; persist consequential decisions.
+Before implementation define phase goals, step dependencies, phase-end hard gates, any exceptional extra gates, selected adversarial reviews, and the final gate. Design steps so genuinely independent work can run concurrently without competing ownership, but do not reshape a clean architecture merely to expose parallelism. Each phase and step must earn its existence through ownership, dependency, risk, or a meaningful integration boundary.
+
+Prefer reuse or extension of sound existing mechanisms before planning new abstractions or subsystems. Use OOP/polymorphism when they express real current domain variation behind stable contracts; do not invent class hierarchies, services, managers, factories, adapters, feature flags, or generalized frameworks for hypothetical future needs. Choose a materially simpler design when it provides the same required correctness, maintainability, and reasonable extensibility.
 
 For any **migration, replacement, compatibility cleanup, or removal** step, the step contract must make coverage unambiguous. Default coverage is every maintained affected caller/surface in the repository—including production code, tests, fixtures, adapters, examples, and indirect or variable-mediated construction—unless authoritative project material explicitly excludes something. Do not let workers infer that an uncovered surface is `legacy`/`historical` merely because a selected test matrix is green or does not include it.
+
+Replan when real facts justify it; persist consequential decisions. Do not replan merely to make the plan look more elegant.
 
 ## 2. Execute steps with Luna/max
 
@@ -71,7 +79,7 @@ If Codex rejects Luna/max because of the known multi-agent catalog mismatch, do 
 
 For a selected risky step, use a fresh Luna/max agent that did not implement it. Point it to the durable principles/step contract, `worker/ENGINEERING.md`, actual code/diff, and verification entry points; do not give it implementer chat/reasoning.
 
-It independently attacks correctness, integration, assumptions, regressions, principle compliance, missed reuse opportunities, duplicated mechanisms, poor abstractions, and incomplete caller/surface coverage. It may repair in-scope findings and reverify. Broader design questions return to the orchestrator.
+It independently attacks correctness, integration, assumptions, regressions, principle compliance, missed reuse opportunities, duplicated mechanisms, poor abstractions, incomplete caller/surface coverage, and unjustified complexity. It may repair in-scope findings and reverify. Broader design questions return to the orchestrator.
 
 ## 4. Hard decisions
 
@@ -83,7 +91,7 @@ Resolve genuine hard questions in this order:
 4. established project evidence/accepted behavior;
 5. conservative engineering judgment preserving intent.
 
-Read the minimum evidence needed, record consequential decisions, and delegate implementation consequences back to Luna/max.
+When several designs satisfy the authority equally, prefer the one with less new machinery and lower maintenance burden. Read the minimum evidence needed, record consequential decisions, and delegate implementation consequences back to Luna/max.
 
 ## 5. Phase hard gate
 
@@ -91,9 +99,9 @@ When all required phase steps are done, stop normal step execution.
 
 For a nontrivial phase, first spawn a fresh Luna/max **gate scout** to compress the integrated change into a small gate pack: changed surfaces, cross-step interfaces, verification status, highest risks/uncertainties, and exact actual artifacts/checks most worth parent inspection. The scout **does not approve the phase**.
 
-The orchestrator then performs the hard gate: use the gate pack as an index, inspect targeted actual code/diff/behavior, and judge the integrated phase against project ethos, architecture/contracts, phase goal, regressions, and cross-step integration. Broaden only when risk or contradictory evidence requires it.
+The orchestrator then performs the hard gate: use the gate pack as an index, inspect targeted actual code/diff/behavior, and judge the integrated phase against project ethos, architecture/contracts, phase goal, regressions, cross-step integration, and **complexity proportionality**. Functional correctness does not excuse unjustified parallel mechanisms, speculative abstractions, excessive layers, or maintenance burden.
 
-Persist the terse gate result. Findings become Luna/max repair steps; repeat the gate after material repair. A tiny obvious phase may skip the scout.
+Persist the terse gate result. Concrete complexity/simplification findings become Luna/max repair steps just like correctness findings; repeat the gate after material repair. A tiny obvious phase may skip the scout.
 
 ## 6. Resume and finish
 
@@ -103,4 +111,4 @@ Resume by reading only project-level instructions, `STATE.md`, `PLAN.md`, curren
 
 If interruption leaves one or more steps `ACTIVE`, do not investigate their partial implementations yourself. Check only whether each active attempt's report/control block completed. Reconcile completed attempts. For each incomplete attempt, mark it interrupted and launch a fresh Luna/max continuation/recovery worker for that same step against the **current repository state**. Re-form a safe batch only after accounting for any surviving partial writes/overlap risk.
 
-At the final gate, judge the integrated result against the whole goal, project ethos/core principles, authoritative plan, architecture/contracts, and required verification. Finish only with no unresolved task-relevant findings.
+At the final gate, judge the integrated result against the whole goal, project ethos/core principles, authoritative plan, architecture/contracts, required verification, and proportional complexity. Finish only with no unresolved task-relevant findings.
