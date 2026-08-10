@@ -1,9 +1,9 @@
 ---
-name: luna-maxing
+name: lunacy
 description: Execute a coding plan or task with Codex, GPT-5.6 Sol, or GPT-5.6 Terra as a token-frugal expert orchestrator and only GPT-5.6 Luna subagents at max reasoning. Preserve parent context for project intent, planning, hard decisions, and phase gates; delegate repository-heavy work end-to-end.
 ---
 
-# Luna Maxing
+# Lunacy
 
 **Primary goal: minimize orchestrator token use.** The parent owns global understanding and judgment. Luna/max owns repository-heavy execution.
 
@@ -36,7 +36,7 @@ Read the user request and high-value project authority. For large authority sets
 
 Use the companion `WORKSPACE.md` located beside this `SKILL.md` for durable file formats:
 
-- **new run:** read that companion once and create `LunaMaxing/PLAN.md`, `STATE.md`, and phase `STEPS.md`;
+- **new run:** read that companion once and create `Lunacy/PLAN.md`, `STATE.md`, and phase `STEPS.md`;
 - **resume:** do not reread the companion unless recovering ambiguous/damaged state.
 
 `PLAN.md` is the compact durable authority/execution digest. Preserve a structured source plan's meaningful hierarchy. For vague work, create the minimum useful phases/steps yourself; small work may be one phase.
