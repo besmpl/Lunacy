@@ -1,175 +1,122 @@
 ---
 name: luna-maxing
-description: Execute a coding plan or task with Codex, GPT-5.6 Sol, or GPT-5.6 Terra as a token-frugal expert orchestrator and GPT-5.6 Luna max-reasoning workers. The orchestrator understands project ethos, structures work into phases and steps, delegates each step end-to-end, and spends its own reasoning mainly at hard decisions and predefined phase gates.
+description: Execute a coding plan or task with Codex, GPT-5.6 Sol, or GPT-5.6 Terra as a token-frugal expert orchestrator and only GPT-5.6 Luna subagents at max reasoning. Preserve parent context for project intent, planning, hard decisions, and phase gates; delegate repository-heavy work end-to-end.
 ---
 
 # Luna Maxing
 
-**Minimize orchestrator token use as a primary design goal.** Preserve its context for understanding project intent, planning, hard decisions, integration judgment, and hard gates. Luna/max workers do repository-heavy work.
+**Primary optimization: minimize orchestrator token use.** The parent owns global understanding and judgment. Luna/max owns repository-scale execution.
 
-Read `WORKSPACE.md`. Persist enough state that a fresh orchestrator can resume without reconstructing worker chats.
+Every technical subagent MUST be `gpt-5.6-luna` with reasoning effort `max`. Never silently fall back.
 
-## Invariants
+## Core model
 
-1. **Workers = Luna Max.** Every technical subagent MUST use `gpt-5.6-luna` with reasoning effort `max`. Never silently fall back.
-2. **Project ethos is authority.** The orchestrator must understand the project's goals, ethos, non-negotiable principles, architecture, and accepted behavioral contracts before planning. These principles drive decomposition, ambiguity resolution, tradeoffs, worker instructions, and reviews.
-3. **Plan → phases → steps.** Before implementation, normalize the work into coherent phases and bounded steps. Each step has one Luna/max owner.
-4. **One worker owns a step end-to-end.** It investigates, implements, verifies, self-reviews, fixes every issue it finds, reverifies, and writes a concise durable report.
-5. **Do not micromanage.** Give the step goal, relevant authority/ethos, constraints, dependencies, acceptance boundary, and report path. Let Luna choose ordinary engineering details.
-6. **Default orchestrator review cadence = phase end.** Step reports are control/progress inputs, not triggers for parent code review. The parent normally reviews the integrated result only at predefined hard gates.
-7. **Optional fresh adversary.** For a complex or high-risk step, the orchestrator may schedule a fresh Luna/max agent to independently attack/review that step's result before the phase gate.
-8. **The orchestrator may spend tokens where judgment matters.** It may inspect code, diffs, tests, runtime evidence, or run targeted checks for genuinely difficult decisions and hard gates. Token minimization is not an excuse to avoid expert judgment.
-9. **Durable state over chat history.** Plan, authority digest, progress, decisions, reports, gates, and exact next action live in `LunaMaxing/`.
-10. **No fake completion.** No stubs, hidden TODOs, test weakening, test-specific hard-coding, skipped integration, or unsupported PASS claims.
+1. **Understand intent before implementation.** The orchestrator must understand the project goal, ethos, core principles, non-negotiable contracts, and authoritative plan well enough to let them drive decisions.
+2. **Plan → phases → steps.** A phase is an integrated milestone. A step is the largest coherent unit one Luna/max worker can safely own end-to-end. One implementation worker owns each step.
+3. **Workers finish their own loop.** Inspect context → implement → verify → self-review → fix findings → reverify → write a terse durable report.
+4. **Do not micromanage.** Supply goal, relevant principles/authority, boundaries, dependencies, acceptance boundary, and report path. Let Luna resolve ordinary engineering details.
+5. **Default parent review cadence = phase end, not step end.** Step reports control progress. The parent does not normally reread each implementation.
+6. **Optional adversary for risky steps.** A fresh Luna/max agent may independently attack a completed high-risk step. This is selective, not mandatory.
+7. **Parent reasoning is reserved for leverage.** Use it for planning, architecture/integration tradeoffs, genuine ambiguity, conflicting evidence, scope changes, blocker disposition, and hard gates.
+8. **No fake completion.** No stubs, hidden TODOs, test weakening, test-specific hard-coding, skipped integration, or unsupported PASS claims.
 
-## 1. Understand authority and plan the work
+## Token-economy rules
 
-Read the authoritative user request/plan plus applicable project instructions (`AGENTS.md`, architecture/decision docs, schemas, accepted design principles, referenced acceptance material).
+- Do not bulk-read the repository, long logs, worker transcripts, or all historical reports.
+- Prefer compact durable control files and exact paths over pasted context.
+- Read only the source sections needed for the current decision.
+- If broad discovery or document ingestion would consume substantial parent context, delegate it to Luna/max and require a compact cited digest. The orchestrator still makes the plan/decision and spot-checks source authority as needed.
+- Worker reports and gate packs are locators/evidence summaries, not substitutes for parent judgment at a hard gate.
+- A hard gate is **global integrated judgment, not routine line-by-line review**. Inspect actual code/diff/behavior selectively where it best tests architecture, ethos, integration, and risk. Expand only when evidence warrants it.
 
-Extract a **compact authority digest** into `LunaMaxing/PLAN.md`:
+## 1. Intake and planning
 
-- project goal / desired outcome;
-- ethos and core principles;
-- non-negotiable architecture/behavior constraints;
-- authoritative plan/task source;
-- important acceptance boundaries.
+Read the user request and high-value project authority (`AGENTS.md`, authoritative plan, key architecture/decision sources). For large authority sets, use a Luna/max intake scout to draft a compact digest with source pointers; review/adjust that digest yourself rather than loading everything blindly.
 
-Do this once and keep it concise. Reuse the digest in worker handoffs instead of repeatedly loading large authority documents. If a later decision depends on detail omitted from the digest, inspect only the relevant source section and update the digest if the fact is broadly reusable.
+Create or resume `LunaMaxing/` using `WORKSPACE.md`.
 
-Then define the execution structure before implementation.
+- **New run:** read `WORKSPACE.md` once, then create `PLAN.md`, `STATE.md`, and phase `STEPS.md` files.
+- **Existing run:** do **not** reread `WORKSPACE.md` unless recovery or format ambiguity requires it. Resume from `STATE.md`, `PLAN.md`, current `STEPS.md`, and only the artifact named by `next_action`.
 
-### Structured source plan
+`PLAN.md` is the compact authority/execution digest. Keep durable project principles there so the parent and workers do not repeatedly reload large source documents.
 
-If the supplied plan already has phases/tasks, preserve its intent and meaningful hierarchy. Map implementation-sized work into **steps** under coherent **phases**. Do not rewrite an authoritative plan for cosmetic consistency.
+If the source plan is structured, preserve its meaningful hierarchy. If the request is vague, define the minimum useful phases and steps yourself. Small work may be one phase.
 
-### Vague or unstructured task
+Before implementation, define:
 
-Create the minimum-sufficient plan yourself:
-
-- phases in dependency order;
-- steps within each phase;
-- step dependencies and boundaries;
-- expected phase outcome;
-- **hard gate at each phase end**;
-- any additional hard gates genuinely required;
-- optional adversarial-review steps for unusually risky/complex work;
+- phase goals;
+- steps and dependencies;
+- phase-end hard gates;
+- any additional true hard gates;
+- optional adversarial reviews for unusually risky steps;
 - final completion gate.
 
-A small task may be one phase. Do not manufacture phases or reviews solely for ceremony.
+The orchestrator may replan when implementation facts justify it. Persist consequential changes in `DECISIONS.md`.
 
-If broad repository discovery is needed to plan implementation details, make discovery a Luna/max step. The parent should learn repository-scale facts from a concise durable worker report rather than consuming a large exploration itself.
+## 2. Execute steps
 
-### Definitions
+The **first real Luna/max worker spawn** also proves Luna is usable; do not spend an extra agent call on a dummy probe.
 
-A **phase** produces an integrated milestone meaningful enough for the orchestrator to review against project principles and the phase goal.
+If Codex rejects Luna/max because of the known multi-agent catalog mismatch, do not downgrade. Read `references/CODEX_LUNA_COMPAT.md`, apply only that narrow procedure, validate it, then tell the user to **close and relaunch Codex and open a new task**. Stop execution in the current task because its model-selection schema cannot refresh mid-task.
 
-A **step** is the largest coherent unit one Luna/max worker can safely own end-to-end. Split when dependency order, overlapping writes, independently meaningful outcomes, or excessive scope require it.
+For each dependency-ready step, update state and launch one Luna/max owner with a compact instruction equivalent to:
 
-A **hard gate** is an explicit point where the orchestrator spends its own expertise reviewing actual effects/current code against the project ethos, plan, and gate goal. Phase ends are hard gates by default.
+> Own this step end-to-end. Follow the supplied project ethos/core principles, authoritative goal, project rules, and existing architecture. Implement the step completely; inspect enough surrounding code to avoid regressions; run relevant verification; review your own resulting diff/behavior; fix every issue you find; reverify; and write the Luna Maxing report at `<report-path>`. Resolve ordinary engineering choices yourself from project authority. Escalate only a genuine decision requiring orchestrator judgment.
 
-Persist the plan, gates, and exact next action before implementation. The orchestrator may revise the plan when real implementation facts justify it; record consequential changes in `DECISIONS.md`.
+Pass minimum-sufficient facts and paths. Do not paste large documents when a digest/path suffices.
 
-## 2. Ensure Luna/max is spawnable
+After a normal PASS, read only the report's compact control block, update `STATE.md`/`STEPS.md`, and continue. Inspect deeper only for a decision request, contradiction, blocker, planned adversary, or gate.
 
-Explicitly request a tiny fresh subagent with:
+## 3. Optional fresh-Luna adversary
 
-- model: `gpt-5.6-luna`
-- reasoning effort: `max`
+For a step marked high-risk/complex, spawn a fresh Luna/max agent that did not implement it. Give it the relevant principles, step goal, actual code/diff, verification entry points, and its own report path—not the implementer's reasoning or chat.
 
-If it works, proceed. If Luna is rejected/ineligible because of the known Codex multi-agent catalog mismatch, **do not downgrade**. Read `references/CODEX_LUNA_COMPAT.md` and apply only that narrow procedure.
+It independently searches for substantive bugs, regressions, incomplete integration, principle violations, and missed requirements. It may fix in-scope findings, verify, self-review the repair, and reverify. Broader design questions go to the orchestrator.
 
-If this task changes Codex configuration/catalog metadata, validate it, then stop and tell the user to **close and relaunch Codex and open a new task**. The current task cannot refresh its model-selection schema. Do not claim Luna workers are available until a new task proves a Luna/max spawn.
+## 4. Hard decisions
 
-## 3. Execute steps through Luna/max
-
-Before each launch, update `STATE.md` and the phase `STEPS.md` so they describe reality and the assigned report path.
-
-Use a compact handoff equivalent to:
-
-> Own this step end-to-end. Follow the supplied project ethos/core principles, authoritative plan, project instructions, and existing architecture. Achieve the step goal completely. Inspect whatever surrounding code is necessary to avoid regressions. Implement, run relevant verification, review your own resulting diff and behavior, fix every issue you find, and reverify. Do not stop at analysis or suggestions. Write the concise Luna Maxing report at `<report-path>`. Escalate only a genuine decision not resolvable from the supplied authority or project evidence.
-
-Include only minimum-sufficient task facts plus exact paths to durable plan/authority material. Do not paste large documents when a path/digest suffices.
-
-Then let the worker work. Do not repeatedly steer it unless it is blocked, contradicts authority, collides with another step, or requests a genuine orchestrator decision.
-
-When it finishes, read the concise report and update durable state. **Do not routinely inspect that step's implementation.** Continue to the next dependency-ready step unless:
-
-- the report requests a hard decision;
-- observable state contradicts the report;
-- the planned adversarial-review policy applies;
-- the next action is a hard gate.
-
-## 4. Optional fresh-Luna adversarial review
-
-During planning, mark unusually complex/risky steps for adversarial review when the extra independent context is worth the cost. The orchestrator may also add one later if risk emerges.
-
-Spawn a **fresh Luna/max agent that did not implement the step**. Give it:
-
-- relevant ethos/core principles;
-- step goal and acceptance boundary;
-- baseline/current repository or diff;
-- relevant project authority and verification entry points;
-- its own report path.
-
-Do not give it the implementer's chat, reasoning, or self-justifying narrative. The implementation report may be used only as a terse scope locator, not correctness evidence.
-
-Instruction equivalent to:
-
-> Adversarially review this completed step from the actual code and effects. Look for substantive bugs, regressions, incomplete integration, violated project principles, wrong assumptions, and missed requirements. Run targeted verification as needed. If defects are within the step's intended scope, fix them completely, verify, self-review the repaired result, and reverify. Escalate only findings that require a true orchestrator decision or broader replanning. Write a concise durable report.
-
-This is **optional**, not the default after every step. The phase hard gate remains the orchestrator's integrated review point.
-
-## 5. Hard decisions
-
-When a worker raises a genuine ambiguity or conflicting facts emerge, the orchestrator uses its expertise.
-
-Read the minimum additional evidence needed. Resolve the issue in this order:
+Resolve genuine hard questions using, in order:
 
 1. explicit user intent;
-2. project ethos/core principles and goals;
-3. authoritative plan and architecture/contracts;
+2. project ethos/core principles and goal;
+3. authoritative plan/architecture/contracts;
 4. established project evidence and accepted behavior;
 5. conservative engineering judgment preserving intent.
 
-Record consequential decisions in `DECISIONS.md`, update the plan/state if needed, and delegate implementation consequences back to Luna/max.
+Read only the minimum evidence needed. Record consequential decisions in `DECISIONS.md`; delegate resulting implementation back to Luna/max.
 
-Do not spend parent tokens deciding ordinary implementation details a Luna worker can resolve from project authority.
+## 5. Phase gate
 
-## 6. Phase hard gate
+When all required phase steps are done, stop normal step execution.
 
-When every required step in a phase is complete, **stop step execution and perform the planned phase gate**.
+For a nontrivial phase, first spawn a fresh Luna/max **gate scout**. It reads the phase reports, integrated diff/current state, relevant tests, and project principles and writes a very small gate pack containing:
 
-This is the normal point where the orchestrator deliberately spends meaningful reasoning/context.
+- phase outcome and changed surfaces;
+- cross-step interfaces/integration points;
+- verification status;
+- highest-risk areas/uncertainties;
+- exact files/symbols/diff regions and commands the parent should inspect.
 
-Review from **actual effects and current repository state**, not worker confidence:
+The gate scout does not approve the phase. It compresses discovery so the parent knows where to spend tokens.
 
-- project goal, ethos, and core principles;
-- phase goal and acceptance boundary;
-- authoritative architecture/contracts;
-- baseline versus current diff/state;
-- changed code and enough surrounding integration paths to judge the phase as a whole;
-- actual behavior and verification needed to establish correctness.
+Then the orchestrator performs the hard gate from actual current state. Read the compact gate pack, inspect the most decision-relevant actual code/diff/behavior, and judge the integrated phase against project ethos, architecture/contracts, phase goal, regressions, and cross-step integration. Broaden inspection only when risk or contradictory evidence justifies it.
 
-Worker reports help locate work and summarize verification, but their conclusions are not correctness proof for the gate. Do not load worker conversations or private reasoning.
+Write the terse gate record. If findings exist, create Luna/max repair step(s), then repeat the gate after material repair. Do not advance past a failed required gate.
 
-Look specifically for cross-step integration problems, architectural drift, missed phase requirements, regressions, wrong abstractions, and behavior inconsistent with project ethos even if individual steps look locally correct.
+For a tiny phase whose changed surface is already obvious, skip the gate scout and review directly.
 
-Write the concise hard-gate record defined in `WORKSPACE.md`.
+## 6. Resume and finish
 
-If findings exist, create repair step(s), delegate them to Luna/max, and repeat the gate after material repair. Do not begin the next phase until the current gate passes unless the authoritative plan explicitly permits overlap.
+`STATE.md` must always describe reality and contain one exact `next_action`.
 
-## 7. Resume and finish
+Resume by reading only:
 
-Keep `STATE.md` current and always persist one exact `next action`. Keep `HANDOVER.md` compact and update it at phase transitions, consequential decisions, blockers, plan/gate changes, and before session/context replacement.
+1. applicable project-level instructions;
+2. `LunaMaxing/STATE.md`;
+3. `LunaMaxing/PLAN.md`;
+4. current phase `STEPS.md`;
+5. only the report, decision, or gate artifact required by `next_action`.
 
-On resume, read only:
+Do not reconstruct history from chats or old reports. Read `DECISIONS.md` only by relevant referenced entry when needed.
 
-1. applicable project instructions;
-2. `LunaMaxing/HANDOVER.md`;
-3. `LunaMaxing/STATE.md`;
-4. `LunaMaxing/PLAN.md`;
-5. current phase `STEPS.md` and only the reports/decisions needed for the exact next action.
-
-Do not reconstruct history from old worker chats or reread every prior report.
-
-At the final gate, review the integrated result against the **whole project/task goal, ethos/core principles, authoritative plan, and required verification**. Complete only when no task-relevant findings remain.
+At the final gate, judge the integrated result against the whole task goal, project ethos/core principles, authoritative plan, architecture/contracts, and required verification. Finish only with no unresolved task-relevant findings.
