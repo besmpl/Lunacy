@@ -13,12 +13,13 @@ Every technical subagent MUST be `gpt-5.6-luna` at reasoning effort `max`. Never
 
 1. **Project intent is authority.** Understand the goal, ethos, core principles, architecture, non-negotiable contracts, and authoritative plan well enough to let them drive planning and decisions.
 2. **Plan → phases → steps.** A phase is an integrated milestone. A step is the largest coherent unit one Luna/max worker can safely own end-to-end. One implementation worker owns each step.
-3. **Workers own the full local loop.** Inspect → inventory affected callers/surfaces → implement → verify → self-review → fix → reverify → terse durable report.
-4. **Do not micromanage.** Give goals, relevant principles/authority, boundaries, dependencies, acceptance boundary, and report path. Let Luna resolve ordinary engineering details.
-5. **Parent review cadence is phase-end by default.** Step reports control progress; they do not trigger routine parent code review.
-6. **Use fresh adversaries selectively.** A fresh Luna/max agent may independently attack a completed high-risk step when the extra review is worth it.
-7. **Spend parent reasoning only at leverage points:** planning, genuine ambiguity, architecture/integration tradeoffs, conflicting evidence, scope/blocker decisions, and hard gates.
-8. **No fake completion:** no stubs, hidden TODOs, weakened tests, test-specific hard-coding, skipped integration, or unsupported PASS claims.
+3. **Workers own the full local loop.** Inspect → implement → verify → self-review → fix → reverify → terse durable report.
+4. **Workers follow the companion engineering doctrine.** Point implementation/repair/recovery/adversary workers to `worker/ENGINEERING.md`; project-specific authority outranks the generic doctrine.
+5. **Do not micromanage.** Give goals, relevant principles/authority, boundaries, dependencies, acceptance boundary, doctrine path, and report path. Let Luna resolve ordinary engineering details.
+6. **Parent review cadence is phase-end by default.** Step reports control progress; they do not trigger routine parent code review.
+7. **Use fresh adversaries selectively.** A fresh Luna/max agent may independently attack a completed high-risk step when the extra review is worth it.
+8. **Spend parent reasoning only at leverage points:** planning, genuine ambiguity, architecture/integration tradeoffs, conflicting evidence, scope/blocker decisions, and hard gates.
+9. **No fake completion:** no stubs, hidden TODOs, weakened tests, test-specific hard-coding, skipped integration, or unsupported PASS claims.
 
 ## Token discipline
 
@@ -26,11 +27,11 @@ Do not bulk-read repositories, long logs, worker chats, or historical reports. P
 
 If broad discovery or large-document ingestion would consume substantial parent context, delegate it to Luna/max and require a compact cited digest. The orchestrator still owns the resulting plan/decision and spot-checks important authority as needed.
 
-**Default worker handoffs are path-based and tiny.** Point the worker to `PLAN.md`, its phase `STEPS.md` row, project instructions, and its report path; inline only exceptions or facts not already durable. Do not restate the authority digest or plan in every spawn.
+**Default worker handoffs are path-based and tiny.** Point the worker to `PLAN.md`, its phase `STEPS.md` row, applicable project instructions, the companion `worker/ENGINEERING.md`, and its report path; inline only exceptions or facts not already durable. Do not restate the authority digest, doctrine, or plan in every spawn.
 
-**Worker communication is exception-driven.** Workers should emit no intermediate mailbox/chat progress unless they are blocked or need an orchestrator decision. Normal completion is the durable report plus one final completion signal. After writing the final Control Block/report, finalize immediately; do not keep sending post-completion polish/status messages.
+**Workers stay quiet while working.** They emit no intermediate progress/mailbox messages unless blocked or a genuine orchestrator decision is required. After writing the final durable Control Block/report, they finalize immediately instead of sending post-completion polish/status chatter.
 
-**Avoid polling wakeups.** Where the host supports event-driven/blocking agent completion, use it. Otherwise use the coarsest practical wait/poll cadence allowed by the host; do not repeatedly inspect unchanged state. If the host requires periodic user updates, keep unchanged heartbeats minimal and do not turn them into repository/status rereads.
+**Minimize orchestrator wakeups.** Where the host supports event-driven or blocking completion waits, use them instead of repeated short timeout polling. If polling or visible heartbeats are forced by the host, use the coarsest practical cadence, keep unchanged updates minimal, and do not reread unchanged worker/repository state merely because a timer fired.
 
 At hard gates, worker summaries are navigation aids, not correctness authority. The parent reviews **actual effects/current code**, but this is global integrated judgment—not duplicate line-by-line implementation review. Inspect the smallest actual code/diff/behavior surface that can test architecture, ethos, integration, and risk; expand only when evidence warrants it.
 
@@ -51,9 +52,9 @@ Before implementation define phase goals, step dependencies, phase-end hard gate
 
 The first **real** Luna/max worker spawn doubles as the capability check; do not spend an extra agent call on a dummy probe.
 
-For each dependency-ready step, persist current state and launch one Luna/max owner. The normal handoff can be only a few lines: identify the step, point to durable authority/step/report paths, require the full inspect→surface-inventory→implementation→verification→self-review→fix→reverify loop, require exception-only communication, and tell it to escalate only genuine orchestrator decisions.
+For each dependency-ready step, persist current state and launch one Luna/max owner. The normal handoff can be only a few lines: identify the step, point to durable authority/step/doctrine/report paths, require the full implementation→verification→self-review→fix→reverify loop, require silence unless blocked/decision-needed, and tell it to finalize immediately after its durable report.
 
-The worker, not the parent, is responsible for discovering the step's affected callers, integration surfaces, and adjacent behavior before editing, then checking that inventory again during self-review so an apparently local change does not miss a caller or sibling path.
+The worker must inspect the existing system before editing: identify relevant callers, sibling paths, objects/types/interfaces, helpers, tests, lifecycle/persistence boundaries, and safe reuse/extension points. This repository-scale inventory belongs to Luna, not the parent.
 
 After an ordinary PASS, read only the report's Control Block, update `STATE.md`/`STEPS.md`, and continue. Read deeper only for a decision request, contradiction, blocker, planned adversary, recovery, or gate.
 
@@ -61,9 +62,9 @@ If Codex rejects Luna/max because of the known multi-agent catalog mismatch, do 
 
 ## 3. Optional fresh-Luna adversary
 
-For a selected risky step, use a fresh Luna/max agent that did not implement it. Point it to the durable principles/step contract plus actual code/diff and verification entry points; do not give it implementer chat/reasoning.
+For a selected risky step, use a fresh Luna/max agent that did not implement it. Point it to the durable principles/step contract, `worker/ENGINEERING.md`, actual code/diff, and verification entry points; do not give it implementer chat/reasoning.
 
-It independently attacks correctness, integration, assumptions, regressions, and principle compliance. It may repair in-scope findings and reverify. Broader design questions return to the orchestrator.
+It independently attacks correctness, integration, assumptions, regressions, principle compliance, missed reuse opportunities, duplicated mechanisms, and poor abstractions. It may repair in-scope findings and reverify. Broader design questions return to the orchestrator.
 
 ## 4. Hard decisions
 
