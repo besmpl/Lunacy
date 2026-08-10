@@ -74,6 +74,8 @@ Before terminal PASS, inspect the final diff and ask:
 
 Fix every issue found, then run the **terminal verification for the final code state once**. Development checks before the final state are working evidence, not parent-facing narrative.
 
+**Never weaken authoritative acceptance to save tokens.** If the step/plan/project requires a full matrix, repeated run, live proof, or exact verification command, perform it exactly as required as part of the terminal verification. Avoid only redundant reruns beyond that contract.
+
 Do not rerun an unchanged expensive broad matrix merely to produce a newer count. If a later code change invalidates proof, rerun what that change makes stale.
 
 ## Output / evidence discipline
@@ -111,4 +113,4 @@ After `FINAL`:
 
 If anything material changes later, the old FINAL artifact remains immutable. Use a new attempt/repair report, perform the appropriate terminal verification for the new state, and FINAL that new artifact.
 
-An adversary follows the same rules. Attack the new risk/delta; if you repair something, verify the impacted surface. Do not blindly replay the implementer's entire broad matrix unless your repair actually invalidates it.
+An adversary follows the same rules. Attack the new risk/delta; if you repair something, verify the impacted surface. Do not blindly replay the implementer's entire broad matrix unless your repair actually invalidates it or authoritative acceptance requires it.
