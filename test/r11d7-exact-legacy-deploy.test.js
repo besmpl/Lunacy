@@ -79,9 +79,11 @@ async function captureChild(target, manifestPath, snapshot, env = {}) {
   }
   if (!done) {
     await new Promise((resolveWait) => setTimeout(resolveWait, 20));
-    const source = join(evidence, `raw-${Date.now()}-${Math.random()}.json`); await writeFile(source, canonicalString({ ...snapshot, capturedAt: new Date().toISOString() }));
-    const bound = spawnSync(process.execPath, ['tools/bind-release-process-snapshot.mjs', '--release-manifest', manifestPath, '--snapshot', source], { cwd: repo, encoding: 'utf8' });
-    if (bound.status !== 0) { child.kill('SIGKILL'); await exited; throw new Error(bound.stderr); }
+    if (!done) {
+      const source = join(evidence, `raw-${Date.now()}-${Math.random()}.json`); await writeFile(source, canonicalString({ ...snapshot, capturedAt: new Date().toISOString() }));
+      const bound = spawnSync(process.execPath, ['tools/bind-release-process-snapshot.mjs', '--release-manifest', manifestPath, '--snapshot', source], { cwd: repo, encoding: 'utf8' });
+      if (bound.status !== 0) { child.kill('SIGKILL'); await exited; throw new Error(bound.stderr); }
+    }
   }
   return { ...await exited, stdout, stderr };
 }
@@ -140,4 +142,18 @@ test('exact predecessor route reuses crash recovery and converges from exact old
     const recovered = await runtimeFiles(join(target, 'runtime')); assert.equal(sha(Buffer.from(recovered.map((record) => `${record.path}\0${record.digest}`).join('\n'))), candidate.aggregate);
     assert.deepEqual((await readdir(target)).filter((name) => name.startsWith('.lunacy-runtime-')), []);
   }
+});
+
+test('foreign well-formed stale transaction is untouched and blocks before recovery', async () => {
+  const target = await prepareOldTarget('lunacy-r11d7-foreign-'); let item = await manifestFor(target, 'foreign-seed');
+  let result = await captureChild(target, item.path, { schema: 'lunacy-process-snapshot/v1', capturedAt: new Date().toISOString(), processes: [] }, { LUNACY_DEPLOY_CRASH_WINDOW: 'stage-verified' }); assert.equal(result.status, 97, result.stderr);
+  const markerPath = join(target, '.lunacy-runtime-deploy.json'); const transaction = JSON.parse(await readFile(markerPath, 'utf8'));
+  transaction.inventory[0].digest = transaction.inventory[0].digest === 'f'.repeat(64) ? 'e'.repeat(64) : 'f'.repeat(64);
+  transaction.aggregate = sha(Buffer.from(transaction.inventory.map((record) => `${record.path}\0${record.digest}`).join('\n')));
+  const foreignBytes = Buffer.from(`${canonicalString(transaction)}\n`); await writeFile(markerPath, foreignBytes);
+  const stagePath = join(target, transaction.stageName); const stageBefore = await runtimeFiles(stagePath);
+  item = await manifestFor(target, 'foreign-retry'); result = await captureChild(target, item.path, { schema: 'lunacy-process-snapshot/v1', capturedAt: new Date().toISOString(), processes: [] });
+  assert.notEqual(result.status, 0); assert.match(result.stderr, /stale deployment transaction is not bound/);
+  assert.deepEqual(await readFile(markerPath), foreignBytes); assert.deepEqual(await runtimeFiles(stagePath), stageBefore);
+  const old = await runtimeFiles(join(target, 'runtime')); assert.equal(sha(Buffer.from(old.map((record) => `${record.path}\0${record.digest}`).join('\n'))), predecessor.aggregate);
 });

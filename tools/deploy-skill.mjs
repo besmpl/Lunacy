@@ -1203,6 +1203,28 @@ async function readRestoreBundle(payloadArgument, inventoryArgument, aggregateAr
   return readDeploymentBundle(payloadArgument, inventoryArgument, aggregateArgument, { label: 'rollback', runtimeVersion: '0.2.12', bridgeVersion: '0.1.0' });
 }
 
+async function readExactLegacyDeployBundles(args, manifest) {
+  const [installed, candidate] = await Promise.all([
+    readRestoreBundle(args.payload, args.inventory, args.aggregate),
+    readDeploymentBundle(args.candidatePayload, args.candidateInventory, args.candidateAggregate, { label: 'candidate', runtimeVersion: '0.3.0', bridgeVersion: '0.2.0' }),
+  ]);
+  if (canonical(installed.identity) !== canonical(manifest.installedDeployment)) throw new Error('installed rollback identity differs from the release manifest');
+  if (canonical(candidate.identity) !== canonical(manifest.candidateDeployment)) throw new Error('preserved candidate identity differs from the release manifest');
+  return Object.freeze({ installed, candidate });
+}
+
+function assertExactLegacyRecoveryBinding(transaction, bundles) {
+  if (!transaction) return;
+  const candidateInventory = bundles.candidate.expectedInventory;
+  const installedInventory = bundles.installed.expectedInventory;
+  if (transaction.aggregate !== bundles.candidate.identity.inventoryAggregate
+    || canonical(transaction.inventory) !== canonical(candidateInventory)
+    || transaction.previousAggregate !== bundles.installed.identity.inventoryAggregate
+    || canonical(transaction.previousInventory) !== canonical(installedInventory)) {
+    throw new Error('stale deployment transaction is not bound to the exact predecessor and candidate');
+  }
+}
+
 function parseArgs(argv) {
   let target = process.env.LUNACY_SKILL_ROOT || defaultTarget; let check = false; let restore = false; let exactLegacyDeploy = false; let payload; let inventory; let aggregate; let candidatePayload; let candidateInventory; let candidateAggregate; let releaseManifest;
   for (let i = 0; i < argv.length; i += 1) {
@@ -1345,7 +1367,7 @@ function makeWrapper(expectedDigest, expectedFiles, expectedRuntimeVersion, expe
   ].join('\n');
 }
 
-async function executeOperation({ target, check, restore, exactLegacyDeploy, payload, inventory, aggregate, candidatePayload, candidateInventory, candidateAggregate, exactLegacyManifest }, targetLock) {
+async function executeOperation({ target, check, restore, exactLegacyDeploy, payload, inventory, aggregate, candidatePayload, candidateInventory, candidateAggregate, exactLegacyManifest, exactLegacyBundles }, targetLock) {
   // Complete any durable transaction left by a previous crash before taking
   // a new source snapshot.  Recovery touches only our marker/stage/backup
   // names and preserves every non-runtime skill-root path.
@@ -1355,12 +1377,8 @@ async function executeOperation({ target, check, restore, exactLegacyDeploy, pay
   await recoverTransaction(target);
   if (exactLegacyDeploy) {
     if (!exactLegacyManifest || exactLegacyManifest.operation !== 'deploy-exact-0.2.12') throw new Error('exact predecessor deployment manifest is absent');
-    const [installed, candidate] = await Promise.all([
-      readRestoreBundle(payload, inventory, aggregate),
-      readDeploymentBundle(candidatePayload, candidateInventory, candidateAggregate, { label: 'candidate', runtimeVersion: '0.3.0', bridgeVersion: '0.2.0' }),
-    ]);
-    if (canonical(installed.identity) !== canonical(exactLegacyManifest.installedDeployment)) throw new Error('installed rollback identity differs from the release manifest');
-    if (canonical(candidate.identity) !== canonical(exactLegacyManifest.candidateDeployment)) throw new Error('preserved candidate identity differs from the release manifest');
+    if (!exactLegacyBundles) throw new Error('exact predecessor deployment bundles are absent');
+    const { installed, candidate } = exactLegacyBundles;
     const runtimeTarget = join(target, 'runtime');
     const current = await verifyManagedTree(runtimeTarget, installed.expectedInventory, 'installed exact 0.2.12 tree', installed.identity.inventoryAggregate);
     if (current.aggregate !== installed.identity.inventoryAggregate) throw new Error('installed exact 0.2.12 aggregate drift');
@@ -1512,7 +1530,12 @@ async function main() {
       // Only the closed predecessor route adopts its own exact stale release
       // transaction before the fresh quiescence snapshot. Ordinary v1 keeps
       // treating any transaction residue as red.
-      if (args.exactLegacyDeploy) await recoverTransaction(args.target);
+      let exactLegacyBundles;
+      if (args.exactLegacyDeploy) {
+        exactLegacyBundles = await readExactLegacyDeployBundles(args, release.manifest);
+        assertExactLegacyRecoveryBinding(await readTransaction(args.target), exactLegacyBundles);
+        await recoverTransaction(args.target);
+      }
       const processSnapshot = await readProductionSnapshot(release.manifest.processSnapshotPath, ownership);
       const quiescenceInput = {
         installedTarget: args.target,
@@ -1529,7 +1552,7 @@ async function main() {
       };
       if (args.exactLegacyDeploy) await verifyExactLegacyDeployQuiescence(quiescenceInput);
       else await verifyReleaseQuiescence(quiescenceInput);
-      return await executeOperation({ ...args, exactLegacyManifest: args.exactLegacyDeploy ? release.manifest : undefined }, targetLock);
+      return await executeOperation({ ...args, exactLegacyManifest: args.exactLegacyDeploy ? release.manifest : undefined, exactLegacyBundles }, targetLock);
     } finally { await targetLock.release(); }
   });
 }
