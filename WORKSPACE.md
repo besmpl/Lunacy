@@ -95,7 +95,7 @@ Final gate: <whole-run standard>
 
 **PLAN is authority, not history.** After a phase passes, do not append its test matrices, hashes, repair narrative, or old residual inventories to PLAN. If completed-phase context remains useful, compress it to one line such as `P1 — PASS — gate: phases/p1/hard-gate-01.md`. The immutable gate/decisions own historical detail. Periodically remove superseded execution detail so every fresh resume pays only for current authority.
 
-For very large authority sets an intake Sol may create `intake.md`; the parent spot-checks it and owns the final plan. **`intake.md` is parent-facing compression, not a replacement dossier: target ≤80 lines / ~8 KB.** Put larger surveys/extracts under evidence and cite exact pointers.
+For very large authority sets an intake worker may create `intake.md`; the parent spot-checks it and owns the final plan. **`intake.md` is parent-facing compression, not a replacement dossier: target ≤80 lines / ~8 KB.** Put larger surveys/extracts under evidence and cite exact pointers.
 
 Plan verification ownership too: do not make every step/adversary/scout/parent rerun the same expensive global suite unless a later change genuinely invalidates earlier evidence. **Never omit verification required by authoritative project/plan acceptance; assign required proof to one clear layer and deduplicate only redundant proof beyond it.**
 
@@ -133,7 +133,7 @@ Before implementation of a new run, and after material ownership changes, inspec
 
 Prefer concurrency only for genuinely independent outcomes/surfaces/contracts. Prefer isolated worktrees/branches where available. Serialize/replan overlapping shared contracts, generated artifacts, unsafe mutable state, same-checkout races, or likely merge/integration cost that outweighs parallelism.
 
-Do not make the parent perform repository-scale conflict discovery. Sol validates deeper assumptions and escalates unexpected overlap before conflicting edits.
+Do not make the parent perform repository-scale conflict discovery. The routed worker validates deeper assumptions and escalates unexpected overlap before conflicting edits.
 
 ## STEPS.md
 
@@ -150,7 +150,7 @@ Gate: <phase standard>
 
 Statuses: `READY`, `ACTIVE`, `NEEDS-DECISION`, `REPAIR`, `DONE`, `BLOCKED`, `SUPERSEDED`.
 
-A step is the largest coherent unit one Sol can safely own. `DONE` means terminal local completion; phase acceptance still needs its gate.
+A step is the largest coherent unit one worker can safely own. `DONE` means terminal local completion; phase acceptance still needs its gate.
 
 ## Worker spawn / handoff
 
@@ -160,9 +160,17 @@ Use a fresh child context by default. When supported by the spawn API:
 fork_turns: "none"
 ```
 
-Any inheritance exception must have a specific reason recorded in run `DECISIONS.md`.
+Any inheritance exception must have a specific reason recorded in run `DECISIONS.md`. It may change only `fork_turns`; the selected model and reasoning effort remain explicit and unchanged. If the host cannot preserve that pair with limited inheritance, block.
 
-The parent chooses Sol reasoning effort per `SKILL.md`: **`high` normally; `max` only for a concrete hard-reasoning trigger.** No permanent effort column is required. If an otherwise ordinary-looking step uses `max`, a one-line rationale in the handoff is enough.
+The parent resolves the exact closed worker route per `SKILL.md`. Omission means `luna` (`gpt-5.6-luna` + `xhigh`); Luna may use a justified `max`; explicit `sol-high` is exactly `gpt-5.6-sol` + `high`. No other pair, normalization, ambient inference, fallback, or downgrade is allowed. Always pass `model` and `reasoning_effort` explicitly to `agents.spawn_agent`.
+
+Before every explicit Sol launch, append this canonical attempt binding to the run's `DECISIONS.md`:
+
+```text
+workerRoute: sol-high; phaseId: <id>; stepId: <id>; attemptEpoch: <n>
+```
+
+Resume the exact binding or block. A route change requires a fresh attempt and new authority. Luna `max` keeps its existing one-line justification; a permanent effort column is unnecessary.
 
 Default handoff:
 
@@ -306,7 +314,7 @@ Consolidate related contradictions discovered in the same bounded investigation 
 
 ## Adversary
 
-Use a fresh Sol adversary only for a named unusually risky surface, not by default for every step. Give it durable authority, engineering doctrine, actual code/diff, and verification entry points—not implementer chat.
+Use a fresh routed-worker adversary only for a named unusually risky surface, not by default for every step. Give it durable authority, engineering doctrine, actual code/diff, and verification entry points—not implementer chat.
 
 It attacks new assumptions/risks. If it repairs something, it verifies the impacted surface. It should not replay the entire implementer matrix unless its repair makes that broad evidence stale **or authoritative acceptance explicitly requires the repetition**.
 
@@ -363,7 +371,7 @@ For ordinary progress, read Control Blocks only. For a decision, read its decisi
 
 A full report read requires a named unresolved contradiction that cannot be settled from Control + brief + cited slices.
 
-If a single decision/gate needs more than **three substantive deep slices**, delegate fresh Sol compression or persist `STATE.md`/`Next action` and continue in fresh parent context. This is the mechanical context ceiling when exact token counters are unavailable.
+If a single decision/gate needs more than **three substantive deep slices**, delegate fresh routed-worker compression or persist `STATE.md`/`Next action` and continue in fresh parent context. This is the mechanical context ceiling when exact token counters are unavailable.
 
 Never estimate token usage. If the host exposes exact counters, record exact values when useful; otherwise `unavailable`.
 
@@ -412,6 +420,6 @@ Resolve the run first. Then read only:
 
 Do not replay worker chat, reread all reports, old decisions/gates, WORKSPACE, or planning doctrine unless current recovery/replanning specifically needs them.
 
-For interrupted ACTIVE attempts, reconcile immutable FINAL Control Blocks first. Incomplete attempts get new attempt/report paths and fresh Sol continuation workers against current state. Never turn the parent into a partial-change archaeologist.
+For interrupted ACTIVE attempts, reconcile immutable FINAL Control Blocks first. Incomplete attempts get new attempt/report paths and fresh routed continuation workers against current state. Never turn the parent into a partial-change archaeologist.
 
 Before known context compaction/restart, persist reality and one exact `Next action`. If the host exposes exact context/token counters, use them; otherwise rely on host pressure signals and the three-deep-read rule, never guessed usage.

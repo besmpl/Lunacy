@@ -71,6 +71,11 @@ phase/final boundaries, or a hard gate. It never parses Markdown to authorize
 work, creates a batch, retries an uncertain token, closes a gate, or adopts a
 plan.
 
+This Sol `codex exec` policy is private to managed runtime drive. The root
+`SKILL.md` direct/manual `agents.spawn_agent` choice between default Luna and
+explicit Sol/high does not enter this policy, change its schema or digest, or
+provide a fallback for it.
+
 After a bridge-process restart, drive performs one bounded reconciliation from
 the verified committed kernel state and exact-token immutable effect records.
 Missing, stale, malformed, or conflicting evidence remains fail-closed. The

@@ -1,19 +1,19 @@
 ---
 name: lunacy
-description: Execute a coding plan or task with Codex, GPT-5.6 Sol, or GPT-5.6 Terra as a token-frugal expert orchestrator and only GPT-5.6 Sol subagents at high or max reasoning. Preserve parent context for project intent, planning, hard decisions, and phase gates; delegate repository-heavy work end-to-end.
+description: Execute a coding plan or task with Codex, GPT-5.6 Sol, or GPT-5.6 Terra as a token-frugal expert orchestrator and explicitly routed GPT-5.6 Luna or Sol workers. Preserve parent context for project intent, planning, hard decisions, and phase gates; delegate repository-heavy work end-to-end.
 ---
 
 # Lunacy
 
-**Primary goal: minimize orchestrator context while preserving high-leverage judgment.** The parent owns global intent, architecture decisions, scheduling, and acceptance. Sol owns repository-heavy work.
+**Primary goal: minimize orchestrator context while preserving high-leverage judgment.** The parent owns global intent, architecture decisions, worker routing, scheduling, and acceptance. Workers own repository-heavy work.
 
-Every technical subagent MUST be `gpt-5.6-sol`. Reasoning effort is **`high` by default** and **`max` only when the orchestrator judges the extra reasoning worthwhile**. Never silently fall back to another model or below `high`.
+Worker routing is a closed choice: omitted route means Luna at `xhigh`; Luna may use a justified `max`; explicit `sol-high` means exactly GPT-5.6 Sol at `high`. Never silently fall back, downgrade, or substitute another pair.
 
 ## Invariants
 
 1. **Project intent is authority.** Goal, current user constraints, ethos, architecture, contracts, and authoritative plan drive decisions.
 2. **Prefer the simplest sound design.** Complexity must earn its cost. Reuse/extend sound mechanisms before inventing new ones.
-3. **Plan → phases → steps.** A step is the largest coherent unit one Sol worker can safely own; do not micro-split for agent count.
+3. **Plan → phases → steps.** A step is the largest coherent unit one worker can safely own; do not micro-split for agent count.
 4. **Multiple runs may coexist.** Each run lives under `Lunacy/runs/<run-id>/`; project-wide user memory lives at `Lunacy/PROJECT_NOTES.md`.
 5. **Workers get fresh context by default.** When the spawn API exposes `fork_turns`, use `fork_turns:"none"`. Do not inherit the parent conversation for convenience. Any exception requires a concise reason in run `DECISIONS.md`.
 6. **Workers own the full local loop.** Inspect → implement → verify → self-review → fix → terminal reverify → one immutable durable report.
@@ -45,20 +45,49 @@ cancellation, unsupported capability, phase/final boundaries, and hard gates.
 The existing Markdown/manual mode remains supported and is the truthful
 fallback when no conforming driver is bound.
 
-## Sol reasoning-effort routing
+## Worker route and effort selection
 
-Use **`high` as the normal worker setting**. It is appropriate for bounded implementation, repository inventory, migrations after the architecture is already decided, focused repairs, test work, read-only scouts, documentation, and most adversarial reviews.
+Resolve each worker route once from this exact closed table:
 
-Use **`max` selectively** when additional exploration/verification is plausibly worth the extra tokens, especially for:
+| Route | Model | Reasoning effort | Selection |
+|---|---|---|---|
+| `luna` | `gpt-5.6-luna` | `xhigh` | Default when the route is omitted |
+| `luna` | `gpt-5.6-luna` | `max` | Explicit, with the existing one-line justification |
+| `sol-high` | `gpt-5.6-sol` | `high` | Explicit only |
+
+No other model/effort pair is valid. Treat route names, model identifiers, and efforts as exact case-sensitive values: no aliases, whitespace normalization, partial declarations, extra route fields, cross-pairs, or ambient inference from the parent model, catalog, availability, or prior attempts. Reject an invalid selection before calling `agents.spawn_agent`.
+
+Always pass the selected pair explicitly at the host boundary. The canonical default and opt-in calls are:
+
+```text
+agents.spawn_agent({ model: "gpt-5.6-luna", reasoning_effort: "xhigh", fork_turns: "none", ... })
+agents.spawn_agent({ model: "gpt-5.6-sol", reasoning_effort: "high", fork_turns: "none", ... })
+```
+
+`fork_turns:"none"` remains the default. The existing reasoned inheritance exception is allowed only if the host accepts the same explicit `model` and `reasoning_effort` with the limited inheritance; otherwise block. Never inherit model or effort from ambient parent state.
+
+If the host rejects or cannot provide the selected pair, surface the failure and make **zero alternate spawn calls**. Sol never becomes Luna; Luna never becomes Sol; Luna `max` never becomes `xhigh`. Only a selected Luna route may use `references/CODEX_LUNA_COMPAT.md`, followed by a fresh-process retry of the unchanged pair.
+
+Before every explicit `sol-high` launch, append one canonical binding to `<run-root>/DECISIONS.md`:
+
+```text
+workerRoute: sol-high; phaseId: <id>; stepId: <id>; attemptEpoch: <n>
+```
+
+Resume that exact route binding or block. An intentional route change requires a fresh attempt and new authority; malformed or stale text never authorizes Sol. Luna `max` retains its existing durable justification.
+
+Use the route's normal effort (`xhigh` for Luna, `high` for Sol) for bounded implementation, repository inventory, migrations after the architecture is decided, focused repairs, test work, read-only scouts, documentation, and most adversarial reviews.
+
+Use Luna **`max` selectively** when additional exploration/verification is plausibly worth the extra tokens, especially for:
 
 - unresolved high-blast-radius architecture or contract decisions inside a worker-owned step;
 - subtle integrity/security/concurrency/replay/finality work where a missed invariant is expensive;
 - cross-cutting migrations with genuinely difficult interaction reasoning, not merely many files;
-- recovery from a materially failed `high` attempt where evidence shows the same hard reasoning boundary remains unresolved;
+- recovery from a materially failed Luna `xhigh` attempt where evidence shows the same hard reasoning boundary remains unresolved;
 - an unusually critical adversarial attack with a named failure mode;
 - explicit user/project authority requiring `max`.
 
-Do **not** choose `max` merely because a step is large, a report could be long, the role is called adversary/scout, or “more reasoning cannot hurt.” Do not escalate just to rerun deterministic verification. The parent may choose effort independently for each worker in a concurrent batch.
+Do **not** choose Luna `max` merely because a step is large, a report could be long, the role is called adversary/scout, or “more reasoning cannot hurt.” Do not escalate just to rerun deterministic verification. `sol-high` never escalates to `max`. The parent may choose routes independently for each worker in a concurrent batch.
 
 ## Hard context / communication limits
 
@@ -78,7 +107,7 @@ Do **not** choose `max` merely because a step is large, a report could be long, 
 
 **Parent reads slices, not dossiers.** Default parent inputs are run control files, terminal Control Blocks, concise decision briefs, and gate packs. Read only exact named source/report slices needed for the current decision. A full worker report may be read only to resolve a specific contradiction that cannot be resolved from its Control Block + cited slices.
 
-**Three-deep-read rule.** If one parent decision/gate would require more than three substantive detail/source slices, stop accumulating context: delegate a fresh Sol compression/decision brief or persist a checkpoint and continue in fresh parent context. Do not brute-force the repository into the parent.
+**Three-deep-read rule.** If one parent decision/gate would require more than three substantive detail/source slices, stop accumulating context: delegate a fresh routed-worker compression/decision brief or persist a checkpoint and continue in fresh parent context. Do not brute-force the repository into the parent.
 
 **No raw verification output in parent context.** Long output goes to a log/evidence file or temporary file. Parent-facing text contains command/check name, exit/result, counts when useful, and the first relevant red only.
 
@@ -105,11 +134,11 @@ For migration/replacement/removal work, coverage defaults to **every maintained 
 
 Record concise `Workspace` and `Ownership` in `STATE.md`. Before implementation and after ownership changes, inspect only other ACTIVE run states. Prefer isolated worktrees/branches where available; serialize/replan semantic or shared-state overlap.
 
-## 2. Execute with Sol
+## 2. Execute with routed workers
 
-The first real Sol spawn doubles as capability check; no dummy probe.
+The first real spawn on a selected route doubles as its capability check; no dummy probe.
 
-At each scheduling point, form the maximal safe concurrent batch from READY steps. Persist the active batch, choose `high` or `max` independently for each step using the routing rule above, then launch one Sol owner per step with fresh/no-turn inheritance when supported.
+At each scheduling point, form the maximal safe concurrent batch from READY steps. Persist the active batch, resolve each step's closed route and effort using the rule above, record every explicit `sol-high` attempt binding, then launch one owner per step with the exact selected pair and fresh/no-turn inheritance by default.
 
 The handoff points to:
 
@@ -120,7 +149,7 @@ The handoff points to:
 
 Require existing-system/reuse inventory first; full implement→verify→self-review→fix→terminal reverify; overlap/scope escalation before unauthorized edits; silence except `BLOCKED`/`DECISION_REQUIRED`/`FINAL`.
 
-Sol owns repository-scale caller/surface/reuse discovery. Unexpected active-step/run overlap stops before conflicting edits and returns to the parent for serialization/replanning.
+Workers own repository-scale caller/surface/reuse discovery. Unexpected active-step/run overlap stops before conflicting edits and returns to the parent for serialization/replanning.
 
 **Material step-scope expansion also stops before the out-of-contract edit even when no concurrent worker is involved.** The worker consolidates the newly discovered scope/contradictions into one decision brief. The parent then updates `STEPS.md`/`PLAN.md` or creates a repair/new step before implementation continues. Do not accumulate a chain of ad-hoc overlap/scope amendments while one supposedly bounded worker keeps expanding its write set.
 
@@ -153,17 +182,17 @@ Resolve genuine hard questions in this order:
 
 Keep the execution-time design bias active: **reuse/extend sound abstractions first; use OOP/polymorphism only when they simplify real current variation or repeated branching; otherwise prefer the simpler direct design and reject speculative machinery.**
 
-Record consequential decisions append-only, then delegate implementation consequences to Sol.
+Record consequential decisions append-only, then delegate implementation consequences to a routed worker.
 
 ## 5. Phase hard gate
 
 When required phase steps are terminal, stop normal execution and close a **write barrier**: no active writer may remain. Any later change to phase-owned code/evidence reopens the barrier and invalidates a gate pack produced against the older state.
 
-Use a fresh Sol gate scout only when it materially compresses parent work—for example multiple writers changed interacting surfaces, an adversary repaired integration, reports conflict, or the phase is genuinely high-risk/cross-cutting. Skip it for a single coherent low-risk phase.
+Use a fresh routed-worker gate scout only when it materially compresses parent work—for example multiple writers changed interacting surfaces, an adversary repaired integration, reports conflict, or the phase is genuinely high-risk/cross-cutting. Skip it for a single coherent low-risk phase.
 
 A scout starts only after the write barrier is closed, is read-only except for its small immutable gate pack, and must point the parent to exact source symbols/diff regions. It cannot approve the phase and cannot run broad verification suites.
 
-The parent then inspects targeted actual code/diff/behavior and performs the authoritative required gate proof plus only the additional bounded acceptance sample needed for integration judgment. Findings become new Sol repair attempts/steps; never reopen or edit finalized worker reports/gate packs. Re-close the barrier and re-gate with new numbered evidence after repair.
+The parent then inspects targeted actual code/diff/behavior and performs the authoritative required gate proof plus only the additional bounded acceptance sample needed for integration judgment. Findings become new routed-worker repair attempts/steps; never reopen or edit finalized worker reports/gate packs. Re-close the barrier and re-gate with new numbered evidence after repair.
 
 ## 6. Resume and finish
 

@@ -1,28 +1,34 @@
 # Lunacy
 
-A compact execution skill for using **Codex, GPT-5.6 Sol, or GPT-5.6 Terra as a token-frugal expert orchestrator** while **GPT-5.6 Sol owns repository-heavy work at dynamically selected `high` or `max` reasoning**.
+A compact execution skill for using **Codex, GPT-5.6 Sol, or GPT-5.6 Terra as a token-frugal expert orchestrator** while **explicitly routed GPT-5.6 Luna or Sol workers own repository-heavy work**.
 
 The core idea is simple: **spend expensive parent context on judgment, not repository ingestion, worker narration, repeated verification, or orchestration paperwork.**
 
-The parent understands project intent/architecture, plans work, resolves hard decisions, schedules safe parallelism, preserves user constraints, chooses worker effort, and owns phase gates. Sol workers inspect, implement, test, self-review, repair, and leave bounded durable evidence.
+The parent understands project intent/architecture, plans work, resolves hard decisions, schedules safe parallelism, preserves user constraints, chooses each worker route, and owns phase gates. Workers inspect, implement, test, self-review, repair, and leave bounded durable evidence.
 
 Both sides use a complexity budget: reuse/extend sound mechanisms first, use OOP/polymorphism where they model real variation, and reject speculative layers/frameworks/process ceremony.
 
-## Sol effort routing
+## Worker routing
 
-Lunacy uses **`high` by default**. `max` is an escalation, not the standard tax on every worker.
+Lunacy uses one closed route choice:
 
-Typical `high` work includes bounded implementation, repository surveys/inventory, migrations after design is settled, focused repairs, tests, documentation, read-only scouts, and most adversarial reviews.
+| Route | Model | Reasoning effort | Selection |
+|---|---|---|---|
+| `luna` | `gpt-5.6-luna` | `xhigh` | Default when omitted |
+| `luna` | `gpt-5.6-luna` | `max` | Explicit and justified |
+| `sol-high` | `gpt-5.6-sol` | `high` | Explicit only |
 
-The parent selects `max` when extra exploration has a concrete expected payoff: high-blast-radius architecture ambiguity, subtle integrity/security/concurrency/replay/finality invariants, genuinely difficult cross-cutting interaction reasoning, a failed `high` attempt stuck on the same hard reasoning boundary, a critical named adversarial risk, or explicit project/user authority.
+Only those exact case-sensitive pairs are valid. The parent resolves one route, passes both `model` and `reasoning_effort` explicitly to `agents.spawn_agent`, and uses `fork_turns:"none"` by default. It never infers from the parent model, catalog, availability, or an earlier attempt. An invalid or unavailable selection blocks with no alternate call, fallback, or downgrade.
 
-Step size or role name alone never justifies `max`. Different workers in the same concurrent batch may use different efforts.
+Before every explicit Sol launch, the parent records `workerRoute: sol-high; phaseId: <id>; stepId: <id>; attemptEpoch: <n>` in the run's `DECISIONS.md`. Resume preserves that exact binding or blocks; changing routes requires a fresh attempt and new authority. Luna `max` keeps its existing one-line hard-reasoning justification. Step size or role name alone never justifies it.
+
+The direct/manual worker route is separate from the private managed runtime drive. Managed drive remains its independently attested, closed Sol `codex exec` policy; the new direct choice does not change runtime schemas, policy digests, or driver behavior.
 
 ## Mechanical context controls
 
 Lunacy does not rely only on “be concise.” It enforces boundaries:
 
-- when supported, every Sol spawn uses `fork_turns: "none"` so workers do not inherit the parent conversation by default;
+- when supported, every worker spawn uses `fork_turns: "none"` so workers do not inherit the parent conversation by default; a reasoned inheritance exception must retain the same explicit model/effort or block;
 - worker mailbox messages are only `BLOCKED`, `DECISION_REQUIRED`, or `FINAL`, at most three short lines;
 - **the parent is event-driven too:** routine resume reads, migrations, worker launches, quiet waits, and timeout expiry are not user-facing status events;
 - while workers run, the parent enters a **quiescent wait**: use the longest supported `wait_agent` timeout, let mailbox/user activity wake it early, and treat a plain timeout as a non-event that immediately re-enters the wait;
@@ -52,7 +58,7 @@ compact PLAN.md
         ↓
 dependency-ready steps
    ↙       ↓       ↘
-  Sol      Sol      Sol    ← safe concurrency; high/max per step
+ worker  worker  worker   ← safe concurrency; explicit route per step
    ↘       ↓       ↙
  quiescent parent wait ← wakes only on mailbox/user event
         ↓
@@ -65,7 +71,7 @@ optional read-only gate scout if integration earns it
 orchestrator hard gate
 ```
 
-A phase is an integrated milestone. A step is the **largest coherent unit** one Sol worker can safely own end-to-end. Lunacy avoids micro-decomposition merely to create more agents.
+A phase is an integrated milestone. A step is the **largest coherent unit** one worker can safely own end-to-end. Lunacy avoids micro-decomposition merely to create more agents.
 
 If deeper inspection discovers material work outside the durable step contract, the worker stops before the out-of-contract edit and sends one consolidated decision brief. The parent updates the durable scope or creates a repair/new step before implementation continues. Lunacy does not accumulate chains of ad-hoc “overlap” amendments while one worker keeps expanding its write set.
 
@@ -92,7 +98,7 @@ This prevents gate scouts from racing moving artifacts and prevents “final” 
 
 ## Small parent decision surface
 
-When Sol encounters genuine ambiguity, it can perform deep repository research, but the parent receives a tiny decision brief: one question, authority, facts, options, recommendation, execution impact, and exact evidence pointers. Large surveys remain worker-side evidence.
+When a worker encounters genuine ambiguity, it can perform deep repository research, but the parent receives a tiny decision brief: one question, authority, facts, options, recommendation, execution impact, and exact evidence pointers. Large surveys remain worker-side evidence.
 
 Related contradictions discovered in one bounded investigation are consolidated before parent adjudication instead of accumulating serial amendments and chat wakeups.
 
@@ -140,17 +146,25 @@ Parent review normally happens at phase boundaries, not after every step. Gate s
 
 The parent inspects targeted actual code/diff/behavior and judges correctness, architecture, project ethos, integration risk, user constraints, and complexity proportionality.
 
-## Worker invariant
+## Direct worker examples
 
-Every technical subagent uses:
+Default Luna:
+
+```text
+model: gpt-5.6-luna
+reasoning_effort: xhigh
+fork_turns: "none"
+```
+
+Explicit Sol/high:
 
 ```text
 model: gpt-5.6-sol
-reasoning_effort: high   # default
-# or max when the orchestrator's routing rule justifies escalation
+reasoning_effort: high
+fork_turns: "none"
 ```
 
-There is no silent model fallback and no effort below `high`. The first real Sol worker spawn doubles as the capability check.
+There is no silent model fallback or effort downgrade. The first real spawn on a selected route doubles as its capability check. Only Luna may use the narrow [`CODEX_LUNA_COMPAT`](references/CODEX_LUNA_COMPAT.md) procedure, followed by a fresh-process retry of the unchanged Luna pair.
 
 ## Install
 
@@ -162,7 +176,7 @@ git clone https://github.com/frozenpepper/Lunacy.git ~/.agents/skills/lunacy
 ## Use
 
 ```text
-Use $lunacy for this task. Minimize parent context; plan phases/steps first and delegate repository-heavy work to Sol.
+Use $lunacy for this task. Minimize parent context; plan phases/steps first and delegate repository-heavy work through the default Luna route.
 ```
 
 Resume a named run when useful:
@@ -184,7 +198,8 @@ LICENSE                          Apache License 2.0 terms.
 SKILL.md                         Always-loaded orchestration protocol.
 orchestrator/PLANNING.md        Parent planning/reuse/OOP/YAGNI/effort/verification doctrine.
 WORKSPACE.md                     Multi-run state, immutable evidence, report/gate/decision limits.
-worker/ENGINEERING.md            Sol engineering + bounded output/terminal evidence doctrine.
+worker/ENGINEERING.md            Worker engineering + bounded output/terminal evidence doctrine.
+references/CODEX_LUNA_COMPAT.md Narrow Luna-only catalog compatibility procedure.
 README.md                        Human-facing overview.
 ```
 

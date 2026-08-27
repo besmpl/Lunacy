@@ -5,6 +5,11 @@ adapter. `tools/probe-codex-exec.mjs` is a capability probe, not a scheduler or
 a worker launcher. It never selects a Lunacy step and it never retries a
 failed command.
 
+This contract applies only to the managed runtime's fixed Sol `codex exec`
+boundary. Lunacy's direct/manual `agents.spawn_agent` worker-route choice is
+documented in the root `SKILL.md` and does not alter this probe, policy, or
+invocation.
+
 Set `NODE` to the absolute, attested Node executable used by the managed
 deployment; the launcher rejects ambient `PATH` Node resolution.
 
