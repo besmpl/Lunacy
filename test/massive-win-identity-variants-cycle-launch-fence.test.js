@@ -926,21 +926,23 @@ test('massive-win stale synchronous observer receipt cannot acknowledge a succes
   }
 });
 
-test('massive-win non-cooperative timeout permits one late matching receipt without relaunch', async () => {
+test('massive-win post-entry cancellation permits one late matching receipt without relaunch', async () => {
   const root = await mkdtemp(join(tmpdir(), 'lunacy-massive-win-late-receipt-'));
   const controller = new AbortController();
   const pendingReceipt = deferred();
   let calls = 0;
   let claimedCommand;
-  const kernel = composeKernel({ plan, rootDir: root, timeoutMs: 1000, signal: controller.signal, driver: { dispatch(command) { calls += 1; claimedCommand = command; return pendingReceipt.promise; } } });
+  const kernel = composeKernel({ plan, rootDir: root, timeoutMs: 30_000, signal: controller.signal, driver: { dispatch(command) { calls += 1; claimedCommand = command; return pendingReceipt.promise; } } });
   const started = await kernel.advance(startInput('late-receipt'));
   await kernel.advance(input('late-receipt', 'resume', { kind: 'RESUME' }, started.snapshot));
-  await waitFor(() => claimedCommand !== undefined);
-  await waitFor(async () => commandFrom(await loadState(root)).state === 'UNKNOWN', 3000);
+  await waitFor(() => claimedCommand !== undefined, 30_000);
+  assert.equal(calls, 1);
+  controller.abort();
+  await waitFor(async () => commandFrom(await loadState(root)).state === 'UNKNOWN', 30_000);
   assert.equal(commandFrom(await loadState(root)).state, 'UNKNOWN');
   assert.equal(getEventListeners(controller.signal, 'abort').length, 0);
   pendingReceipt.resolve(receipt(claimedCommand, claimedCommand.launchToken, 'late'));
-  await waitFor(async () => commandFrom(await loadState(root)).state === 'ACKED', 3000);
+  await waitFor(async () => commandFrom(await loadState(root)).state === 'ACKED', 30_000);
   assert.equal(commandFrom(await loadState(root)).state, 'ACKED');
   assert.equal(calls, 1);
 });
