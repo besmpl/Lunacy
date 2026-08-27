@@ -2,7 +2,7 @@ import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, readdir, rename, rm, rmdir, stat, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { canonicalString, digest } from '../dist/canonical.js';
@@ -11,7 +11,7 @@ import { CodexExecDriver } from '../dist/codex-exec-driver.js';
 import { drive } from '../dist/orchestration.js';
 import { verifyReleaseQuiescence } from '../dist/release-quiescence.js';
 import {
-  RELEASE_EXCLUSION_LOCK, acquireOwnedFileClaim, currentReleaseOwner,
+  RELEASE_EXCLUSION_LOCK, acquireOwnedFileClaim, currentReleaseOwner, tryAcquireWriterReclaimMarker,
 } from '../dist/release-admission.js';
 import { withReleaseExclusion } from '../dist/release-operation.js';
 import { FileArtifactStore } from '../dist/store.js';
@@ -81,7 +81,8 @@ test('release writer claim waits behind the shared reclaim marker without residu
   const item = await fixture();
   const writer = join(item.roots[0], '.kernel', '.writer.lock');
   const marker = `${writer}.reclaim`;
-  await mkdir(marker, { mode: 0o700 });
+  const markerClaim = await tryAcquireWriterReclaimMarker(marker, 'test writer reclaim marker');
+  assert.ok(markerClaim);
   let entered = false;
   const acquiring = withReleaseExclusion(
     { manifest: item.manifest, manifestDigest: item.manifestDigest, waitMs: 500 },
@@ -93,11 +94,30 @@ test('release writer claim waits behind the shared reclaim marker without residu
   );
   await sleep(25);
   assert.equal(entered, false);
-  await rmdir(marker);
+  await markerClaim.release();
   await acquiring;
   assert.equal(await exists(writer), false);
   assert.equal(await exists(marker), false);
   assert.deepEqual((await readdir(join(item.roots[0], '.kernel'))).filter((name) => name.startsWith('.writer.lock.new-')), []);
+
+  const crashedClaim = await tryAcquireWriterReclaimMarker(marker, 'test crashed writer reclaim marker');
+  assert.ok(crashedClaim);
+  const crashedOwner = JSON.parse(crashedClaim.bytes);
+  await crashedClaim.release();
+  crashedOwner.processStartedAt = `${crashedOwner.processStartedAt}-stale`;
+  await writeFile(marker, canonicalString(crashedOwner), { mode: 0o600 });
+  await withReleaseExclusion(
+    { manifest: item.manifest, manifestDigest: item.manifestDigest, waitMs: 500 },
+    async (ownership) => {
+      assert.equal(ownership.writerClaims.length, 1);
+      assert.equal(await readFile(writer, 'utf8'), ownership.writerClaims[0].bytes);
+    },
+  );
+  assert.equal(await exists(writer), false);
+  assert.equal(await exists(marker), false);
+  const terminal = await readdir(join(item.roots[0], '.kernel'));
+  assert.deepEqual(terminal.filter((name) => name.startsWith('.writer.lock.new-')), []);
+  assert.deepEqual(terminal.filter((name) => name.startsWith('.writer.lock.reclaim.new-')), []);
 });
 
 test('writer, drive, and newly created root cannot enter after release green', async () => {

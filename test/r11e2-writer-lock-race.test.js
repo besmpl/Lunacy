@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chmod, mkdir, mkdtemp, readFile, readdir, rm, rmdir, stat, unlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, readdir, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { canonicalString } from '../dist/canonical.js';
 import { drive } from '../dist/orchestration.js';
-import { withManagedLaunchAdmission } from '../dist/release-admission.js';
+import { tryAcquireWriterReclaimMarker, withManagedLaunchAdmission } from '../dist/release-admission.js';
 import { FileArtifactStore, isFileArtifactStoreAbort } from '../dist/store.js';
 
 async function initializeRun(root, runId) {
@@ -16,6 +16,25 @@ async function initializeRun(root, runId) {
     driver: { dispatch() { throw new Error('must not launch'); } },
     maxTransitions: 1,
   });
+}
+
+async function leaveStaleReclaimMarker(marker) {
+  const claim = await tryAcquireWriterReclaimMarker(marker, 'test writer reclaim marker');
+  assert.ok(claim);
+  const owner = JSON.parse(claim.bytes);
+  await claim.release();
+  owner.processStartedAt = `${owner.processStartedAt}-stale`;
+  const bytes = canonicalString(owner);
+  await writeFile(marker, bytes, { mode: 0o600 });
+  return bytes;
+}
+
+async function assertNoWriterResidue(kernel) {
+  const entries = await readdir(kernel);
+  assert.equal(entries.includes('.writer.lock'), false);
+  assert.equal(entries.includes('.writer.lock.reclaim'), false);
+  assert.deepEqual(entries.filter((name) => name.startsWith('.writer.lock.new-')), []);
+  assert.deepEqual(entries.filter((name) => name.startsWith('.writer.lock.reclaim.new-')), []);
 }
 
 async function assertBoundedContendedOwner(root, ownerBytes) {
@@ -104,7 +123,8 @@ test('managed launch claim may disappear between writer-lock trust probes', asyn
     FileArtifactStore.prototype.assertRegular = originalAssertRegular;
     await writeFile(lock, '{}', { mode: 0o600 });
     await chmod(lock, 0o666);
-    await mkdir(`${lock}.reclaim`, { mode: 0o700 });
+    const markerClaim = await tryAcquireWriterReclaimMarker(`${lock}.reclaim`, 'test writer reclaim marker');
+    assert.ok(markerClaim);
     await assert.rejects(
       () => new FileArtifactStore(root).load(),
       /ManifestMismatch: writer lock is group\/world-writable/,
@@ -114,7 +134,7 @@ test('managed launch claim may disappear between writer-lock trust probes', asyn
     const afterUnsafe = await readdir(kernel);
     assert.equal(afterUnsafe.includes('.writer.lock.reclaim'), true);
     assert.deepEqual(afterUnsafe.filter((name) => name.startsWith('.writer.lock.new-')), []);
-    await rmdir(`${lock}.reclaim`);
+    await markerClaim.release();
   } finally {
     FileArtifactStore.prototype.assertRegular = originalAssertRegular;
     releaseLaunch?.();
@@ -153,7 +173,8 @@ test('live managed owner outlives the legacy poll cap and fake deadline', async 
     });
     await entered;
     assert.equal((await stat(lock)).isFile(), true);
-    await mkdir(`${lock}.reclaim`, { mode: 0o700 });
+    const markerClaim = await tryAcquireWriterReclaimMarker(`${lock}.reclaim`, 'test writer reclaim marker');
+    assert.ok(markerClaim);
 
     let polls = 0;
     let fakeNow = originalDateNow();
@@ -168,7 +189,7 @@ test('live managed owner outlives the legacy poll cap and fake deadline', async 
       polls += 1;
       if (polls === 1) fakeNow += 1_000_000;
       if (polls === 501) {
-        await rmdir(`${lock}.reclaim`);
+        await markerClaim.release();
         releaseLaunch();
         await admittedLaunch;
       }
@@ -196,7 +217,7 @@ test('live managed owner outlives the legacy poll cap and fake deadline', async 
     await admittedLaunch?.catch(() => undefined);
     await chmod(lock, 0o600).catch(() => undefined);
     await unlink(lock).catch(() => undefined);
-    await rmdir(`${lock}.reclaim`).catch(() => undefined);
+    await unlink(`${lock}.reclaim`).catch(() => undefined);
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -220,6 +241,157 @@ test('managed owner with mismatched current-process start is reclaimed as stale'
     assert.equal(entries.includes('.writer.lock.reclaim'), false);
     assert.deepEqual(entries.filter((name) => name.startsWith('.writer.lock.new-')), []);
   } finally {
+    await unlink(lock).catch(() => undefined);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('crashed stale reclaim markers recover with no lock and preserve a live replacement lock', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'lunacy-r11e2-writer-marker-crash-'));
+  const kernel = join(root, '.kernel');
+  const lock = join(kernel, '.writer.lock');
+  const marker = `${lock}.reclaim`;
+  let releaseManaged;
+  let admitted;
+  try {
+    await initializeRun(root, 'r11e2-writer-marker-crash');
+
+    await leaveStaleReclaimMarker(marker);
+    const first = await new FileArtifactStore(root).load();
+    assert.ok(first.state);
+    await assertNoWriterResidue(kernel);
+
+    await leaveStaleReclaimMarker(marker);
+    await withManagedLaunchAdmission(root, undefined, async () => {
+      assert.equal((await stat(lock)).isFile(), true);
+    });
+    await assertNoWriterResidue(kernel);
+
+    let managedEntered;
+    const entered = new Promise((resolve) => { managedEntered = resolve; });
+    const gate = new Promise((resolve) => { releaseManaged = resolve; });
+    admitted = withManagedLaunchAdmission(root, undefined, async () => {
+      managedEntered();
+      await gate;
+    });
+    await entered;
+    const replacementBytes = await readFile(lock, 'utf8');
+    const replacementIdentity = await stat(lock);
+    await leaveStaleReclaimMarker(marker);
+    const loading = new FileArtifactStore(root).load();
+    while (await stat(marker).then(() => true, () => false)) await new Promise((resolve) => setTimeout(resolve, 1));
+    const heldIdentity = await stat(lock);
+    assert.equal(heldIdentity.dev, replacementIdentity.dev);
+    assert.equal(heldIdentity.ino, replacementIdentity.ino);
+    assert.equal(await readFile(lock, 'utf8'), replacementBytes);
+    releaseManaged();
+    await admitted;
+    assert.ok((await loading).state);
+    await assertNoWriterResidue(kernel);
+  } finally {
+    releaseManaged?.();
+    await admitted?.catch(() => undefined);
+    await unlink(marker).catch(() => undefined);
+    await unlink(lock).catch(() => undefined);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('unknown reclaim-marker evidence is bounded and cannot authorize lock mutation', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'lunacy-r11e2-writer-marker-unknown-'));
+  const kernel = join(root, '.kernel');
+  const lock = join(kernel, '.writer.lock');
+  const marker = `${lock}.reclaim`;
+  const originalKill = process.kill;
+  const originalSetTimeout = globalThis.setTimeout;
+  try {
+    await initializeRun(root, 'r11e2-writer-marker-unknown');
+    const claim = await tryAcquireWriterReclaimMarker(marker, 'test writer reclaim marker');
+    assert.ok(claim);
+    const owner = JSON.parse(claim.bytes);
+    await claim.release();
+    const unknownPid = process.pid + 100_000;
+    owner.pid = unknownPid;
+    owner.processStartedAt = 'unknown-start';
+    const bytes = canonicalString(owner);
+    await writeFile(marker, bytes, { mode: 0o600 });
+    const identity = await stat(marker);
+    let probes = 0;
+    process.kill = function (candidate, ...args) {
+      if (candidate === unknownPid) {
+        probes += 1;
+        const error = new Error('process evidence unavailable');
+        error.code = 'EACCES';
+        throw error;
+      }
+      return originalKill.call(this, candidate, ...args);
+    };
+    globalThis.setTimeout = (callback, milliseconds, ...args) => originalSetTimeout(callback, milliseconds === 5 ? 0 : milliseconds, ...args);
+    await assert.rejects(() => new FileArtifactStore(root).load(), /concurrent commit fence timeout/);
+    assert.ok(probes > 0);
+    const retained = await stat(marker);
+    assert.equal(retained.dev, identity.dev);
+    assert.equal(retained.ino, identity.ino);
+    assert.equal(await readFile(marker, 'utf8'), bytes);
+    assert.equal(await stat(lock).then(() => true, () => false), false);
+    process.kill = originalKill;
+    globalThis.setTimeout = originalSetTimeout;
+    await unlink(marker);
+    assert.ok((await new FileArtifactStore(root).load()).state);
+    await assertNoWriterResidue(kernel);
+  } finally {
+    process.kill = originalKill;
+    globalThis.setTimeout = originalSetTimeout;
+    await unlink(marker).catch(() => undefined);
+    await unlink(lock).catch(() => undefined);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('stale-marker cleanup never removes a live replacement marker', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'lunacy-r11e2-writer-marker-replaced-'));
+  const kernel = join(root, '.kernel');
+  const lock = join(kernel, '.writer.lock');
+  const marker = `${lock}.reclaim`;
+  const store = new FileArtifactStore(root);
+  const originalRemove = FileArtifactStore.prototype.removeStaleWriterReclaimMarker;
+  let replacementClaim;
+  let replacementInstalled;
+  const installed = new Promise((resolve) => { replacementInstalled = resolve; });
+  let loading;
+  try {
+    await initializeRun(root, 'r11e2-writer-marker-replaced');
+    await leaveStaleReclaimMarker(marker);
+    let replaced = false;
+    FileArtifactStore.prototype.removeStaleWriterReclaimMarker = async function (observation) {
+      if (this === store && !replaced) {
+        replaced = true;
+        await unlink(marker);
+        replacementClaim = await tryAcquireWriterReclaimMarker(marker, 'replacement writer reclaim marker');
+        assert.ok(replacementClaim);
+        replacementInstalled();
+      }
+      const removed = await originalRemove.call(this, observation);
+      if (this === store && replaced) assert.equal(removed, false);
+      return removed;
+    };
+    loading = store.load();
+    await installed;
+    const bytes = await readFile(marker, 'utf8');
+    const identity = await stat(marker);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const retained = await stat(marker);
+    assert.equal(retained.dev, identity.dev);
+    assert.equal(retained.ino, identity.ino);
+    assert.equal(await readFile(marker, 'utf8'), bytes);
+    await replacementClaim.release();
+    assert.ok((await loading).state);
+    await assertNoWriterResidue(kernel);
+  } finally {
+    FileArtifactStore.prototype.removeStaleWriterReclaimMarker = originalRemove;
+    await replacementClaim?.release().catch(() => undefined);
+    await loading?.catch(() => undefined);
+    await unlink(marker).catch(() => undefined);
     await unlink(lock).catch(() => undefined);
     await rm(root, { recursive: true, force: true });
   }
@@ -338,7 +510,7 @@ test('stale reclaimer cannot unlink a managed replacement admitted behind its ma
     };
     storeLoad = store.load();
     await staleClassified;
-    assert.equal((await stat(`${lock}.reclaim`)).isDirectory(), true);
+    assert.equal((await stat(`${lock}.reclaim`)).isFile(), true);
 
     let managedEntered;
     const entered = new Promise((resolve) => { managedEntered = resolve; });
@@ -382,7 +554,7 @@ test('stale reclaimer cannot unlink a managed replacement admitted behind its ma
     releaseManaged?.();
     await Promise.allSettled([storeLoad, admitted].filter(Boolean));
     await unlink(lock).catch(() => undefined);
-    await rmdir(`${lock}.reclaim`).catch(() => undefined);
+    await unlink(`${lock}.reclaim`).catch(() => undefined);
     await rm(root, { recursive: true, force: true });
   }
 });

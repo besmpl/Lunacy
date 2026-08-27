@@ -7,7 +7,15 @@ import { canonicalString, digest, identityKey, parseCanonical } from './canonica
 import { validateDependencyTopology } from './dependency.js';
 import { CURRENT_BYTE_CEILING, JOURNAL_BYTE_CEILING, JOURNAL_EVENT_CEILING, MANAGED_METADATA_BYTE_CEILING, READ_ONLY_STATE_BYTE_CEILING } from './limits.js';
 import { assertStableIdentity, ensurePrivateDirectory, filesystemIdentity, inspectTrustedPath, sameFilesystemIdentity, trustedIdentity, type FilesystemIdentity } from './filesystem.js';
-import { assertReleaseAdmissionOpen, managedLaunchOwnerLiveness } from './release-admission.js';
+import {
+  assertReleaseAdmissionOpen,
+  inspectWriterReclaimMarker,
+  managedLaunchOwnerLiveness,
+  removeStaleWriterReclaimMarker,
+  tryAcquireWriterReclaimMarker,
+  type WriterReclaimMarkerClaim,
+  type WriterReclaimMarkerObservation,
+} from './release-admission.js';
 
 export type StoreSnapshot = { state: MachineState | undefined; generation: number };
 
@@ -947,15 +955,28 @@ export class FileArtifactStore implements ArtifactStore {
     }
   }
 
-  private async writerReclaimMarkerPresent(): Promise<boolean> {
-    const marker = `${this.lockPath}.reclaim`;
-    let markerStat;
-    try { markerStat = await fs.lstat(marker); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error; }
-    if (markerStat.isSymbolicLink() || !markerStat.isDirectory()) throw new Error('ManifestMismatch: writer lock reclaim marker is not a directory');
-    try { await this.assertDirectory(marker, 'writer lock reclaim marker'); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error; }
-    return true;
+  private async inspectWriterReclaimMarker(): Promise<WriterReclaimMarkerObservation> {
+    try { return await inspectWriterReclaimMarker(`${this.lockPath}.reclaim`, 'writer lock reclaim marker'); }
+    catch (error) {
+      const message = (error as Error).message.replace(/^ReleaseExclusion:\s*/, '').replace(/^FilesystemTrust:\s*/, '');
+      throw new Error(`ManifestMismatch: ${message}`);
+    }
+  }
+
+  private async removeStaleWriterReclaimMarker(observation: WriterReclaimMarkerObservation): Promise<boolean> {
+    try { return await removeStaleWriterReclaimMarker(`${this.lockPath}.reclaim`, observation, 'writer lock reclaim marker'); }
+    catch (error) {
+      const message = (error as Error).message.replace(/^ReleaseExclusion:\s*/, '').replace(/^FilesystemTrust:\s*/, '');
+      throw new Error(`ManifestMismatch: ${message}`);
+    }
+  }
+
+  private async tryAcquireWriterReclaimMarker(): Promise<WriterReclaimMarkerClaim | undefined> {
+    try { return await tryAcquireWriterReclaimMarker(`${this.lockPath}.reclaim`, 'writer lock reclaim marker'); }
+    catch (error) {
+      const message = (error as Error).message.replace(/^ReleaseExclusion:\s*/, '').replace(/^FilesystemTrust:\s*/, '');
+      throw new Error(`ManifestMismatch: ${message}`);
+    }
   }
 
   private async classifyFenceOwner(): Promise<FenceOwnerState> {
@@ -1018,14 +1039,27 @@ export class FileArtifactStore implements ArtifactStore {
   }
 
   private async reclaimFence(): Promise<FenceReclaimResult> {
-    const marker = `${this.lockPath}.reclaim`;
-    try { await fs.mkdir(marker, { mode: 0o700 }); }
-    catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-      if (!await this.writerReclaimMarkerPresent()) return 'RETRY';
+    const observedMarker = await this.inspectWriterReclaimMarker();
+    if (observedMarker.state !== 'ABSENT') {
+      if (observedMarker.state === 'STALE') {
+        await this.removeStaleWriterReclaimMarker(observedMarker);
+        return 'RETRY';
+      }
       // A marker loser has no mutation authority. It may still read the lock
       // through the full trust boundary so a verified live owner is not charged
       // against the bounded reclaimer-contention budget.
+      const owner = await this.classifyFenceOwner();
+      if (owner === 'RETRY' || owner === 'LIVE') return owner;
+      return 'CONTENDED';
+    }
+    const markerClaim = await this.tryAcquireWriterReclaimMarker();
+    if (!markerClaim) {
+      const marker = await this.inspectWriterReclaimMarker();
+      if (marker.state === 'ABSENT') return 'RETRY';
+      if (marker.state === 'STALE') {
+        await this.removeStaleWriterReclaimMarker(marker);
+        return 'RETRY';
+      }
       const owner = await this.classifyFenceOwner();
       if (owner === 'RETRY' || owner === 'LIVE') return owner;
       return 'CONTENDED';
@@ -1035,8 +1069,7 @@ export class FileArtifactStore implements ArtifactStore {
       if (owner === 'RETRY' || owner === 'LIVE' || owner === 'CONTENDED') return owner;
       return await this.unlinkClassifiedStaleFence();
     } finally {
-      await fs.rmdir(marker).catch(() => undefined);
-      await this.fsyncDir(this.kernelDir).catch(() => undefined);
+      await markerClaim.release();
     }
   }
 
@@ -1045,7 +1078,8 @@ export class FileArtifactStore implements ArtifactStore {
     let contendedPolls = 0;
     while (true) {
       throwIfFileStoreAborted(signal);
-      if (await this.writerReclaimMarkerPresent()) {
+      const existingMarker = await this.inspectWriterReclaimMarker();
+      if (existingMarker.state !== 'ABSENT') {
         const reclaim = await this.reclaimFence();
         throwIfFileStoreAborted(signal);
         if (reclaim === 'LIVE') {
@@ -1060,11 +1094,12 @@ export class FileArtifactStore implements ArtifactStore {
       }
       if (await this.createExclusiveFence(owner)) {
         this.fenceOwner = owner;
-        let markerAppeared: boolean;
-        try { markerAppeared = await this.writerReclaimMarkerPresent(); }
+        let markerAppeared: WriterReclaimMarkerObservation;
+        try { markerAppeared = await this.inspectWriterReclaimMarker(); }
         catch (error) { await this.releaseFence(); throw error; }
-        if (markerAppeared) {
+        if (markerAppeared.state !== 'ABSENT') {
           await this.releaseFence();
+          if (markerAppeared.state === 'STALE') await this.removeStaleWriterReclaimMarker(markerAppeared);
           contendedPolls += 1;
           await sleep(FENCE_POLL_MS, signal);
           if (contendedPolls >= MAX_FENCE_RECLAIM_CONTENTION_POLLS) break;

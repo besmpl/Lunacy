@@ -13,6 +13,7 @@ const MANIFEST_V1_SCHEMA = 'lunacy-release-operation/v1';
 const MANIFEST_V2_SCHEMA = 'lunacy-release-operation/v2';
 const DEPLOYMENT_IDENTITY_SCHEMA = 'lunacy-deployment-identity/v1';
 const OWNER_SCHEMA = 'lunacy-release-owner/v1';
+const WRITER_RECLAIM_OWNER_SCHEMA = 'lunacy-writer-reclaim-owner/v1';
 const MAX_MANIFEST_BYTES = 1024 * 1024;
 const MAX_DISCOVERY_DIRECTORIES = 65_536;
 const MAX_DISCOVERY_DEPTH = 64;
@@ -64,6 +65,21 @@ export type OwnedFileClaim = Readonly<{
   path: string;
   bytes: string;
   owner: ReleaseOwner;
+  release(): Promise<void>;
+}>;
+type WriterReclaimOwner = Readonly<{
+  schema: typeof WRITER_RECLAIM_OWNER_SCHEMA;
+  id: string;
+  pid: number;
+  processStartedAt: string;
+  acquiredAt: string;
+}>;
+export type WriterReclaimMarkerObservation =
+  | Readonly<{ state: 'ABSENT' | 'LIVE' | 'CONTENDED' }>
+  | Readonly<{ state: 'STALE'; text: string; identity: { dev: string; ino: string } }>;
+export type WriterReclaimMarkerClaim = Readonly<{
+  path: string;
+  bytes: string;
   release(): Promise<void>;
 }>;
 type ManagedLaunchOwnerState = 'LIVE' | 'STALE' | 'CONTENDED';
@@ -233,6 +249,103 @@ async function unlinkExact(path: string, expectedText: string, expectedIdentity:
   await syncDirectory(directory, `${label} parent`);
 }
 
+function parseWriterReclaimOwner(text: string): WriterReclaimOwner | undefined {
+  let value: unknown;
+  try { value = parseCanonical(text); }
+  catch { return undefined; }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const object = value as Record<string, unknown>;
+  const keys = Object.keys(object).sort(stableCompare);
+  const expected = ['schema', 'id', 'pid', 'processStartedAt', 'acquiredAt'].sort(stableCompare);
+  if (keys.length !== expected.length || keys.some((key, index) => key !== expected[index])) return undefined;
+  if (object.schema !== WRITER_RECLAIM_OWNER_SCHEMA || typeof object.id !== 'string' || !UUID.test(object.id)
+    || !Number.isSafeInteger(object.pid) || (object.pid as number) <= 0 || (object.pid as number) > MAX_PROCESS_ID
+    || typeof object.processStartedAt !== 'string' || object.processStartedAt.length === 0
+    || typeof object.acquiredAt !== 'string' || Number.isNaN(Date.parse(object.acquiredAt))) return undefined;
+  const owner = Object.freeze(object as WriterReclaimOwner);
+  return canonicalString(owner) === text ? owner : undefined;
+}
+
+/** Inspect the private shared writer-reclaim marker without granting mutation
+ * authority to malformed records or owners whose liveness cannot be proven. */
+export async function inspectWriterReclaimMarker(path: string, label: string): Promise<WriterReclaimMarkerObservation> {
+  let observed: Awaited<ReturnType<typeof readExact>>;
+  try { observed = await readExact(path, label); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return Object.freeze({ state: 'ABSENT' });
+    if ((error as Error).message.endsWith('changed during read')) return Object.freeze({ state: 'CONTENDED' });
+    throw error;
+  }
+  const owner = parseWriterReclaimOwner(observed.text);
+  if (!owner) return Object.freeze({ state: 'CONTENDED' });
+  const started = processStart(owner.pid);
+  if (started === null) return Object.freeze({ state: 'CONTENDED' });
+  if (started === owner.processStartedAt) return Object.freeze({ state: 'LIVE' });
+  return Object.freeze({ state: 'STALE', text: observed.text, identity: observed.identity });
+}
+
+/** Remove only the exact stale marker classified by inspectWriterReclaimMarker.
+ * A missing or replaced marker is an ordinary lost race, not authority to
+ * remove the replacement. */
+export async function removeStaleWriterReclaimMarker(path: string, observation: WriterReclaimMarkerObservation, label: string): Promise<boolean> {
+  if (observation.state !== 'STALE') return false;
+  try { await unlinkExact(path, observation.text, observation.identity, dirname(path), label); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT' || (error as Error).message.endsWith('ownership changed') || (error as Error).message.endsWith('changed during read')) return false;
+    throw error;
+  }
+  return true;
+}
+
+/** Publish an owner-bound marker atomically. A crash can leave either no
+ * marker or one complete record whose exact process start can later be
+ * classified; an empty marker namespace is never visible. */
+export async function tryAcquireWriterReclaimMarker(path: string, label: string): Promise<WriterReclaimMarkerClaim | undefined> {
+  const canonical = canonicalPath(path, label);
+  const directory = dirname(canonical);
+  const processStartedAt = processStart(process.pid);
+  if (!processStartedAt) fail(`${label} current process start evidence is unavailable`);
+  const owner: WriterReclaimOwner = Object.freeze({
+    schema: WRITER_RECLAIM_OWNER_SCHEMA,
+    id: randomUUID(),
+    pid: process.pid,
+    processStartedAt,
+    acquiredAt: new Date().toISOString(),
+  });
+  const bytes = canonicalString(owner);
+  const temporary = `${canonical}.new-${process.pid}-${randomUUID()}`;
+  let handle;
+  let identity: { dev: string; ino: string } | undefined;
+  let linked = false;
+  try {
+    handle = await fs.open(temporary, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_NOFOLLOW, 0o600);
+    await handle.writeFile(bytes, 'utf8');
+    await handle.sync();
+    const stat = await handle.stat();
+    identity = Object.freeze({ dev: String(stat.dev), ino: String(stat.ino) });
+    await handle.close(); handle = undefined;
+    try { await fs.link(temporary, canonical); linked = true; }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'EEXIST') return undefined; throw error; }
+    await syncDirectory(directory, `${label} parent`);
+  } catch (error) {
+    if (linked && identity) await unlinkExact(canonical, bytes, identity, directory, label).catch(() => undefined);
+    throw error;
+  } finally {
+    await handle?.close().catch(() => undefined);
+    await fs.unlink(temporary).catch(() => undefined);
+  }
+  let released = false;
+  return Object.freeze({
+    path: canonical,
+    bytes,
+    async release(): Promise<void> {
+      if (released) return;
+      await unlinkExact(canonical, bytes, identity!, directory, label);
+      released = true;
+    },
+  });
+}
+
 export async function acquireOwnedFileClaim(path: string, owner: ReleaseOwner, options: OwnedFileClaimOptions): Promise<OwnedFileClaim> {
   const canonical = canonicalPath(path, options.label);
   const directory = dirname(canonical);
@@ -242,12 +355,9 @@ export async function acquireOwnedFileClaim(path: string, owner: ReleaseOwner, o
   const bytes = canonicalString(owner);
   const deadline = Date.now() + options.waitMs;
   const reclaimMarker = options.writerReclaimProtocol ? `${canonical}.reclaim` : undefined;
-  const markerPresent = async (): Promise<boolean> => {
-    if (!reclaimMarker) return false;
-    const marker = await inspectTrustedPath(reclaimMarker, `${options.label} reclaim marker`, { allowMissing: true, surface: true, kind: 'directory' })
-      .catch((error) => fail(`${options.label} reclaim marker is unsafe: ${(error as Error).message}`));
-    return marker !== undefined;
-  };
+  const inspectMarker = async (): Promise<WriterReclaimMarkerObservation> => reclaimMarker
+    ? inspectWriterReclaimMarker(reclaimMarker, `${options.label} reclaim marker`)
+    : Object.freeze({ state: 'ABSENT' });
   const waitForContention = async (): Promise<void> => {
     if (Date.now() >= deadline) fail(`${options.label} is busy`);
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 5));
@@ -285,17 +395,29 @@ export async function acquireOwnedFileClaim(path: string, owner: ReleaseOwner, o
   };
   while (true) {
     if (options.signal?.aborted) { const error = new Error(`${options.label} acquisition cancelled`); error.name = 'AbortError'; throw error; }
-    if (await markerPresent()) { await observeExisting(); await waitForContention(); continue; }
+    const existingMarker = await inspectMarker();
+    if (existingMarker.state !== 'ABSENT') {
+      if (existingMarker.state === 'STALE') {
+        await removeStaleWriterReclaimMarker(reclaimMarker!, existingMarker, `${options.label} reclaim marker`);
+        continue;
+      }
+      await observeExisting(); await waitForContention(); continue;
+    }
     let handle;
     try { handle = await fs.open(canonical, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_NOFOLLOW, 0o600); }
     catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
       if (options.reclaimStaleReleaseOwner) {
-        let ownsMarker = false;
+        let markerClaim: WriterReclaimMarkerClaim | undefined;
         if (reclaimMarker) {
-          try { await fs.mkdir(reclaimMarker, { mode: 0o700 }); ownsMarker = true; }
-          catch (markerError) {
-            if ((markerError as NodeJS.ErrnoException).code !== 'EEXIST') throw markerError;
+          markerClaim = await tryAcquireWriterReclaimMarker(reclaimMarker, `${options.label} reclaim marker`);
+          if (!markerClaim) {
+            const marker = await inspectMarker();
+            if (marker.state === 'ABSENT') continue;
+            if (marker.state === 'STALE') {
+              await removeStaleWriterReclaimMarker(reclaimMarker, marker, `${options.label} reclaim marker`);
+              continue;
+            }
             await observeExisting();
             await waitForContention();
             continue;
@@ -304,10 +426,7 @@ export async function acquireOwnedFileClaim(path: string, owner: ReleaseOwner, o
         try {
           if (await reclaimExisting()) continue;
         } finally {
-          if (ownsMarker) {
-            await fs.rmdir(reclaimMarker!).catch(() => undefined);
-            await syncDirectory(directory, `${options.label} parent`).catch(() => undefined);
-          }
+          await markerClaim?.release();
         }
       }
       await waitForContention();
@@ -323,16 +442,17 @@ export async function acquireOwnedFileClaim(path: string, owner: ReleaseOwner, o
       await syncDirectory(directory, `${options.label} parent`).catch(() => undefined);
       throw error;
     }
-    let markerAppeared: boolean;
-    try { markerAppeared = await markerPresent(); }
+    let markerAppeared: WriterReclaimMarkerObservation;
+    try { markerAppeared = await inspectMarker(); }
     catch (error) {
       try { await unlinkExact(canonical, bytes, identity, directory, options.label); }
       finally { await handle.close(); }
       throw error;
     }
-    if (markerAppeared) {
+    if (markerAppeared.state !== 'ABSENT') {
       try { await unlinkExact(canonical, bytes, identity, directory, options.label); }
       finally { await handle.close(); }
+      if (markerAppeared.state === 'STALE') await removeStaleWriterReclaimMarker(reclaimMarker!, markerAppeared, `${options.label} reclaim marker`);
       await waitForContention();
       continue;
     }
