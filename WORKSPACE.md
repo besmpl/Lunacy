@@ -95,7 +95,7 @@ Final gate: <whole-run standard>
 
 **PLAN is authority, not history.** After a phase passes, do not append its test matrices, hashes, repair narrative, or old residual inventories to PLAN. If completed-phase context remains useful, compress it to one line such as `P1 — PASS — gate: phases/p1/hard-gate-01.md`. The immutable gate/decisions own historical detail. Periodically remove superseded execution detail so every fresh resume pays only for current authority.
 
-For very large authority sets an intake Luna may create `intake.md`; the parent spot-checks it and owns the final plan. **`intake.md` is parent-facing compression, not a replacement dossier: target ≤80 lines / ~8 KB.** Put larger surveys/extracts under evidence and cite exact pointers.
+For very large authority sets an intake Sol may create `intake.md`; the parent spot-checks it and owns the final plan. **`intake.md` is parent-facing compression, not a replacement dossier: target ≤80 lines / ~8 KB.** Put larger surveys/extracts under evidence and cite exact pointers.
 
 Plan verification ownership too: do not make every step/adversary/scout/parent rerun the same expensive global suite unless a later change genuinely invalidates earlier evidence. **Never omit verification required by authoritative project/plan acceptance; assign required proof to one clear layer and deduplicate only redundant proof beyond it.**
 
@@ -133,7 +133,7 @@ Before implementation of a new run, and after material ownership changes, inspec
 
 Prefer concurrency only for genuinely independent outcomes/surfaces/contracts. Prefer isolated worktrees/branches where available. Serialize/replan overlapping shared contracts, generated artifacts, unsafe mutable state, same-checkout races, or likely merge/integration cost that outweighs parallelism.
 
-Do not make the parent perform repository-scale conflict discovery. Luna validates deeper assumptions and escalates unexpected overlap before conflicting edits.
+Do not make the parent perform repository-scale conflict discovery. Sol validates deeper assumptions and escalates unexpected overlap before conflicting edits.
 
 ## STEPS.md
 
@@ -150,7 +150,7 @@ Gate: <phase standard>
 
 Statuses: `READY`, `ACTIVE`, `NEEDS-DECISION`, `REPAIR`, `DONE`, `BLOCKED`, `SUPERSEDED`.
 
-A step is the largest coherent unit one Luna can safely own. `DONE` means terminal local completion; phase acceptance still needs its gate.
+A step is the largest coherent unit one Sol can safely own. `DONE` means terminal local completion; phase acceptance still needs its gate.
 
 ## Worker spawn / handoff
 
@@ -162,7 +162,7 @@ fork_turns: "none"
 
 Any inheritance exception must have a specific reason recorded in run `DECISIONS.md`.
 
-The parent chooses Luna reasoning effort per `SKILL.md`: **`xhigh` normally; `max` only for a concrete hard-reasoning trigger.** No permanent effort column is required. If an otherwise ordinary-looking step uses `max`, a one-line rationale in the handoff is enough.
+The parent chooses Sol reasoning effort per `SKILL.md`: **`high` normally; `max` only for a concrete hard-reasoning trigger.** No permanent effort column is required. If an otherwise ordinary-looking step uses `max`, a one-line rationale in the handoff is enough.
 
 Default handoff:
 
@@ -178,6 +178,21 @@ Mailbox only BLOCKED / DECISION_REQUIRED / FINAL.
 ```
 
 Do not paste parent conversation/history into the handoff. Durable files carry the required context.
+
+## Managed runtime drive boundary
+
+An explicitly deployed/verified skill may use the private bridge drive route to
+mechanically drain runtime-authorized commands. The pump is not a second
+scheduler: it asks `RunKernel.advance` to select/claim work, waits for the
+one-token Codex supervisor evidence, submits the exact receipt/envelope, and
+continues only through another kernel call. It persists no pump cursor or
+queue, parses no Markdown for authority, retries no uncertain token, and
+cannot close gates or adopt plans. Parent approval, stop/redirect, decision,
+phase/final, and hard-gate boundaries remain authoritative. Markdown/manual
+mode and `HumanReceiptRequired` are preserved when the private driver is not
+bound. On restart, reconciliation is bounded to verified committed state plus
+exact-token immutable effect evidence; missing or conflicting evidence fails
+closed.
 
 ## Scope changes
 
@@ -291,7 +306,7 @@ Consolidate related contradictions discovered in the same bounded investigation 
 
 ## Adversary
 
-Use a fresh Luna adversary only for a named unusually risky surface, not by default for every step. Give it durable authority, engineering doctrine, actual code/diff, and verification entry points—not implementer chat.
+Use a fresh Sol adversary only for a named unusually risky surface, not by default for every step. Give it durable authority, engineering doctrine, actual code/diff, and verification entry points—not implementer chat.
 
 It attacks new assumptions/risks. If it repairs something, it verifies the impacted surface. It should not replay the entire implementer matrix unless its repair makes that broad evidence stale **or authoritative acceptance explicitly requires the repetition**.
 
@@ -348,7 +363,7 @@ For ordinary progress, read Control Blocks only. For a decision, read its decisi
 
 A full report read requires a named unresolved contradiction that cannot be settled from Control + brief + cited slices.
 
-If a single decision/gate needs more than **three substantive deep slices**, delegate fresh Luna compression or persist `STATE.md`/`Next action` and continue in fresh parent context. This is the mechanical context ceiling when exact token counters are unavailable.
+If a single decision/gate needs more than **three substantive deep slices**, delegate fresh Sol compression or persist `STATE.md`/`Next action` and continue in fresh parent context. This is the mechanical context ceiling when exact token counters are unavailable.
 
 Never estimate token usage. If the host exposes exact counters, record exact values when useful; otherwise `unavailable`.
 
@@ -397,6 +412,6 @@ Resolve the run first. Then read only:
 
 Do not replay worker chat, reread all reports, old decisions/gates, WORKSPACE, or planning doctrine unless current recovery/replanning specifically needs them.
 
-For interrupted ACTIVE attempts, reconcile immutable FINAL Control Blocks first. Incomplete attempts get new attempt/report paths and fresh Luna continuation workers against current state. Never turn the parent into a partial-change archaeologist.
+For interrupted ACTIVE attempts, reconcile immutable FINAL Control Blocks first. Incomplete attempts get new attempt/report paths and fresh Sol continuation workers against current state. Never turn the parent into a partial-change archaeologist.
 
 Before known context compaction/restart, persist reality and one exact `Next action`. If the host exposes exact context/token counters, use them; otherwise rely on host pressure signals and the three-deep-read rule, never guessed usage.

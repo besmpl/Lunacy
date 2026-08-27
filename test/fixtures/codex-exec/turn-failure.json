@@ -1,0 +1,1 @@
+{"name":"turn-failure","expected":"turn-failure","input":{"exitCode":1,"signal":null,"stdout":"{\"type\":\"turn.failed\",\"error\":{\"message\":\"provider error\"}}\n","stderr":"","finalOutputPresent":false}}

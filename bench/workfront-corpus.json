@@ -1,0 +1,73 @@
+{
+  "schema": "lunacy-workfront-paired-v1",
+  "seed": "native-workfront-m3-2026-08-17",
+  "repetitions": 10,
+  "scenarios": [
+    {
+      "id": "small",
+      "phaseId": "small",
+      "steps": [
+        {
+          "stepId": "a",
+          "goal": "A"
+        },
+        {
+          "stepId": "b",
+          "goal": "B",
+          "dependencies": [
+            "a"
+          ]
+        },
+        {
+          "stepId": "c",
+          "goal": "C"
+        }
+      ]
+    },
+    {
+      "id": "wide",
+      "phaseId": "wide",
+      "steps": "GENERATE_80_INDEPENDENT"
+    },
+    {
+      "id": "max-bound",
+      "phaseId": "max-bound",
+      "steps": "GENERATE_500_INDEPENDENT"
+    },
+    {
+      "id": "deep",
+      "phaseId": "deep",
+      "steps": [
+        {
+          "stepId": "s0"
+        },
+        {
+          "stepId": "s1",
+          "dependencies": [
+            "s0"
+          ]
+        },
+        {
+          "stepId": "s2",
+          "dependencies": [
+            "s1"
+          ]
+        },
+        {
+          "stepId": "s3",
+          "dependencies": [
+            "s2"
+          ]
+        },
+        {
+          "stepId": "s4",
+          "dependencies": [
+            "s3"
+          ]
+        }
+      ]
+    }
+  ],
+  "notes": "Synthetic local paired fixture only. Provider/token/native counters are unavailable; promotion remains NOT_CLAIMED.",
+  "fixtureDigest": "3517bac6faae7b165332edd68f9405e04d298056f1191b273e8b0b57636c8659"
+}

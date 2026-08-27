@@ -1,0 +1,1 @@
+{"name":"absent-final-output","expected":"absent-final-output","input":{"exitCode":0,"signal":null,"stdout":"{\"type\":\"turn.completed\"}\n","stderr":"","finalOutputPresent":false}}

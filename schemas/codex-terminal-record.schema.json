@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "lunacy-codex-terminal-record-v1",
+  "title": "Lunacy Codex terminal record",
+  "description": "Immutable evidence of the terminal boundary for one launch token.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema": { "const": "lunacy-codex-terminal/v1" },
+    "launchToken": { "type": "string", "minLength": 1 },
+    "commandDigest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "status": { "type": "string", "enum": ["PASS", "NEEDS-DECISION", "BLOCKED", "UNKNOWN"] },
+    "outcome": { "type": "string", "enum": ["normal-completion", "turn-failure", "sandbox-denial", "approval-required", "cancellation", "host-evidence-failure", "unresolved-termination", "malformed-final-output", "absent-final-output", "process-failure"] },
+    "exitCode": { "type": ["integer", "null"] },
+    "signal": { "type": ["string", "null"] },
+    "resultDigest": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
+    "reportPath": { "type": ["string", "null"] },
+    "reportDigest": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
+    "eventsDigest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "finishedAt": { "type": "string", "format": "date-time" }
+  },
+  "required": ["schema", "launchToken", "commandDigest", "status", "outcome", "exitCode", "signal", "resultDigest", "reportPath", "reportDigest", "eventsDigest", "finishedAt"]
+}

@@ -1,0 +1,47 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { Conflict, InvalidPlan, makeRunKernel } from '../dist/index.js';
+const canon = (v) => Array.isArray(v) ? v.map(canon) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map(k => [k, canon(v[k])])) : v;
+const sha = (v) => createHash('sha256').update(JSON.stringify(canon(v))).digest('hex');
+const input = (runId, eventId, event, revision, extra = {}) => ({ runId, expectedRevision: revision, identity: { runId, phaseId: 'run', stepId: 'run', attemptEpoch: 0, authorityEpoch: 0, barrierEpoch: 0, eventId, payloadDigest: sha(event), ...extra }, event });
+test('filesystem CURRENT reload preserves exact duplicate yield and current generation', async () => {
+  const rootDir = await mkdtemp(join(tmpdir(), 'lunacy-kernel-'));
+  const plan = { phaseId: 'p', steps: [{ stepId: 'a' }] };
+  const firstKernel = makeRunKernel({ plan, rootDir });
+  const startEvent = { kind: 'START', intentRef: { id: 'plan', digest: sha(plan) } };
+  const start = await firstKernel.advance(input('r', 'start', startEvent, undefined));
+  const secondKernel = makeRunKernel({ plan, rootDir });
+  const duplicate = await secondKernel.advance(input('r', 'start', startEvent, undefined));
+  assert.deepEqual(duplicate, start);
+  const current = JSON.parse(await readFile(join(rootDir, '.kernel', 'CURRENT'), 'utf8'));
+  assert.equal(current.generation, 1);
+  const statePath = join(rootDir, '.kernel', 'generations', `g${current.generation}`, 'state.json');
+  const state = JSON.parse(await readFile(statePath, 'utf8'));
+  assert.equal(state.revision, 1);
+});
+test('conflicting identity and cyclic/invalid plans fail closed', async () => {
+  const cyclic = { phaseId: 'p', steps: [{ stepId: 'a', dependencies: ['b'] }, { stepId: 'b', dependencies: ['a'] }] };
+  const kernel = makeRunKernel({ plan: cyclic });
+  const event = { kind: 'START', intentRef: { id: 'plan', digest: sha(cyclic) } };
+  await assert.rejects(() => kernel.advance(input('r', 's', event, undefined)), InvalidPlan);
+  const plan = { phaseId: 'p', steps: [{ stepId: 'a' }] };
+  const k = makeRunKernel({ plan });
+  const e1 = { kind: 'START', intentRef: { id: 'plan', digest: sha(plan) } };
+  await k.advance(input('r', 'same', e1, undefined));
+  const e2 = { kind: 'START', intentRef: { id: 'plan2', digest: sha(plan) } };
+  await assert.rejects(() => k.advance(input('r', 'same', e2, undefined)), Conflict);
+});
+test('CURRENT corruption is rejected before effects', async () => {
+  const rootDir = await mkdtemp(join(tmpdir(), 'lunacy-kernel-'));
+  const plan = { phaseId: 'p', steps: [{ stepId: 'a' }] };
+  const kernel = makeRunKernel({ plan, rootDir });
+  const event = { kind: 'START', intentRef: { id: 'plan', digest: sha(plan) } };
+  await kernel.advance(input('r', 'start', event, undefined));
+  const current = JSON.parse(await readFile(join(rootDir, '.kernel', 'CURRENT'), 'utf8'));
+  await writeFile(join(rootDir, '.kernel', 'generations', `g${current.generation}`, 'state.json'), '{}');
+  await assert.rejects(() => kernel.advance(input('r', 'next', { kind: 'RESUME' }, 1)), /ManifestMismatch|digest mismatch/);
+});

@@ -1,20 +1,20 @@
 # Lunacy
 
-A compact execution skill for using **Codex, GPT-5.6 Sol, or GPT-5.6 Terra as a token-frugal expert orchestrator** while **GPT-5.6 Luna owns repository-heavy work at dynamically selected `xhigh` or `max` reasoning**.
+A compact execution skill for using **Codex, GPT-5.6 Sol, or GPT-5.6 Terra as a token-frugal expert orchestrator** while **GPT-5.6 Sol owns repository-heavy work at dynamically selected `high` or `max` reasoning**.
 
 The core idea is simple: **spend expensive parent context on judgment, not repository ingestion, worker narration, repeated verification, or orchestration paperwork.**
 
-The parent understands project intent/architecture, plans work, resolves hard decisions, schedules safe parallelism, preserves user constraints, chooses worker effort, and owns phase gates. Luna workers inspect, implement, test, self-review, repair, and leave bounded durable evidence.
+The parent understands project intent/architecture, plans work, resolves hard decisions, schedules safe parallelism, preserves user constraints, chooses worker effort, and owns phase gates. Sol workers inspect, implement, test, self-review, repair, and leave bounded durable evidence.
 
 Both sides use a complexity budget: reuse/extend sound mechanisms first, use OOP/polymorphism where they model real variation, and reject speculative layers/frameworks/process ceremony.
 
-## Luna effort routing
+## Sol effort routing
 
-Lunacy uses **`xhigh` by default**. `max` is an escalation, not the standard tax on every worker.
+Lunacy uses **`high` by default**. `max` is an escalation, not the standard tax on every worker.
 
-Typical `xhigh` work includes bounded implementation, repository surveys/inventory, migrations after design is settled, focused repairs, tests, documentation, read-only scouts, and most adversarial reviews.
+Typical `high` work includes bounded implementation, repository surveys/inventory, migrations after design is settled, focused repairs, tests, documentation, read-only scouts, and most adversarial reviews.
 
-The parent selects `max` when extra exploration has a concrete expected payoff: high-blast-radius architecture ambiguity, subtle integrity/security/concurrency/replay/finality invariants, genuinely difficult cross-cutting interaction reasoning, a failed `xhigh` attempt stuck on the same hard reasoning boundary, a critical named adversarial risk, or explicit project/user authority.
+The parent selects `max` when extra exploration has a concrete expected payoff: high-blast-radius architecture ambiguity, subtle integrity/security/concurrency/replay/finality invariants, genuinely difficult cross-cutting interaction reasoning, a failed `high` attempt stuck on the same hard reasoning boundary, a critical named adversarial risk, or explicit project/user authority.
 
 Step size or role name alone never justifies `max`. Different workers in the same concurrent batch may use different efforts.
 
@@ -22,7 +22,7 @@ Step size or role name alone never justifies `max`. Different workers in the sam
 
 Lunacy does not rely only on “be concise.” It enforces boundaries:
 
-- when supported, every Luna spawn uses `fork_turns: "none"` so workers do not inherit the parent conversation by default;
+- when supported, every Sol spawn uses `fork_turns: "none"` so workers do not inherit the parent conversation by default;
 - worker mailbox messages are only `BLOCKED`, `DECISION_REQUIRED`, or `FINAL`, at most three short lines;
 - **the parent is event-driven too:** routine resume reads, migrations, worker launches, quiet waits, and timeout expiry are not user-facing status events;
 - while workers run, the parent enters a **quiescent wait**: use the longest supported `wait_agent` timeout, let mailbox/user activity wake it early, and treat a plain timeout as a non-event that immediately re-enters the wait;
@@ -52,7 +52,7 @@ compact PLAN.md
         ↓
 dependency-ready steps
    ↙       ↓       ↘
- Luna     Luna     Luna    ← safe concurrency; xhigh/max per step
+  Sol      Sol      Sol    ← safe concurrency; high/max per step
    ↘       ↓       ↙
  quiescent parent wait ← wakes only on mailbox/user event
         ↓
@@ -65,7 +65,7 @@ optional read-only gate scout if integration earns it
 orchestrator hard gate
 ```
 
-A phase is an integrated milestone. A step is the **largest coherent unit** one Luna worker can safely own end-to-end. Lunacy avoids micro-decomposition merely to create more agents.
+A phase is an integrated milestone. A step is the **largest coherent unit** one Sol worker can safely own end-to-end. Lunacy avoids micro-decomposition merely to create more agents.
 
 If deeper inspection discovers material work outside the durable step contract, the worker stops before the out-of-contract edit and sends one consolidated decision brief. The parent updates the durable scope or creates a repair/new step before implementation continues. Lunacy does not accumulate chains of ad-hoc “overlap” amendments while one worker keeps expanding its write set.
 
@@ -92,7 +92,7 @@ This prevents gate scouts from racing moving artifacts and prevents “final” 
 
 ## Small parent decision surface
 
-When Luna encounters genuine ambiguity, it can perform deep repository research, but the parent receives a tiny decision brief: one question, authority, facts, options, recommendation, execution impact, and exact evidence pointers. Large surveys remain worker-side evidence.
+When Sol encounters genuine ambiguity, it can perform deep repository research, but the parent receives a tiny decision brief: one question, authority, facts, options, recommendation, execution impact, and exact evidence pointers. Large surveys remain worker-side evidence.
 
 Related contradictions discovered in one bounded investigation are consolidated before parent adjudication instead of accumulating serial amendments and chat wakeups.
 
@@ -145,12 +145,12 @@ The parent inspects targeted actual code/diff/behavior and judges correctness, a
 Every technical subagent uses:
 
 ```text
-model: gpt-5.6-luna
-reasoning_effort: xhigh   # default
+model: gpt-5.6-sol
+reasoning_effort: high   # default
 # or max when the orchestrator's routing rule justifies escalation
 ```
 
-There is no silent model fallback and no effort below `xhigh`. The first real Luna worker spawn doubles as the capability check.
+There is no silent model fallback and no effort below `high`. The first real Sol worker spawn doubles as the capability check.
 
 ## Install
 
@@ -162,7 +162,7 @@ git clone https://github.com/frozenpepper/Lunacy.git ~/.agents/skills/lunacy
 ## Use
 
 ```text
-Use $lunacy for this task. Minimize parent context; plan phases/steps first and delegate repository-heavy work to Luna.
+Use $lunacy for this task. Minimize parent context; plan phases/steps first and delegate repository-heavy work to Sol.
 ```
 
 Resume a named run when useful:
@@ -184,7 +184,33 @@ LICENSE                          Apache License 2.0 terms.
 SKILL.md                         Always-loaded orchestration protocol.
 orchestrator/PLANNING.md        Parent planning/reuse/OOP/YAGNI/effort/verification doctrine.
 WORKSPACE.md                     Multi-run state, immutable evidence, report/gate/decision limits.
-worker/ENGINEERING.md            Luna engineering + bounded output/terminal evidence doctrine.
-references/CODEX_LUNA_COMPAT.md Conditional Luna compatibility procedure.
+worker/ENGINEERING.md            Sol engineering + bounded output/terminal evidence doctrine.
 README.md                        Human-facing overview.
 ```
+
+## Runtime package
+
+This repository also ships the installable `lunacy-runtime` package: a durable
+per-run execution kernel with one public lifecycle operation,
+`RunKernel.advance(input)`. Install with `npm ci` (Node.js 22+), or use the
+packed artifact's `lunacy-runtime` executable with the canonical fixtures in
+[`examples/`](examples/). The package has no runtime dependencies and makes no
+implicit provider, token, or native-host calls. See the [installation](docs/INSTALL.md),
+[API](docs/API.md), [durability](docs/DURABILITY.md), [migration](docs/MIGRATION.md),
+and [benchmark](docs/BENCHMARK.md) contracts.
+
+The private managed skill deployment also carries the event-driven Codex drive
+adapter, its one-token supervisor, closed schemas, and capability probe. Run
+`npm run deploy:skill -- --target /absolute/skill-root` and then
+`"$NODE" tools/deploy-skill.mjs --target /absolute/skill-root --check` (with
+`NODE` set to the absolute, attested Node executable) before using
+the installed `runtime/bridge.mjs drive` route. Deployment publishes a fully
+verified complete managed tree through a recoverable atomic directory exchange,
+removing stale owned files while preserving unrelated skill-root files. Drive
+mode removes only the parent's mechanical resume/wait/reconcile loop; the
+kernel remains the sole
+authority and Markdown/manual mode with truthful `HumanReceiptRequired`
+fallback remains available. An audited exact-inventory 0.2.12 restore command
+and crash-recovery matrix are documented in [install](docs/INSTALL.md). See
+[bridge](docs/BRIDGE.md),
+[Codex exec](docs/CODEX_EXEC.md), and [install](docs/INSTALL.md).

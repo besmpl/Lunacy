@@ -15,13 +15,13 @@ Prefer modifying, reusing, deleting, or extending sound existing mechanisms over
 - Use OOP/polymorphism for real current variation behind stable contracts; prefer composition unless inheritance expresses genuine substitutability.
 - Do not force OOP where a simpler functional/data-oriented design is clearer.
 - Do not redesign healthy architecture merely because another design is theoretically cleaner.
-- Make each step the largest coherent Luna-owned unit; make each phase earn a real integration/gate boundary.
+- Make each step the largest coherent Sol-owned unit; make each phase earn a real integration/gate boundary.
 
-## Luna effort routing
+## Sol effort routing
 
-Plan Luna work assuming **`xhigh` by default**. Reserve **`max`** for steps where extra exploration/verification has a concrete expected payoff: unresolved high-blast-radius architecture, subtle integrity/security/concurrency/replay/finality invariants, genuinely difficult cross-cutting interaction reasoning, recovery from an `xhigh` attempt that failed on the same hard reasoning boundary, a critical named adversarial risk, or explicit user/project authority.
+Plan Sol work assuming **`high` by default**. Reserve **`max`** for steps where extra exploration/verification has a concrete expected payoff: unresolved high-blast-radius architecture, subtle integrity/security/concurrency/replay/finality invariants, genuinely difficult cross-cutting interaction reasoning, recovery from a `high` attempt that failed on the same hard reasoning boundary, a critical named adversarial risk, or explicit user/project authority.
 
-Do not mark a step `max` merely because it is large, touches many files, is an adversary/scout, or because higher effort sounds safer. Read-only surveys/scouts, bounded implementation, migrations after the design decision, focused repairs, tests, and documentation normally stay `xhigh`.
+Do not mark a step `max` merely because it is large, touches many files, is an adversary/scout, or because higher effort sounds safer. Read-only surveys/scouts, bounded implementation, migrations after the design decision, focused repairs, tests, and documentation normally stay `high`.
 
 The orchestrator may choose effort at spawn time; no permanent effort column is required unless the project itself benefits from recording it. If `max` is selected for an otherwise ordinary-looking step, a one-line rationale in the handoff is enough—do not create an effort bureaucracy.
 
@@ -66,11 +66,11 @@ Do not assign the same expensive/global matrix to implementer, adversary, scout,
 
 ## Decision surfaces
 
-When a planned step may uncover a genuine architecture/authority ambiguity, let Luna investigate it, but keep the parent decision surface small.
+When a planned step may uncover a genuine architecture/authority ambiguity, let Sol investigate it, but keep the parent decision surface small.
 
 A `DECISION_REQUIRED` handoff should be one concise decision brief (≤30 lines / ~4 KB) plus exact evidence pointers. Larger surveys/logs remain worker evidence. Related contradictions from one bounded investigation should be consolidated before parent adjudication rather than producing serial amendments/messages.
 
-Do not plan for parent repository archaeology. If a decision would require broad discovery, assign a Luna scout to compress it first.
+Do not plan for parent repository archaeology. If a decision would require broad discovery, assign a Sol scout to compress it first.
 
 ## Gate-scout selection
 
@@ -98,7 +98,7 @@ Before approving the plan, ask:
 7. Is verification owned once per layer while still satisfying every authoritative acceptance requirement?
 8. Does each planned scout/adversary/decision artifact actually earn its cost?
 9. Is this run safely independent of other ACTIVE run ownership?
-10. Is each `max` Luna call justified by a concrete reasoning-risk trigger rather than task size/role alone?
+10. Is each `max` Sol call justified by a concrete reasoning-risk trigger rather than task size/role alone?
 
 If #6 is yes, choose the simpler design.
 

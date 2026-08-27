@@ -1,0 +1,1 @@
+{"name":"cancellation","expected":"cancellation","input":{"exitCode":null,"signal":"SIGTERM","stdout":"{\"type\":\"turn.started\"}\n","stderr":"","finalOutputPresent":false}}

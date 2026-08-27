@@ -1,0 +1,1 @@
+{"name":"max-supported","effort":"max","expected":"supported","contract":"A valid max invocation is accepted only when its own structured final output is valid; no high retry is implied."}

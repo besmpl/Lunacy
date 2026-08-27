@@ -1,0 +1,9 @@
+dist/bridge.js
+dist/bridge.d.ts
+dist/bridge.js.map
+dist/bridge-cli.js
+dist/bridge-cli.d.ts
+dist/bridge-cli.js.map
+dist/beads.js
+dist/beads.d.ts
+dist/beads.js.map

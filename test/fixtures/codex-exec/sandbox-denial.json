@@ -1,0 +1,1 @@
+{"name":"sandbox-denial","expected":"sandbox-denial","input":{"exitCode":0,"signal":null,"stdout":"{\"type\":\"item.completed\",\"item\":{\"type\":\"command_execution_output\",\"status\":\"denied\",\"message\":\"sandbox denied\"}}\n","stderr":"","finalOutputPresent":false}}

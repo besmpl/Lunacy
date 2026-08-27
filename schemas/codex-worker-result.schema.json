@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "lunacy-codex-worker-result-v1",
+  "title": "Lunacy Codex worker result",
+  "description": "The only structured final value accepted from a Codex worker.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "status": { "type": "string", "enum": ["PASS", "NEEDS-DECISION", "BLOCKED"] },
+    "reportPath": { "type": "string", "minLength": 1 },
+    "reportDigest": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+  },
+  "required": ["status", "reportPath", "reportDigest"]
+}

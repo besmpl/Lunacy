@@ -1,0 +1,1 @@
+{"name":"max-unsupported","effort":"max","expected":"unsupported","contract":"Any rejected or failed max invocation is recorded unsupported and blocks max-authorized commands; it is never downgraded."}

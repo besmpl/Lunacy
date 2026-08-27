@@ -1,0 +1,1 @@
+{"name":"approval-required","expected":"approval-required","input":{"exitCode":0,"signal":null,"stdout":"{\"type\":\"item.completed\",\"item\":{\"type\":\"command_execution_output\",\"status\":\"approval_required\",\"message\":\"approval required\"}}\n","stderr":"","finalOutputPresent":false}}

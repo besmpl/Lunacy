@@ -1,0 +1,1 @@
+{"name":"normal-completion","expected":"normal-completion","input":{"exitCode":0,"signal":null,"stdout":"{\"type\":\"turn.completed\"}\n","stderr":"","finalOutputPresent":true,"finalOutputText":"{\"status\":\"PASS\",\"reportPath\":\"report.md\",\"reportDigest\":\"0000000000000000000000000000000000000000000000000000000000000000\"}"}}

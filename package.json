@@ -1,0 +1,56 @@
+{
+  "name": "lunacy-runtime",
+  "version": "0.3.0",
+  "description": "Durable per-run execution kernel for Lunacy",
+  "type": "module",
+  "engines": {
+    "node": ">=22.15.0 <23 || >=23.5.0"
+  },
+  "license": "Apache-2.0",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./dist/composition.js": {
+      "types": "./dist/composition.d.ts",
+      "import": "./dist/composition.js"
+    }
+  },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "dist/**/*.js.map",
+    "!dist/bridge*",
+    "!dist/beads*",
+    "!dist/workfront*",
+    "README.md",
+    "LICENSE",
+    "docs",
+    "examples",
+    "bench",
+    "!bench/bridge-*",
+    "!bench/workfront-*"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json",
+    "test": "npm run build && node --test",
+    "check": "npm run typecheck && npm test && npm run build && npm pack --dry-run",
+    "benchmark": "npm run build && node bench/run.mjs",
+    "benchmark:workfront": "npm run build && node bench/workfront-paired.mjs",
+    "cli:example": "npm run build && node dist/cli.js --plan examples/canonical-plan.json --event examples/canonical-event.json",
+    "bridge:example": "npm run build && node dist/bridge-cli.js --help",
+    "deploy:skill": "npm run build && node tools/deploy-skill.mjs",
+    "probe:codex": "node tools/probe-codex-exec.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.1",
+    "typescript": "5.4.5"
+  },
+  "bin": {
+    "lunacy-runtime": "./dist/cli.js"
+  }
+}

@@ -1,0 +1,555 @@
+import { createHash } from 'node:crypto';
+import { promises as fs } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import type { OutboxCommand, Sha256 } from './model.js';
+import { canonicalString, digest } from './canonical.js';
+
+/** The host policy is capability-only data.  It never contains a command
+ * status, dependency state, retry instruction, or scheduler cursor. */
+export const CODEX_HOST_POLICY_SCHEMA = 'lunacy-codex-exec-policy/v1' as const;
+export const CODEX_MODEL = 'gpt-5.6-sol' as const;
+export const CODEX_VERSION = '0.145.0' as const;
+export const DEFAULT_REASONING_EFFORT = 'high' as const;
+export const MAX_REASONING_EFFORT = 'max' as const;
+export const WORKER_RESULT_SCHEMA = 'lunacy-codex-worker-result-v1' as const;
+
+export const MAX_REASON_CODES = Object.freeze([
+  'REPLAY_FINALITY_HIGH_RISK',
+  'ARCHITECTURE_AMBIGUITY',
+  'FAILED_XHIGH_REPAIR',
+  'EXPLICIT_PROJECT_AUTHORITY',
+  'LIVE_MAX_OVERRIDE_PROOF',
+] as const);
+export type MaxReasonCode = (typeof MAX_REASON_CODES)[number];
+export type ReasoningEffort = typeof DEFAULT_REASONING_EFFORT | typeof MAX_REASONING_EFFORT;
+export type CodexWorkerResult = Readonly<{
+  status: 'PASS' | 'NEEDS-DECISION' | 'BLOCKED';
+  reportPath: string;
+  reportDigest: string;
+}>;
+
+const WORKER_STATUSES = new Set(['PASS', 'NEEDS-DECISION', 'BLOCKED']);
+
+/** Parse the provider's closed worker-result object without accepting
+ * duplicate-key ambiguity. Property order is intentionally independent at
+ * this boundary; all fields are validated exactly before use. */
+export function parseWorkerResultText(text: string): CodexWorkerResult | undefined {
+  let index = 0;
+  const skipWhitespace = (): void => { while (/\s/.test(text[index] ?? '')) index += 1; };
+  const scanString = (): number => {
+    if (text[index] !== '"') return -1;
+    index += 1;
+    while (index < text.length) {
+      const char = text[index]!;
+      if (char === '\\') { index += 2; continue; }
+      if (char === '"') return index + 1;
+      index += 1;
+    }
+    return -1;
+  };
+  skipWhitespace();
+  if (text[index] !== '{') return undefined;
+  index += 1;
+  const keys = new Set<string>();
+  while (index < text.length) {
+    skipWhitespace();
+    if (text[index] === '}') break;
+    const keyStart = index;
+    const keyEnd = scanString();
+    if (keyEnd < 0) return undefined;
+    index = keyEnd;
+    let key: unknown;
+    try { key = JSON.parse(text.slice(keyStart, keyEnd)); } catch { return undefined; }
+    if (typeof key !== 'string' || keys.has(key)) return undefined;
+    keys.add(key);
+    skipWhitespace();
+    if (text[index] !== ':') return undefined;
+    index += 1;
+    let depth = 0;
+    let inString = false;
+    while (index < text.length) {
+      const char = text[index]!;
+      if (inString) {
+        if (char === '\\') index += 2;
+        else { if (char === '"') inString = false; index += 1; }
+        continue;
+      }
+      if (char === '"') { inString = true; index += 1; continue; }
+      if (char === '{' || char === '[') { depth += 1; index += 1; continue; }
+      if (char === '}' || char === ']') {
+        if (char === '}' && depth === 0) break;
+        if (depth > 0) depth -= 1;
+        index += 1;
+        continue;
+      }
+      if (char === ',' && depth === 0) break;
+      index += 1;
+    }
+    skipWhitespace();
+    if (text[index] === ',') { index += 1; continue; }
+    if (text[index] === '}') break;
+    return undefined;
+  }
+  skipWhitespace();
+  if (text[index] !== '}') return undefined;
+  let parsed: unknown;
+  try { parsed = JSON.parse(text); } catch { return undefined; }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
+  const record = parsed as Record<string, unknown>;
+  const sortedKeys = Object.keys(record).sort();
+  if (sortedKeys.join(',') !== 'reportDigest,reportPath,status' || !WORKER_STATUSES.has(String(record.status)) || typeof record.reportPath !== 'string' || record.reportPath.length === 0 || typeof record.reportDigest !== 'string' || !/^[0-9a-f]{64}$/.test(record.reportDigest)) return undefined;
+  return { status: record.status as CodexWorkerResult['status'], reportPath: record.reportPath, reportDigest: record.reportDigest };
+}
+
+export type MaxOverride = Readonly<{
+  phaseId: string;
+  stepId: string;
+  attemptEpoch: number;
+  planDigest: string;
+  reasonCode: MaxReasonCode;
+  decisionRef: string;
+}>;
+
+export type CodexHostPolicy = Readonly<{
+  schema: typeof CODEX_HOST_POLICY_SCHEMA;
+  runId: string;
+  planDigest: string;
+  runRoot: string;
+  workspace: string;
+  skillRoot: string;
+  instructionPaths: readonly string[];
+  codexPath: string;
+  codexVersion: typeof CODEX_VERSION;
+  codexBinaryDigest: string;
+  model: typeof CODEX_MODEL;
+  defaultEffort: typeof DEFAULT_REASONING_EFFORT;
+  sandbox: 'workspace-write';
+  writableRoots: readonly string[];
+  environmentNames: readonly string[];
+  effectsRoot: string;
+  workerSchemaPath: string;
+  workerSchemaDigest: string;
+  timeoutMs: number;
+  cancellationGraceMs: number;
+  maxOutputBytes: number;
+  maxErrorBytes: number;
+  maxReportBytes: number;
+  maxSupported: boolean;
+  maxOverrides: readonly MaxOverride[];
+}>;
+
+export type CodexHostPolicyInput = Readonly<Partial<Omit<CodexHostPolicy, 'schema'>> & {
+  schema?: typeof CODEX_HOST_POLICY_SCHEMA;
+  runId: string;
+  planDigest: string;
+  runRoot: string;
+  workspace: string;
+  skillRoot: string;
+  codexPath: string;
+  codexBinaryDigest: string;
+  workerSchemaPath: string;
+  workerSchemaDigest: string;
+  instructionPaths?: readonly string[];
+  effectsRoot?: string;
+  maxOverrides?: readonly MaxOverride[];
+}>;
+
+export type CodexCommandFrame = Readonly<Pick<OutboxCommand, 'commandId' | 'runId' | 'phaseId' | 'stepId' | 'attemptEpoch' | 'authorityEpoch' | 'barrierEpoch' | 'modeEpoch' | 'launchToken' | 'commandDigest'> & {
+  /** The plan digest is supplied by the composition root, never inferred from Markdown. */
+  planDigest: string;
+}>;
+
+const SAFE_ENVIRONMENT_NAMES = new Set([
+  'HOME', 'USER', 'LOGNAME', 'LANG', 'LC_ALL', 'TMPDIR', 'TMP', 'TEMP',
+  'CODEX_HOME', 'XDG_CONFIG_HOME', 'XDG_CACHE_HOME',
+  'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY',
+  'OPENAI_API_KEY', 'CODEX_AUTH_TOKEN', 'CHATGPT_API_KEY',
+]);
+const FORBIDDEN_ARGUMENTS = new Set([
+  '--dangerously-bypass-approvals-and-sandbox', '--dangerously-bypass-hook-trust', '--ignore-rules',
+]);
+
+function fail(message: string): never { throw new Error(`CodexHostPolicy: ${message}`); }
+function asDigest(value: string, label: string): string {
+  if (typeof value !== 'string' || !/^[0-9a-f]{64}$/.test(value)) fail(`${label} must be a lowercase SHA-256 digest`);
+  return value;
+}
+function asPath(value: string, label: string): string {
+  if (typeof value !== 'string' || !isAbsolute(value) || /[\u0000-\u001f\u007f]/.test(value) || resolve(value) !== value) fail(`${label} must be an absolute canonical path`);
+  return value;
+}
+function within(parent: string, child: string): boolean {
+  const rel = relative(parent, child);
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
+}
+function asId(value: string, label: string): string {
+  if (typeof value !== 'string' || value.length === 0 || value.includes('/') || value.includes('\\') || /[\u0000-\u001f\u007f]/.test(value) || value === '.' || value === '..' || value === '__proto__' || value === 'prototype' || value === 'constructor') fail(`${label} is invalid`);
+  return value;
+}
+function asNonNegativeInteger(value: number, label: string): number {
+  if (!Number.isSafeInteger(value) || value < 0) fail(`${label} must be a non-negative safe integer`);
+  return value;
+}
+function asPositiveInteger(value: number, label: string): number {
+  if (!Number.isSafeInteger(value) || value < 1) fail(`${label} must be a positive safe integer`);
+  return value;
+}
+
+/** Construct and validate a closed policy.  The returned object is frozen so
+ * argv/effect evidence cannot drift after the driver has been composed. */
+export function createCodexHostPolicy(input: CodexHostPolicyInput): CodexHostPolicy {
+  if (!input || typeof input !== 'object') fail('policy input is required');
+  const inputPrototype = Object.getPrototypeOf(input);
+  if (inputPrototype !== Object.prototype && inputPrototype !== null) fail('policy input must be a plain object');
+  const allowedInputKeys = new Set(['schema', 'runId', 'planDigest', 'runRoot', 'workspace', 'skillRoot', 'instructionPaths', 'codexPath', 'codexVersion', 'codexBinaryDigest', 'model', 'defaultEffort', 'sandbox', 'writableRoots', 'environmentNames', 'effectsRoot', 'workerSchemaPath', 'workerSchemaDigest', 'timeoutMs', 'cancellationGraceMs', 'maxOutputBytes', 'maxErrorBytes', 'maxReportBytes', 'maxSupported', 'maxOverrides']);
+  if (Object.keys(input).some((key) => !allowedInputKeys.has(key))) fail('policy input fields are not closed');
+  if (input.schema !== undefined && input.schema !== CODEX_HOST_POLICY_SCHEMA) fail('policy schema is invalid');
+  if (input.codexVersion !== undefined && input.codexVersion !== CODEX_VERSION) fail('codexVersion is not attested');
+  if (input.model !== undefined && input.model !== CODEX_MODEL) fail('model must be gpt-5.6-sol');
+  if (input.defaultEffort !== undefined && input.defaultEffort !== DEFAULT_REASONING_EFFORT) fail('defaultEffort must be high');
+  if (input.sandbox !== undefined && input.sandbox !== 'workspace-write') fail('sandbox must be workspace-write');
+  if (input.maxSupported !== undefined && typeof input.maxSupported !== 'boolean') fail('maxSupported must be boolean');
+  const runId = asId(input.runId, 'runId');
+  const planDigest = asDigest(input.planDigest, 'planDigest');
+  const runRoot = asPath(input.runRoot, 'runRoot');
+  const workspace = asPath(input.workspace, 'workspace');
+  const skillRoot = asPath(input.skillRoot, 'skillRoot');
+  const codexPath = asPath(input.codexPath, 'codexPath');
+  const codexBinaryDigest = asDigest(input.codexBinaryDigest, 'codexBinaryDigest');
+  const workerSchemaPath = asPath(input.workerSchemaPath, 'workerSchemaPath');
+  const workerSchemaDigest = asDigest(input.workerSchemaDigest, 'workerSchemaDigest');
+  const effectsRoot = asPath(input.effectsRoot ?? join(runRoot, '.codex-effects'), 'effectsRoot');
+  if (!within(runRoot, effectsRoot)) fail('effectsRoot must be under runRoot');
+  // A managed skill bundle may live beside the run root.  It is still an
+  // explicit path and never inferred from ambient HOME/PATH.
+  const rawInstructionPaths = input.instructionPaths ?? [join(runRoot, 'PLAN.md'), join(runRoot, 'DECISIONS.md')];
+  if (!Array.isArray(rawInstructionPaths)) fail('instructionPaths must be an array');
+  const instructionPaths = Object.freeze([...new Set(rawInstructionPaths)].map((path, index) => asPath(path, `instructionPaths[${index}]`)));
+  const rawWritableRoots = input.writableRoots ?? [workspace, runRoot];
+  if (!Array.isArray(rawWritableRoots)) fail('writableRoots must be an array');
+  const writableRoots = Object.freeze([...new Set(rawWritableRoots)].map((path, index) => {
+    const normalized = asPath(path, `writableRoots[${index}]`);
+    if (!within(workspace, normalized) && !within(runRoot, normalized)) fail(`writableRoots[${index}] must be under workspace or runRoot`);
+    return normalized;
+  }));
+  const rawEnvironmentNames = input.environmentNames ?? ['HOME', 'USER', 'LOGNAME', 'LANG', 'LC_ALL', 'TMPDIR', 'CODEX_HOME', 'XDG_CONFIG_HOME', 'XDG_CACHE_HOME'];
+  if (!Array.isArray(rawEnvironmentNames)) fail('environmentNames must be an array');
+  const environmentNames = Object.freeze([...new Set(rawEnvironmentNames)].map((name, index) => {
+    if (!SAFE_ENVIRONMENT_NAMES.has(name)) fail(`environmentNames[${index}] is not allowlisted`);
+    return name;
+  }).sort());
+  const rawMaxOverrides = input.maxOverrides ?? [];
+  if (!Array.isArray(rawMaxOverrides)) fail('maxOverrides must be an array');
+  const maxOverrides = Object.freeze([...rawMaxOverrides].map((raw, index) => {
+    if (!raw || typeof raw !== 'object') fail(`maxOverrides[${index}] is malformed`);
+    const maxKeys = Object.keys(raw).sort();
+    if (maxKeys.join(',') !== 'attemptEpoch,decisionRef,phaseId,planDigest,reasonCode,stepId') fail(`maxOverrides[${index}] fields are not closed`);
+    const value = {
+      phaseId: asId(raw.phaseId, `maxOverrides[${index}].phaseId`),
+      stepId: asId(raw.stepId, `maxOverrides[${index}].stepId`),
+      attemptEpoch: asNonNegativeInteger(raw.attemptEpoch, `maxOverrides[${index}].attemptEpoch`),
+      planDigest: asDigest(raw.planDigest, `maxOverrides[${index}].planDigest`),
+      reasonCode: raw.reasonCode,
+      decisionRef: raw.decisionRef,
+    } satisfies MaxOverride;
+    if (!MAX_REASON_CODES.includes(value.reasonCode)) fail(`maxOverrides[${index}].reasonCode is not accepted`);
+    if (value.planDigest !== planDigest) fail(`maxOverrides[${index}] planDigest does not match policy`);
+    if (typeof value.decisionRef !== 'string' || value.decisionRef.trim().length === 0 || /[\u0000-\u001f\u007f]/.test(value.decisionRef)) fail(`maxOverrides[${index}].decisionRef is invalid`);
+    return Object.freeze(value);
+  }).sort((left, right) => (left.phaseId < right.phaseId ? -1 : left.phaseId > right.phaseId ? 1 : left.stepId < right.stepId ? -1 : left.stepId > right.stepId ? 1 : left.attemptEpoch - right.attemptEpoch)));
+  const overrideKeys = new Set<string>();
+  for (const override of maxOverrides) {
+    const key = `${override.phaseId}\0${override.stepId}\0${override.attemptEpoch}`;
+    if (overrideKeys.has(key)) fail(`maxOverrides contains a duplicate command frame for ${override.phaseId}/${override.stepId}/${override.attemptEpoch}`);
+    overrideKeys.add(key);
+  }
+  const policy: CodexHostPolicy = Object.freeze({
+    schema: CODEX_HOST_POLICY_SCHEMA,
+    runId, planDigest, runRoot, workspace, skillRoot, instructionPaths,
+    codexPath, codexVersion: CODEX_VERSION, codexBinaryDigest,
+    model: CODEX_MODEL, defaultEffort: DEFAULT_REASONING_EFFORT, sandbox: 'workspace-write',
+    writableRoots, environmentNames, effectsRoot, workerSchemaPath, workerSchemaDigest,
+    timeoutMs: asPositiveInteger(input.timeoutMs ?? 60_000, 'timeoutMs'),
+    cancellationGraceMs: asNonNegativeInteger(input.cancellationGraceMs ?? 750, 'cancellationGraceMs'),
+    maxOutputBytes: asPositiveInteger(input.maxOutputBytes ?? 512 * 1024, 'maxOutputBytes'),
+    maxErrorBytes: asPositiveInteger(input.maxErrorBytes ?? 256 * 1024, 'maxErrorBytes'),
+    maxReportBytes: asPositiveInteger(input.maxReportBytes ?? 512 * 1024, 'maxReportBytes'),
+    maxSupported: input.maxSupported === true,
+    maxOverrides,
+  });
+  return policy;
+}
+
+export function validateCodexHostPolicy(policy: CodexHostPolicy): CodexHostPolicy {
+  // Reconstructing through the closed constructor rejects extra/malformed
+  // fields while preserving the exact canonical values used for its digest.
+  if (!policy || typeof policy !== 'object') fail('policy is malformed');
+  const policyPrototype = Object.getPrototypeOf(policy);
+  if (policyPrototype !== Object.prototype && policyPrototype !== null) fail('policy must be a plain object');
+  const keys = Object.keys(policy).sort();
+  const expected = ['codexBinaryDigest', 'codexPath', 'codexVersion', 'cancellationGraceMs', 'defaultEffort', 'effectsRoot', 'environmentNames', 'instructionPaths', 'maxErrorBytes', 'maxOutputBytes', 'maxOverrides', 'maxReportBytes', 'maxSupported', 'model', 'planDigest', 'runId', 'runRoot', 'sandbox', 'schema', 'skillRoot', 'timeoutMs', 'workerSchemaDigest', 'workerSchemaPath', 'workspace', 'writableRoots'].sort();
+  if (keys.length !== expected.length || keys.some((key, index) => key !== expected[index])) fail('policy fields are not closed');
+  return createCodexHostPolicy(policy);
+}
+
+export function codexHostPolicyDigest(policy: CodexHostPolicy): Sha256 {
+  return digest(validateCodexHostPolicy(policy)) as Sha256;
+}
+
+export function commandFrameDigest(command: Pick<OutboxCommand, 'commandId' | 'runId' | 'phaseId' | 'stepId' | 'attemptEpoch' | 'launchToken'>): string {
+  return digest({ commandId: command.commandId, runId: command.runId, phaseId: command.phaseId, stepId: command.stepId, attemptEpoch: command.attemptEpoch, launchToken: command.launchToken });
+}
+
+function matchingOverride(policy: CodexHostPolicy, command: CodexCommandFrame): MaxOverride | undefined {
+  return policy.maxOverrides.find((override) => override.phaseId === command.phaseId && override.stepId === command.stepId && override.attemptEpoch === command.attemptEpoch && override.planDigest === policy.planDigest);
+}
+
+function assertCommandAuthority(policy: CodexHostPolicy, command: Pick<CodexCommandFrame, 'runId' | 'planDigest'>): void {
+  if (command.runId !== policy.runId || command.planDigest !== policy.planDigest) fail('command frame is outside policy authority');
+}
+
+/** Resolve effort without fallback.  An exact override is required for max;
+ * a rejected max capability is surfaced as an error rather than downgraded. */
+export function reasoningEffortFor(policy: CodexHostPolicy, command: CodexCommandFrame): ReasoningEffort {
+  validateCodexHostPolicy(policy);
+  assertCommandAuthority(policy, command);
+  if (typeof command.launchToken !== 'string' || command.launchToken.length === 0) fail('launchToken is invalid');
+  const override = matchingOverride(policy, command);
+  if (!override) return DEFAULT_REASONING_EFFORT;
+  if (!policy.maxSupported) fail(`max is unsupported for ${override.phaseId}/${override.stepId}/${override.attemptEpoch}`);
+  return MAX_REASONING_EFFORT;
+}
+
+export function expectedReportPath(policy: CodexHostPolicy, command: Pick<CodexCommandFrame, 'phaseId' | 'stepId' | 'attemptEpoch'>): string {
+  const phaseId = asId(command.phaseId, 'phaseId');
+  const stepId = asId(command.stepId, 'stepId');
+  const attempt = asNonNegativeInteger(command.attemptEpoch, 'attemptEpoch');
+  return join(policy.runRoot, 'phases', phaseId, 'reports', `${stepId}-worker-${attempt}.md`);
+}
+
+/** Resolve the phase-owned instruction selected by a command.  This path is
+ * intentionally derived from the command frame rather than from a caller
+ * supplied policy list: the worker must read and the host must attest the
+ * exact STEPS.md for the phase it is executing. */
+export function expectedStepsPath(policy: CodexHostPolicy, command: Pick<CodexCommandFrame, 'runId' | 'planDigest' | 'phaseId'>): string {
+  validateCodexHostPolicy(policy);
+  assertCommandAuthority(policy, command);
+  return join(policy.runRoot, 'phases', asId(command.phaseId, 'phaseId'), 'STEPS.md');
+}
+
+/**
+ * Return the deterministic private namespace used for one launch's immutable
+ * authority snapshot.  The token is hashed before it reaches a pathname, just
+ * as effect records do, so an opaque launch token cannot escape its slot.
+ * Keeping this derivation in the host-policy module lets the live and restart
+ * binding paths reconstruct the exact same handoff/argv witnesses without
+ * persisting another mutable path list in the launch record.
+ */
+export function launchAuthoritySnapshotRoot(policy: CodexHostPolicy, command: Pick<CodexCommandFrame, 'runId' | 'planDigest' | 'launchToken'>): string {
+  validateCodexHostPolicy(policy);
+  assertCommandAuthority(policy, command);
+  if (typeof command.launchToken !== 'string' || command.launchToken.length === 0 || command.launchToken.includes('\0')) fail('launchToken is invalid');
+  const tokenNamespace = createHash('sha256').update(command.launchToken).digest('hex');
+  return join(policy.effectsRoot, tokenNamespace, 'authority');
+}
+
+/** Map one original authority path to its deterministic snapshot spelling. */
+export function launchAuthoritySnapshotPath(policy: CodexHostPolicy, command: CodexCommandFrame, originalPath: string): string {
+  const root = launchAuthoritySnapshotRoot(policy, command);
+  const path = asPath(originalPath, 'authority path');
+  if (within(policy.runRoot, path)) return join(root, 'run', relative(policy.runRoot, path));
+  if (within(policy.skillRoot, path)) return join(root, 'skill', relative(policy.skillRoot, path));
+  // Instruction/schema paths outside the run and skill trees remain distinct
+  // without interpolating arbitrary path bytes into the snapshot name.
+  return join(root, 'external', createHash('sha256').update(path).digest('hex'));
+}
+
+/**
+ * Build the complete deterministic original→snapshot map used by a launch.
+ * `descriptorRoot` is only needed by Linux child-entry code, where the
+ * snapshot lives under a run-root directory descriptor (`/proc/self/fd/N`).
+ * Restart binding omits it and therefore uses the durable pathname spelling.
+ */
+export function launchAuthoritySnapshotPaths(policy: CodexHostPolicy, command: CodexCommandFrame, descriptorRoot?: string): ReadonlyMap<string, string> {
+  const map = new Map<string, string>();
+  const snapshotRoot = launchAuthoritySnapshotRoot(policy, command);
+  for (const original of commandAuthorityPaths(policy, command)) {
+    let snapshot = launchAuthoritySnapshotPath(policy, command, original);
+    if (descriptorRoot !== undefined) {
+      const relativeSnapshot = relative(policy.runRoot, snapshotRoot);
+      if (within(policy.runRoot, snapshotRoot)) snapshot = join(descriptorRoot, relativeSnapshot, snapshot.slice(snapshotRoot.length + 1));
+    }
+    map.set(original, snapshot);
+  }
+  return map;
+}
+
+/**
+ * Bind each command-selected authority file to a fixed child descriptor slot.
+ * The supervisor opens the corresponding sealed snapshot before spawn and
+ * passes it at these slots; unlike a snapshot pathname, `/proc/self/fd/N`
+ * cannot be redirected by a concurrent rename or same-user rewrite.
+ */
+export function launchAuthorityDescriptorPaths(policy: CodexHostPolicy, command: CodexCommandFrame, firstDescriptor = 6): ReadonlyMap<string, string> {
+  if (!Number.isSafeInteger(firstDescriptor) || firstDescriptor < 3) fail('authority descriptor slot is invalid');
+  const map = new Map<string, string>();
+  commandAuthorityPaths(policy, command).forEach((path, index) => map.set(path, `/proc/self/fd/${firstDescriptor + index}`));
+  return map;
+}
+
+/**
+ * Bind a policy-owned directory path to the descriptor spelling used by the
+ * child.  Linux launches inherit trusted workspace/run-root descriptors, so
+ * `--cd` and every `--add-dir` must resolve through those descriptors rather
+ * than performing a second pathname lookup in the child.  Other platforms
+ * leave the canonical path unchanged; the supervisor freezes those roots for
+ * the synchronous spawn boundary instead.
+ */
+export function launchDirectoryPath(policy: CodexHostPolicy, originalPath: string, workspaceDescriptor?: string, runRootDescriptor?: string): string {
+  const path = asPath(originalPath, 'launch directory path');
+  const inWorkspace = workspaceDescriptor !== undefined && within(policy.workspace, path);
+  const inRunRoot = runRootDescriptor !== undefined && within(policy.runRoot, path);
+  // When policy roots overlap, bind through the deepest matching root.  This
+  // keeps a run-root descendant from becoming a second pathname lookup under
+  // a broader workspace descriptor (and vice versa).
+  if (inWorkspace && (!inRunRoot || policy.workspace.length >= policy.runRoot.length)) return join(workspaceDescriptor!, relative(policy.workspace, path));
+  if (inRunRoot) return join(runRootDescriptor!, relative(policy.runRoot, path));
+  return path;
+}
+
+/** Return writable roots with the same descriptor binding as `--cd`. */
+export function launchWritableRoots(policy: CodexHostPolicy, workspaceDescriptor?: string, runRootDescriptor?: string): readonly string[] {
+  return Object.freeze(policy.writableRoots.map((path) => launchDirectoryPath(policy, path, workspaceDescriptor, runRootDescriptor)));
+}
+
+export type CodexLaunchPathOverrides = Readonly<{
+  authorityPaths?: ReadonlyMap<string, string>;
+  outputPath?: string;
+  workerSchemaPath?: string;
+  workspacePath?: string;
+  writableRoots?: readonly string[];
+}>;
+
+/** Return the complete command-specific authority file set.  The dynamic
+ * phase STEPS path is always present, even when a policy's static instruction
+ * list omits it or contains a different phase's STEPS file. */
+export function commandAuthorityPaths(policy: CodexHostPolicy, command: CodexCommandFrame): readonly string[] {
+  validateCodexHostPolicy(policy);
+  assertCommandAuthority(policy, command);
+  const dynamicSteps = expectedStepsPath(policy, command);
+  return Object.freeze([
+    ...new Set([
+      join(policy.runRoot, 'PLAN.md'),
+      ...policy.instructionPaths,
+      dynamicSteps,
+      join(policy.skillRoot, 'worker', 'ENGINEERING.md'),
+      policy.workerSchemaPath,
+    ]),
+  ]);
+}
+
+export function buildWorkerHandoff(policy: CodexHostPolicy, command: CodexCommandFrame, overrides: CodexLaunchPathOverrides = {}): { text: string; reportPath: string; digest: Sha256 } {
+  validateCodexHostPolicy(policy);
+  assertCommandAuthority(policy, command);
+  const reportPath = expectedReportPath(policy, command);
+  const authorityPath = (path: string): string => overrides.authorityPaths?.get(path) ?? path;
+  const dynamicSteps = authorityPath(expectedStepsPath(policy, command));
+  const authority = [authorityPath(join(policy.runRoot, 'PLAN.md')), ...policy.instructionPaths.map(authorityPath), dynamicSteps].filter((path, index, all) => all.indexOf(path) === index);
+  const engineering = authorityPath(join(policy.skillRoot, 'worker', 'ENGINEERING.md'));
+  const text = [
+    `Own ${asId(command.stepId, 'stepId')} end-to-end.`,
+    `Authority: ${authority.join(' + ')}.`,
+    `Engineering: ${engineering}.`,
+    `Step: ${dynamicSteps} (${asId(command.stepId, 'stepId')} row).`,
+    `Report: ${reportPath}.`,
+    'Inspect/reuse first; implement → verify → self-review → fix → terminal reverify.',
+    'If active ownership or material durable scope would be exceeded, stop before the edit.',
+    'Mailbox only BLOCKED / DECISION_REQUIRED / FINAL.',
+    'Final structured result: emit exactly one canonical JSON object with keys in sorted order reportDigest, reportPath, status; include no prose.',
+  ].join('\n');
+  return { text: `${text}\n`, reportPath, digest: digest(`${text}\n`) as Sha256 };
+}
+
+export function buildCodexArguments(policy: CodexHostPolicy, command: CodexCommandFrame, effort: ReasoningEffort, outputPath: string, overrides: CodexLaunchPathOverrides = {}): string[] {
+  validateCodexHostPolicy(policy);
+  assertCommandAuthority(policy, command);
+  if (!isAbsolute(outputPath) || resolve(outputPath) !== outputPath) fail('outputPath must be absolute canonical');
+  if (!within(policy.effectsRoot, outputPath) || outputPath === policy.effectsRoot) fail('outputPath must be under effectsRoot');
+  const launchOutputPath = overrides.outputPath ?? outputPath;
+  if (!isAbsolute(launchOutputPath) || resolve(launchOutputPath) !== launchOutputPath) fail('launch outputPath must be absolute canonical');
+  if (effort !== DEFAULT_REASONING_EFFORT && effort !== MAX_REASONING_EFFORT) fail('reasoning effort is unsupported');
+  if (effort === MAX_REASONING_EFFORT && reasoningEffortFor(policy, command) !== MAX_REASONING_EFFORT) fail('max requires an exact durable override');
+  const args = [
+    'exec', '-', '--model', CODEX_MODEL, '--sandbox', 'workspace-write', '--json',
+    '--output-schema', overrides.workerSchemaPath ?? policy.workerSchemaPath, '--output-last-message', launchOutputPath,
+    '--ephemeral', '--ignore-user-config', '--strict-config', '--cd', overrides.workspacePath ?? policy.workspace,
+    ...(overrides.writableRoots ?? policy.writableRoots).flatMap((root) => ['--add-dir', root]),
+    '--config', 'approval_policy="never"', '--config', `model_reasoning_effort="${effort}"`,
+  ];
+  if (args.some((arg) => FORBIDDEN_ARGUMENTS.has(arg) || arg === 'danger-full-access')) fail('invocation contains a forbidden capability');
+  return args;
+}
+
+export function childEnvironment(policy: CodexHostPolicy, source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  validateCodexHostPolicy(policy);
+  const env: NodeJS.ProcessEnv = {};
+  for (const name of policy.environmentNames) if (Object.prototype.hasOwnProperty.call(source, name)) env[name] = source[name];
+  env.NO_COLOR = '1';
+  return env;
+}
+
+export type CodexBinaryAttestation = Readonly<{
+  requestedPath: string;
+  physicalPath: string;
+  requestedPathIsSymlink: boolean;
+  uid: number;
+  gid: number;
+  mode: string;
+  digest: string;
+  version: string;
+}>;
+
+function boundedVersion(executable: string, timeoutMs: number): Promise<string> {
+  return new Promise((resolvePromise, reject) => {
+    const child = spawn(executable, ['--version'], { shell: false, stdio: ['ignore', 'pipe', 'pipe'], env: { NO_COLOR: '1' } });
+    let stdout = ''; let stderr = ''; let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      if (error) reject(error); else resolvePromise(stdout.trim());
+    };
+    child.stdout?.on('data', (chunk: Buffer | string) => { stdout += String(chunk).slice(0, 4096); });
+    child.stderr?.on('data', (chunk: Buffer | string) => { stderr += String(chunk).slice(0, 4096); });
+    child.once('error', (error) => finish(error));
+    child.once('close', (code) => code === 0 ? finish() : finish(new Error(`Codex version probe failed (${code ?? 'signal'}): ${stderr.slice(0, 256)}`)));
+    timer = setTimeout(() => { try { child.kill('SIGTERM'); } catch { /* best effort */ } finish(new Error('Codex version probe timed out')); }, timeoutMs);
+    if (settled) { clearTimeout(timer); timer = undefined; }
+  });
+}
+
+/** Attest the exact executable image immediately before launch. */
+export async function attestCodexExecutable(policy: CodexHostPolicy): Promise<CodexBinaryAttestation> {
+  validateCodexHostPolicy(policy);
+  const physicalPath = await fs.realpath(policy.codexPath);
+  const requested = await fs.lstat(policy.codexPath);
+  const binary = await fs.stat(physicalPath);
+  if (!binary.isFile() || (binary.mode & 0o111) === 0) fail('codex executable is not an executable regular file');
+  if ((binary.mode & 0o022) !== 0) fail('codex executable is group/world writable');
+  if (typeof process.getuid === 'function' && binary.uid !== process.getuid()) fail('codex executable is not owned by the current user');
+  const bytes = await fs.readFile(physicalPath);
+  const actualDigest = createHash('sha256').update(bytes).digest('hex');
+  if (actualDigest !== policy.codexBinaryDigest) fail('codex executable digest changed');
+  const version = await boundedVersion(physicalPath, policy.timeoutMs);
+  if (version !== `codex-cli ${policy.codexVersion}`) fail('codex executable version changed');
+  const requestedAfter = await fs.lstat(policy.codexPath);
+  const binaryAfter = await fs.stat(physicalPath);
+  if (requestedAfter.dev !== requested.dev || requestedAfter.ino !== requested.ino || binaryAfter.dev !== binary.dev || binaryAfter.ino !== binary.ino || binaryAfter.uid !== binary.uid || binaryAfter.gid !== binary.gid || binaryAfter.mode !== binary.mode) fail('codex executable identity changed during attestation');
+  const bytesAfter = await fs.readFile(physicalPath);
+  if (createHash('sha256').update(bytesAfter).digest('hex') !== actualDigest) fail('codex executable digest changed during attestation');
+  return Object.freeze({ requestedPath: policy.codexPath, physicalPath, requestedPathIsSymlink: requested.isSymbolicLink(), uid: binary.uid, gid: binary.gid, mode: (binary.mode & 0o7777).toString(8), digest: actualDigest, version: policy.codexVersion });
+}
+
+export function canonicalPolicyBytes(policy: CodexHostPolicy): string { return canonicalString(validateCodexHostPolicy(policy)); }

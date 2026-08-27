@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "lunacy-codex-launch-intent-record-v1",
+  "title": "Lunacy Codex launch intent record",
+  "description": "Immutable one-shot reservation written before a Codex child is created.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema": { "const": "lunacy-codex-launch-intent/v1" },
+    "launchToken": { "type": "string", "minLength": 1 },
+    "commandDigest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "commandId": { "type": "string", "minLength": 1 },
+    "runId": { "type": "string", "minLength": 1 },
+    "phaseId": { "type": "string", "minLength": 1 },
+    "stepId": { "type": "string", "minLength": 1 },
+    "attempt": { "type": "integer", "minimum": 0 },
+    "attemptEpoch": { "type": "integer", "minimum": 0 },
+    "authorityEpoch": { "type": "integer", "minimum": 0 },
+    "barrierEpoch": { "type": "integer", "minimum": 0 },
+    "policyDigest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "authorityDigest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "handoffDigest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "argvDigest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "codexPath": { "type": "string", "minLength": 1 },
+    "codexVersion": { "type": "string", "pattern": "^0\\.145\\.0$" },
+    "codexBinaryDigest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "workspace": { "type": "string", "minLength": 1 },
+    "supervisor": { "type": "object", "additionalProperties": false, "properties": { "pid": { "type": "integer", "minimum": 1 } }, "required": ["pid"] },
+    "startedAt": { "type": "string", "format": "date-time" }
+  },
+  "required": ["schema", "launchToken", "commandDigest", "commandId", "runId", "phaseId", "stepId", "attempt", "attemptEpoch", "authorityEpoch", "barrierEpoch", "policyDigest", "authorityDigest", "handoffDigest", "argvDigest", "codexPath", "codexVersion", "codexBinaryDigest", "workspace", "supervisor", "startedAt"]
+}

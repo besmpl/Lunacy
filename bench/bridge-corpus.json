@@ -1,0 +1,18 @@
+{
+  "schema": "lunacy-bridge-corpus-v1",
+  "runId": "bridge-corpus",
+  "plan": {
+    "phaseId": "bridge-phase",
+    "steps": [
+      { "stepId": "alpha", "goal": "first deterministic step" },
+      { "stepId": "beta", "goal": "second deterministic step", "dependencies": ["alpha"] }
+    ]
+  },
+  "events": [
+    { "kind": "START", "intentRef": { "id": "plan", "digest": "" } },
+    { "kind": "RESUME" },
+    { "kind": "RESUME" }
+  ],
+  "repetitions": 3,
+  "notes": "Synthetic local control trace only; provider/token/native counters are unavailable."
+}
