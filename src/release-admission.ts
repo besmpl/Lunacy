@@ -8,7 +8,9 @@ import { inspectTrustedPath, sameFilesystemIdentity, syncDirectory } from './fil
 export const RELEASE_EXCLUSION_LOCK = '.lunacy-release-exclusion.lock';
 export const BRIDGE_OPERATION_LOCK = '.bridge.lock';
 export const WRITER_LOCK = '.writer.lock';
-const MANIFEST_SCHEMA = 'lunacy-release-operation/v1';
+const MANIFEST_V1_SCHEMA = 'lunacy-release-operation/v1';
+const MANIFEST_V2_SCHEMA = 'lunacy-release-operation/v2';
+const DEPLOYMENT_IDENTITY_SCHEMA = 'lunacy-deployment-identity/v1';
 const OWNER_SCHEMA = 'lunacy-release-owner/v1';
 const MAX_MANIFEST_BYTES = 1024 * 1024;
 const MAX_DISCOVERY_DIRECTORIES = 65_536;
@@ -18,14 +20,36 @@ const MANAGED_LAUNCH_DIGEST = createHash('sha256').update('lunacy-managed-launch
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 export type ReleaseOperation = 'deploy' | 'check' | 'restore';
-export type ReleaseManifest = Readonly<{
-  schema: typeof MANIFEST_SCHEMA;
+export type ReleaseManifestV1 = Readonly<{
+  schema: typeof MANIFEST_V1_SCHEMA;
   operation: ReleaseOperation;
   installedTarget: string;
   discoveryParents: readonly string[];
   runRoots: readonly string[];
   processSnapshotPath: string;
 }>;
+export type DeploymentIdentity = Readonly<{
+  schema: typeof DEPLOYMENT_IDENTITY_SCHEMA;
+  runtimeVersion: string;
+  bridgeVersion: string;
+  sourceDigest: string;
+  deploymentManifestDigest: string;
+  launcherDigest: string;
+  inventoryDigest: string;
+  inventoryAggregate: string;
+  fileCount: number;
+}>;
+export type ExactLegacyDeployManifest = Readonly<{
+  schema: typeof MANIFEST_V2_SCHEMA;
+  operation: 'deploy-exact-0.2.12';
+  installedTarget: string;
+  discoveryParents: readonly string[];
+  runRoots: readonly string[];
+  processSnapshotPath: string;
+  installedDeployment: DeploymentIdentity;
+  candidateDeployment: DeploymentIdentity;
+}>;
+export type ReleaseManifest = ReleaseManifestV1 | ExactLegacyDeployManifest;
 export type ReleaseOwner = Readonly<{
   schema: typeof OWNER_SCHEMA;
   id: string;
@@ -63,11 +87,35 @@ function canonicalPaths(value: unknown, label: string, allowEmpty: boolean): rea
   return Object.freeze(paths);
 }
 
+export function validateDeploymentIdentity(value: unknown, label = 'deployment identity'): DeploymentIdentity {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) fail(`${label} is malformed`);
+  const object = value as Record<string, unknown>;
+  exactKeys(object, ['schema', 'runtimeVersion', 'bridgeVersion', 'sourceDigest', 'deploymentManifestDigest', 'launcherDigest', 'inventoryDigest', 'inventoryAggregate', 'fileCount'], label);
+  if (object.schema !== DEPLOYMENT_IDENTITY_SCHEMA) fail(`${label} schema is invalid`);
+  for (const field of ['runtimeVersion', 'bridgeVersion'] as const) { const fieldValue = object[field]; if (typeof fieldValue !== 'string' || fieldValue.length === 0 || fieldValue.includes('\0')) fail(`${label} ${field} is invalid`); }
+  for (const field of ['sourceDigest', 'deploymentManifestDigest', 'launcherDigest', 'inventoryDigest', 'inventoryAggregate'] as const) { const fieldValue = object[field]; if (typeof fieldValue !== 'string' || !SHA256.test(fieldValue)) fail(`${label} ${field} is invalid`); }
+  if (!Number.isSafeInteger(object.fileCount) || (object.fileCount as number) <= 0 || (object.fileCount as number) > 65_536) fail(`${label} file count is invalid`);
+  return Object.freeze({
+    schema: DEPLOYMENT_IDENTITY_SCHEMA,
+    runtimeVersion: object.runtimeVersion as string,
+    bridgeVersion: object.bridgeVersion as string,
+    sourceDigest: object.sourceDigest as string,
+    deploymentManifestDigest: object.deploymentManifestDigest as string,
+    launcherDigest: object.launcherDigest as string,
+    inventoryDigest: object.inventoryDigest as string,
+    inventoryAggregate: object.inventoryAggregate as string,
+    fileCount: object.fileCount as number,
+  });
+}
+
 export function validateReleaseManifest(value: unknown): ReleaseManifest {
   if (!value || typeof value !== 'object' || Array.isArray(value)) fail('manifest is malformed');
   const object = value as Record<string, unknown>;
-  exactKeys(object, ['schema', 'operation', 'installedTarget', 'discoveryParents', 'runRoots', 'processSnapshotPath'], 'manifest');
-  if (object.schema !== MANIFEST_SCHEMA || !['deploy', 'check', 'restore'].includes(String(object.operation))) fail('manifest schema or operation is invalid');
+  const isExactLegacyDeploy = object.schema === MANIFEST_V2_SCHEMA;
+  exactKeys(object, isExactLegacyDeploy
+    ? ['schema', 'operation', 'installedTarget', 'discoveryParents', 'runRoots', 'processSnapshotPath', 'installedDeployment', 'candidateDeployment']
+    : ['schema', 'operation', 'installedTarget', 'discoveryParents', 'runRoots', 'processSnapshotPath'], 'manifest');
+  if (isExactLegacyDeploy ? object.operation !== 'deploy-exact-0.2.12' : object.schema !== MANIFEST_V1_SCHEMA || !['deploy', 'check', 'restore'].includes(String(object.operation))) fail('manifest schema or operation is invalid');
   const installedTarget = canonicalPath(object.installedTarget, 'installed target');
   const discoveryParents = canonicalPaths(object.discoveryParents, 'discovery parents', false);
   const runRoots = canonicalPaths(object.runRoots, 'run roots', true);
@@ -80,7 +128,13 @@ export function validateReleaseManifest(value: unknown): ReleaseManifest {
     if (pathWithin(runRoots[left]!, runRoots[right]!) || pathWithin(runRoots[right]!, runRoots[left]!)) fail('run roots overlap');
   }
   for (const root of runRoots) if (!discoveryParents.some((parent) => pathWithin(parent, root))) fail(`run root is outside every discovery parent: ${root}`);
-  return Object.freeze({ schema: MANIFEST_SCHEMA, operation: object.operation as ReleaseOperation, installedTarget, discoveryParents, runRoots, processSnapshotPath });
+  if (!isExactLegacyDeploy) return Object.freeze({ schema: MANIFEST_V1_SCHEMA, operation: object.operation as ReleaseOperation, installedTarget, discoveryParents, runRoots, processSnapshotPath });
+  if (runRoots.length !== 0) fail('exact 0.2.12 deploy requires an empty run-root set');
+  const installedDeployment = validateDeploymentIdentity(object.installedDeployment, 'installed deployment identity');
+  const candidateDeployment = validateDeploymentIdentity(object.candidateDeployment, 'candidate deployment identity');
+  if (installedDeployment.runtimeVersion !== '0.2.12' || installedDeployment.bridgeVersion !== '0.1.0') fail('installed deployment identity is not exact 0.2.12');
+  if (candidateDeployment.runtimeVersion !== '0.3.0' || candidateDeployment.bridgeVersion !== '0.2.0') fail('candidate deployment identity is not exact 0.3.0');
+  return Object.freeze({ schema: MANIFEST_V2_SCHEMA, operation: 'deploy-exact-0.2.12', installedTarget, discoveryParents, runRoots: Object.freeze([]), processSnapshotPath, installedDeployment, candidateDeployment });
 }
 
 export async function readReleaseManifest(path: string): Promise<{ manifest: ReleaseManifest; digest: string; bytes: string }> {

@@ -1004,7 +1004,7 @@ async function buildManagedStage(target, payloadFiles, manifestBytes, expectedIn
   }
 }
 
-async function publishManagedTree(target, payloadFiles, manifestBytes, expectedInventory, preservedFiles, owner = { pid: process.pid, id: randomUUID() }) {
+async function publishManagedTree(target, payloadFiles, manifestBytes, expectedInventory, preservedFiles, owner = { pid: process.pid, id: randomUUID() }, expectedPrevious = undefined) {
   const runtimeTarget = join(target, 'runtime');
   const transactionId = randomUUID();
   const fullInventory = [...expectedInventory, ...preservedFiles.map((file) => ({ path: file.path, digest: file.digest }))].sort((a, b) => stableCompare(a.path, b.path));
@@ -1016,6 +1016,7 @@ async function publishManagedTree(target, payloadFiles, manifestBytes, expectedI
     if (existingRuntime?.isSymbolicLink() || (existingRuntime && !existingRuntime.isDirectory())) throw new Error('managed runtime is not a regular directory');
     const existingRuntimeIdentity = existingRuntime ? { dev: String(existingRuntime.dev), ino: String(existingRuntime.ino) } : undefined;
     const previous = existingRuntime ? await captureRuntimeInventory(runtimeTarget) : { files: [], aggregate: inventoryDigest([]) };
+    if (expectedPrevious && (!existingRuntime || previous.aggregate !== expectedPrevious.aggregate || canonical(previous.files) !== canonical(expectedPrevious.inventory))) throw new Error('previous managed tree differs from the exact predecessor');
     const stageName = transactionSiblingName('stage', transactionId);
     const backupName = existingRuntime ? transactionSiblingName('backup', transactionId) : null;
     const failedName = transactionSiblingName('failed', transactionId);
@@ -1052,6 +1053,7 @@ async function publishManagedTree(target, payloadFiles, manifestBytes, expectedI
       await testDelayBeforePreservedFence();
       const currentRuntime = await lstat(runtimeTarget, 'managed runtime before publication');
       if (!currentRuntime || !sameStatIdentity(currentRuntime, existingRuntimeIdentity)) throw new Error('managed runtime changed before publication');
+      if (expectedPrevious) await verifyManagedTree(runtimeTarget, expectedPrevious.inventory, 'previous exact managed tree before publication', expectedPrevious.aggregate);
       await assertPreservedRuntimeFence(runtimeTarget, expectedInventory, preservedFiles);
       await fs.rename(runtimeTarget, transactionPath(target, backupName));
       await syncParent(target);
@@ -1115,7 +1117,7 @@ function parseClosedObject(value, keys, label) {
   if (actual.length !== expected.length || actual.some((key, index) => key !== expected[index])) throw new Error(`${label} has unexpected fields`);
 }
 
-async function readRestoreBundle(payloadArgument, inventoryArgument, aggregateArgument) {
+async function readDeploymentBundle(payloadArgument, inventoryArgument, aggregateArgument, expected) {
   const payloadArgumentPath = resolve(payloadArgument);
   await ensureDir(payloadArgumentPath, 'rollback payload');
   const nestedRuntime = join(payloadArgumentPath, 'runtime');
@@ -1129,7 +1131,7 @@ async function readRestoreBundle(payloadArgument, inventoryArgument, aggregateAr
   try { descriptor = JSON.parse(inventoryText); } catch { throw new Error('rollback inventory is malformed'); }
   if (`${canonical(descriptor)}\n` !== inventoryText) throw new Error('rollback inventory is not canonical');
   parseClosedObject(descriptor, ['aggregate', 'bridgeVersion', 'files', 'launcherDigest', 'manifestDigest', 'runtimeVersion', 'schema'], 'rollback inventory');
-  if (descriptor.schema !== 1 || descriptor.bridgeVersion !== '0.1.0' || descriptor.runtimeVersion !== '0.2.12') throw new Error('rollback inventory is not the attested 0.2.12 release');
+  if (descriptor.schema !== 1 || descriptor.bridgeVersion !== expected.bridgeVersion || descriptor.runtimeVersion !== expected.runtimeVersion) throw new Error(`${expected.label} inventory is not the expected release`);
   for (const [key, value] of [['aggregate', descriptor.aggregate], ['launcherDigest', descriptor.launcherDigest], ['manifestDigest', descriptor.manifestDigest]]) {
     if (typeof value !== 'string' || !/^[0-9a-f]{64}$/.test(value)) throw new Error(`rollback inventory ${key} is malformed`);
   }
@@ -1156,7 +1158,7 @@ async function readRestoreBundle(payloadArgument, inventoryArgument, aggregateAr
   try { manifest = JSON.parse(manifestText); } catch { throw new Error('rollback deployment manifest is malformed'); }
   if (`${canonical(manifest)}\n` !== manifestText) throw new Error('rollback deployment manifest is not canonical');
   parseClosedObject(manifest, ['bridgeVersion', 'files', 'launcherDigest', 'runtimeVersion', 'schema', 'sourceDigest'], 'rollback deployment manifest');
-  if (manifest.schema !== 1 || manifest.bridgeVersion !== '0.1.0' || manifest.runtimeVersion !== '0.2.12' || manifest.launcherDigest !== descriptor.launcherDigest || typeof manifest.sourceDigest !== 'string' || !/^[0-9a-f]{64}$/.test(manifest.sourceDigest) || !Array.isArray(manifest.files) || manifest.files.length === 0) throw new Error('rollback deployment manifest is not the attested 0.2.12 release');
+  if (manifest.schema !== 1 || manifest.bridgeVersion !== expected.bridgeVersion || manifest.runtimeVersion !== expected.runtimeVersion || manifest.launcherDigest !== descriptor.launcherDigest || typeof manifest.sourceDigest !== 'string' || !/^[0-9a-f]{64}$/.test(manifest.sourceDigest) || !Array.isArray(manifest.files) || manifest.files.length === 0) throw new Error(`${expected.label} deployment manifest is not the expected release`);
   const manifestFiles = manifest.files.map((path) => safeDeploymentPath(path));
   if (manifestFiles.includes(manifestName) || manifestFiles.includes('runtime/bridge.mjs') || manifestFiles.includes('runtime/README.md')) throw new Error('rollback deployment manifest source files contain generated entries');
   if (new Set(manifestFiles).size !== manifestFiles.length || manifestFiles.some((path) => !records.some((record) => record.path === path))) throw new Error('rollback deployment manifest files are not covered by the attested inventory');
@@ -1183,27 +1185,48 @@ async function readRestoreBundle(payloadArgument, inventoryArgument, aggregateAr
   }
   const verified = await verifyManagedTree(payloadRoot, records, 'rollback payload', descriptor.aggregate);
   if (verified.aggregate !== descriptor.aggregate) throw new Error('rollback payload aggregate drift');
-  return Object.freeze({ payloadRoot, payloadFiles, manifestBytes, expectedInventory: records, descriptor });
+  const identity = Object.freeze({
+    schema: 'lunacy-deployment-identity/v1',
+    runtimeVersion: descriptor.runtimeVersion,
+    bridgeVersion: descriptor.bridgeVersion,
+    sourceDigest: manifest.sourceDigest,
+    deploymentManifestDigest: hash(manifestBytes),
+    launcherDigest: descriptor.launcherDigest,
+    inventoryDigest: hash(inventoryBytes),
+    inventoryAggregate: descriptor.aggregate,
+    fileCount: records.length,
+  });
+  return Object.freeze({ payloadRoot, payloadFiles, manifestBytes, expectedInventory: records, descriptor, identity });
+}
+
+async function readRestoreBundle(payloadArgument, inventoryArgument, aggregateArgument) {
+  return readDeploymentBundle(payloadArgument, inventoryArgument, aggregateArgument, { label: 'rollback', runtimeVersion: '0.2.12', bridgeVersion: '0.1.0' });
 }
 
 function parseArgs(argv) {
-  let target = process.env.LUNACY_SKILL_ROOT || defaultTarget; let check = false; let restore = false; let payload; let inventory; let aggregate; let releaseManifest;
+  let target = process.env.LUNACY_SKILL_ROOT || defaultTarget; let check = false; let restore = false; let exactLegacyDeploy = false; let payload; let inventory; let aggregate; let candidatePayload; let candidateInventory; let candidateAggregate; let releaseManifest;
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--check') { check = true; continue; }
     if (arg === '--restore') { restore = true; continue; }
+    if (arg === '--exact-0.2.12-to-candidate') { exactLegacyDeploy = true; continue; }
     if (arg === '--payload' || arg === '--rollback-payload' || arg === '--rollback-dir') { payload = argv[++i]; if (!payload || payload.startsWith('--')) throw new Error(`${arg} requires a path`); continue; }
     if (arg === '--inventory' || arg === '--rollback-inventory' || arg === '--expected-inventory') { inventory = argv[++i]; if (!inventory || inventory.startsWith('--')) throw new Error(`${arg} requires a path`); continue; }
     if (arg === '--aggregate' || arg === '--rollback-aggregate' || arg === '--expected-aggregate') { aggregate = argv[++i]; if (!aggregate || aggregate.startsWith('--') || !/^[0-9a-f]{64}$/.test(aggregate)) throw new Error(`${arg} requires a 64-character SHA-256 digest`); continue; }
+    if (arg === '--candidate-payload') { candidatePayload = argv[++i]; if (!candidatePayload || candidatePayload.startsWith('--')) throw new Error('--candidate-payload requires a path'); continue; }
+    if (arg === '--candidate-inventory') { candidateInventory = argv[++i]; if (!candidateInventory || candidateInventory.startsWith('--')) throw new Error('--candidate-inventory requires a path'); continue; }
+    if (arg === '--candidate-aggregate') { candidateAggregate = argv[++i]; if (!candidateAggregate || candidateAggregate.startsWith('--') || !/^[0-9a-f]{64}$/.test(candidateAggregate)) throw new Error('--candidate-aggregate requires a 64-character SHA-256 digest'); continue; }
     if (arg === '--target') { target = argv[++i]; if (!target || target.startsWith('--')) throw new Error('--target requires a path'); continue; }
     if (arg === '--release-manifest') { releaseManifest = argv[++i]; if (!releaseManifest || releaseManifest.startsWith('--')) throw new Error('--release-manifest requires a path'); continue; }
-    if (arg === '--help' || arg === '-h') { console.log('Usage: node tools/deploy-skill.mjs [--target SKILL_ROOT] [--check]\n       node tools/deploy-skill.mjs --target SKILL_ROOT --restore --payload PAYLOAD_DIR --inventory INVENTORY.json --aggregate SHA256\n       add --release-manifest MANIFEST.json for the production release boundary'); process.exit(0); }
+    if (arg === '--help' || arg === '-h') { console.log('Usage: node tools/deploy-skill.mjs [--target SKILL_ROOT] [--check]\n       node tools/deploy-skill.mjs --target SKILL_ROOT --restore --payload PAYLOAD_DIR --inventory INVENTORY.json --aggregate SHA256\n       private exact predecessor deploy: --exact-0.2.12-to-candidate plus rollback and candidate payload/inventory/aggregate and --release-manifest\n       add --release-manifest MANIFEST.json for the production release boundary'); process.exit(0); }
     throw new Error(`unknown argument ${arg}`);
   }
-  if (check && restore) throw new Error('--check cannot be combined with --restore');
+  if ([check, restore, exactLegacyDeploy].filter(Boolean).length > 1) throw new Error('--check, --restore, and --exact-0.2.12-to-candidate are mutually exclusive');
   if (restore && (!payload || !inventory || aggregate === undefined)) throw new Error('--restore requires --payload, --inventory, and --aggregate');
-  if (!restore && (payload || inventory || aggregate !== undefined)) throw new Error('--payload, --inventory, and --aggregate require --restore');
-  return { target: resolve(target), check, restore, payload: payload ? resolve(payload) : undefined, inventory: inventory ? resolve(inventory) : undefined, aggregate, releaseManifest: releaseManifest ? resolve(releaseManifest) : undefined };
+  if (exactLegacyDeploy && (!payload || !inventory || aggregate === undefined || !candidatePayload || !candidateInventory || candidateAggregate === undefined || !releaseManifest)) throw new Error('--exact-0.2.12-to-candidate requires rollback and candidate payload/inventory/aggregate plus --release-manifest');
+  if (!restore && !exactLegacyDeploy && (payload || inventory || aggregate !== undefined)) throw new Error('--payload, --inventory, and --aggregate require --restore or --exact-0.2.12-to-candidate');
+  if (!exactLegacyDeploy && (candidatePayload || candidateInventory || candidateAggregate !== undefined)) throw new Error('candidate payload, inventory, and aggregate require --exact-0.2.12-to-candidate');
+  return { target: resolve(target), check, restore, exactLegacyDeploy, payload: payload ? resolve(payload) : undefined, inventory: inventory ? resolve(inventory) : undefined, aggregate, candidatePayload: candidatePayload ? resolve(candidatePayload) : undefined, candidateInventory: candidateInventory ? resolve(candidateInventory) : undefined, candidateAggregate, releaseManifest: releaseManifest ? resolve(releaseManifest) : undefined };
 }
 
 function makeWrapper(expectedDigest, expectedFiles, expectedRuntimeVersion, expectedManifestDigest, expectedLauncherDigest, expectedNode) {
@@ -1322,7 +1345,7 @@ function makeWrapper(expectedDigest, expectedFiles, expectedRuntimeVersion, expe
   ].join('\n');
 }
 
-async function executeOperation({ target, check, restore, payload, inventory, aggregate }, targetLock) {
+async function executeOperation({ target, check, restore, exactLegacyDeploy, payload, inventory, aggregate, candidatePayload, candidateInventory, candidateAggregate, exactLegacyManifest }, targetLock) {
   // Complete any durable transaction left by a previous crash before taking
   // a new source snapshot.  Recovery touches only our marker/stage/backup
   // names and preserves every non-runtime skill-root path.
@@ -1330,6 +1353,22 @@ async function executeOperation({ target, check, restore, payload, inventory, ag
   // through the entire check/deploy/restore operation.
   await testHoldTargetLock();
   await recoverTransaction(target);
+  if (exactLegacyDeploy) {
+    if (!exactLegacyManifest || exactLegacyManifest.operation !== 'deploy-exact-0.2.12') throw new Error('exact predecessor deployment manifest is absent');
+    const [installed, candidate] = await Promise.all([
+      readRestoreBundle(payload, inventory, aggregate),
+      readDeploymentBundle(candidatePayload, candidateInventory, candidateAggregate, { label: 'candidate', runtimeVersion: '0.3.0', bridgeVersion: '0.2.0' }),
+    ]);
+    if (canonical(installed.identity) !== canonical(exactLegacyManifest.installedDeployment)) throw new Error('installed rollback identity differs from the release manifest');
+    if (canonical(candidate.identity) !== canonical(exactLegacyManifest.candidateDeployment)) throw new Error('preserved candidate identity differs from the release manifest');
+    const runtimeTarget = join(target, 'runtime');
+    const current = await verifyManagedTree(runtimeTarget, installed.expectedInventory, 'installed exact 0.2.12 tree', installed.identity.inventoryAggregate);
+    if (current.aggregate !== installed.identity.inventoryAggregate) throw new Error('installed exact 0.2.12 aggregate drift');
+    const verified = await publishManagedTree(target, candidate.payloadFiles, candidate.manifestBytes, candidate.expectedInventory, [], targetLock.owner, { inventory: installed.expectedInventory, aggregate: installed.identity.inventoryAggregate });
+    if (verified.aggregate !== candidate.identity.inventoryAggregate) throw new Error('published candidate aggregate drift');
+    console.log(JSON.stringify({ status: 'deployed-exact-predecessor', target, installedDeployment: installed.identity, candidateDeployment: candidate.identity, managedFiles: verified.files, managedDirectories: verified.directories, managedAggregate: verified.aggregate }));
+    return;
+  }
   if (restore) {
     const rollback = await readRestoreBundle(payload, inventory, aggregate);
     const runtimeTarget = join(target, 'runtime');
@@ -1461,17 +1500,21 @@ async function main() {
   ]);
   const { readReleaseManifest, releaseOwnerIsLive } = admission;
   const { withReleaseExclusion } = releaseOperation;
-  const { verifyReleaseQuiescence } = quiescence;
+  const { verifyReleaseQuiescence, verifyExactLegacyDeployQuiescence } = quiescence;
   const release = await readReleaseManifest(args.releaseManifest);
-  const expectedOperation = args.restore ? 'restore' : args.check ? 'check' : 'deploy';
+  const expectedOperation = args.exactLegacyDeploy ? 'deploy-exact-0.2.12' : args.restore ? 'restore' : args.check ? 'check' : 'deploy';
   if (release.manifest.installedTarget !== args.target || release.manifest.operation !== expectedOperation) throw new Error('release manifest target/operation differs from invocation');
   if (!await trustedIdentity(args.target, 'installed skill target', { surface: true, kind: 'directory' })) throw new Error('release installed target is absent');
   if (await lstat(release.manifest.processSnapshotPath, 'release process snapshot')) throw new Error('release process snapshot path must be absent before ownership');
   return withReleaseExclusion({ manifest: release.manifest, manifestDigest: release.digest }, async (ownership) => {
     const targetLock = await acquireTargetLock(args.target, { reclaimStaleExactRelease: true, releaseOwner: ownership.owner, releaseOwnerIsLive });
     try {
+      // Only the closed predecessor route adopts its own exact stale release
+      // transaction before the fresh quiescence snapshot. Ordinary v1 keeps
+      // treating any transaction residue as red.
+      if (args.exactLegacyDeploy) await recoverTransaction(args.target);
       const processSnapshot = await readProductionSnapshot(release.manifest.processSnapshotPath, ownership);
-      await verifyReleaseQuiescence({
+      const quiescenceInput = {
         installedTarget: args.target,
         runRoots: release.manifest.runRoots,
         processSnapshot,
@@ -1483,8 +1526,10 @@ async function main() {
           writerClaimPaths: ownership.writerClaims.map((claim) => claim.path),
           targetLock: { path: targetLock.path, bytes: targetLock.bytes },
         },
-      });
-      return await executeOperation(args, targetLock);
+      };
+      if (args.exactLegacyDeploy) await verifyExactLegacyDeployQuiescence(quiescenceInput);
+      else await verifyReleaseQuiescence(quiescenceInput);
+      return await executeOperation({ ...args, exactLegacyManifest: args.exactLegacyDeploy ? release.manifest : undefined }, targetLock);
     } finally { await targetLock.release(); }
   });
 }

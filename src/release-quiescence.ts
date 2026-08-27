@@ -45,6 +45,10 @@ export type ReleaseQuiescenceReport = Readonly<{
   effectCount: number; processCount: number; capturedAt: string;
 }>;
 
+/** Private production-only predecessor-release gate. The deployment tool
+ * calls this only for the closed v2 0.2.12 -> 0.3.0 operation. */
+export type ExactLegacyDeployQuiescenceInput = ReleaseQuiescenceInput & Readonly<{ runRoots: readonly string[] }>;
+
 type EffectChain = Readonly<{ launch: LaunchRecord; terminal: TerminalRecord; copiedExecutable: string }>;
 
 function fail(message: string): never { throw new Error(`ReleaseQuiescence: ${message}`); }
@@ -183,7 +187,7 @@ async function validateReleaseOwnership(ownership: NonNullable<ReleaseQuiescence
   await exactOwnedBytes(ownership.targetLock.path, ownership.targetLock.bytes, 'target transaction ownership');
 }
 
-async function validateInstalledTarget(path: string, ownership?: ReleaseQuiescenceInput['releaseOwnership']): Promise<{ path: string; bridgeVersion: string; runtimeVersion: string }> {
+async function validateInstalledTarget(path: string, ownership?: ReleaseQuiescenceInput['releaseOwnership'], requireCurrentReleaseFiles = true): Promise<{ path: string; bridgeVersion: string; runtimeVersion: string }> {
   const target = canonicalPath(path, 'installed target');
   const trusted = await inspectTrustedPath(target, 'installed target', { surface: true, kind: 'directory' }).catch((error) => fail(`installed target is unreadable: ${(error as Error).message}`));
   if (!trusted) fail('installed target is absent');
@@ -199,7 +203,10 @@ async function validateInstalledTarget(path: string, ownership?: ReleaseQuiescen
   const runtime = join(target, 'runtime');
   const runtimeTrusted = await inspectTrustedPath(runtime, 'installed runtime', { surface: true, kind: 'directory' }).catch((error) => fail(`installed runtime is unreadable: ${(error as Error).message}`));
   if (!runtimeTrusted) fail('installed runtime is absent');
-  for (const required of ['bridge.mjs', 'schemas/codex-terminal-record.schema.json', 'dist/store.js', 'dist/codex-effect-records.js']) {
+  const requiredFiles = requireCurrentReleaseFiles
+    ? ['bridge.mjs', 'schemas/codex-terminal-record.schema.json', 'dist/store.js', 'dist/codex-effect-records.js']
+    : ['bridge.mjs'];
+  for (const required of requiredFiles) {
     const item = await inspectTrustedPath(join(runtime, required), `installed runtime ${required}`, { surface: true, kind: 'file' }).catch((error) => fail(`installed runtime ${required} is unreadable: ${(error as Error).message}`));
     if (!item) fail(`installed runtime ${required} is absent`);
   }
@@ -309,7 +316,7 @@ function afterTerminal(process: ProcessSnapshotRecord, terminal: TerminalRecord)
   return Date.parse(process.startedAt) > Date.parse(terminal.finishedAt);
 }
 
-function validateProcesses(snapshot: ProcessSnapshot, installedTarget: string, roots: readonly string[], effects: readonly EffectChain[], selfPid?: number): void {
+function validateProcesses(snapshot: ProcessSnapshot, installedTarget: string, roots: readonly string[], effects: readonly EffectChain[], selfPid?: number, rejectAnyInstalledTargetProcess = false): void {
   const bridgePath = join(installedTarget, 'runtime', 'bridge.mjs');
   const rootSet = new Set(roots); const copied = new Map(effects.map((effect) => [effect.copiedExecutable, effect]));
   const byChildPid = new Map(effects.map((effect) => [effect.launch.child.pid, effect]));
@@ -317,6 +324,7 @@ function validateProcesses(snapshot: ProcessSnapshot, installedTarget: string, r
   for (const effect of effects) bySupervisorPid.set(effect.launch.supervisor.pid, [...(bySupervisorPid.get(effect.launch.supervisor.pid) ?? []), effect]);
   for (const process of snapshot.processes) {
     const exactTokens = new Set([process.executable, ...process.argv]);
+    if (rejectAnyInstalledTargetProcess && process.pid !== selfPid && [...exactTokens].some((token) => token === installedTarget || token.startsWith(`${installedTarget}${sep}`))) fail(`live installed-target process ${process.pid}`);
     const bridgeIndex = process.argv.findIndex((token) => token === bridgePath || /^\/.*\/runtime\/bridge\.mjs$/.test(token));
     if (bridgeIndex >= 0 && process.argv[bridgeIndex + 1] === 'drive') fail(`live managed bridge/pump process ${process.pid}`);
     for (const token of exactTokens) {
@@ -338,6 +346,17 @@ function validateProcesses(snapshot: ProcessSnapshot, installedTarget: string, r
     if (supervised?.some((effect) => !afterTerminal(process, effect.terminal))) fail(`live Codex supervisor ${process.pid}`);
     if (selfPid !== undefined && process.pid === selfPid) continue;
   }
+}
+
+export async function verifyExactLegacyDeployQuiescence(input: ExactLegacyDeployQuiescenceInput): Promise<ReleaseQuiescenceReport> {
+  if (!input || typeof input !== 'object' || !Array.isArray(input.runRoots) || input.runRoots.length !== 0) fail('exact 0.2.12 deploy requires an empty run-root set');
+  if (!input.releaseOwnership) fail('exact 0.2.12 deploy requires release ownership');
+  await validateReleaseOwnership(input.releaseOwnership, input.installedTarget, input.runRoots);
+  const target = await validateInstalledTarget(input.installedTarget, input.releaseOwnership, false);
+  if (target.runtimeVersion !== '0.2.12' || target.bridgeVersion !== '0.1.0') fail('installed target is not the attested 0.2.12 release');
+  const snapshot = parseProcessSnapshot(input.processSnapshot);
+  validateProcesses(snapshot, target.path, input.runRoots, [], input.selfPid, true);
+  return Object.freeze({ status: 'QUIESCENT', installedTarget: target.path, runRoots: Object.freeze([]), runCount: 0, effectCount: 0, processCount: snapshot.processes.length, capturedAt: snapshot.capturedAt });
 }
 
 export async function verifyReleaseQuiescence(input: ReleaseQuiescenceInput): Promise<ReleaseQuiescenceReport> {
