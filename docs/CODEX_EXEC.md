@@ -46,8 +46,20 @@ executable image, workspace, run root, and authority files are passed through
 fixed child descriptor slots; on macOS, the copied executable, every snapshot
 entry/root, and the workspace/run-root roots are sealed first, then synchronously
 rechecked for identity, digest, ownership, mode, metadata, and immutable flags
-immediately before process entry. A replacement or transient mutation of any
-attested input fences the launch before spawn.
+immediately before process entry. Immediately after `spawn` returns, the two
+entry-only workspace/run-root flags are synchronously cleared and verified
+against those exact inode witnesses before launch publication or any awaited
+bridge work, so state projection can proceed while the child remains live. A
+native flag observation fails closed when the filesystem inspection or
+fallback `stat` subprocess errors, exits unsuccessfully, or returns missing,
+unparseable, or out-of-range flags; test-only flag setter/observer seams are
+rejected when paired with the production spawn implementation. A
+clear/verification failure terminates the unpublished owned child tree and
+leaves the one-shot intent as conservative evidence; terminal cleanup is a
+separate best-effort fallback that never clears a replacement pathname. The
+copied executable and authority snapshot retain their immutable evidence
+boundary. A replacement or transient mutation of any attested input fences the
+launch before spawn or before launch publication, respectively.
 
 ## Disposable probe
 

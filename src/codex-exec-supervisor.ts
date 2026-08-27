@@ -38,7 +38,9 @@ export type CodexSupervisorOptions = Readonly<{
   spawnProcess?: typeof spawn;
   attestExecutable?: (policy: CodexHostPolicy) => Promise<CodexBinaryAttestation>;
   /** Injectable only for deterministic Darwin sealing regressions. */
-  sealImmutable?: (path: string, enabled: boolean) => void;
+  sealImmutable?: (path: string, enabled: boolean) => boolean | void;
+  /** Injectable only for deterministic Darwin flag-observation regressions. */
+  observeImmutable?: (path: string) => boolean;
   /** Injectable process-group signal seam for deterministic tree tests. */
   signalProcessTree?: (pid: number, signal: NodeJS.Signals) => void;
   /** Injectable durable launch publication seam for deterministic failures. */
@@ -192,22 +194,23 @@ async function writeAuthoritySnapshotFile(snapshotRoot: string, snapshotPath: st
   await syncDirectory(dirname(snapshotPath), `${label} snapshot directory`);
 }
 
-type ImmutableSetter = (path: string, enabled: boolean) => void;
+type ImmutableSetter = (path: string, enabled: boolean) => boolean | void;
+type ImmutableObserver = (path: string) => boolean;
 
 function setImmutableSync(path: string, enabled: boolean, override?: ImmutableSetter, simulatedFlags?: Map<string, boolean>): void {
   // Darwin has no descriptor-relative cwd in child_process.spawn.  A private
   // uchg boundary is therefore used for the detached launch image/snapshot;
   // Linux binds the actual image and directories through inherited fds below.
-  if (process.platform !== 'darwin') return;
   if (override) {
-    override(path, enabled);
+    const changed = override(path, enabled);
     // The optional setter is a deterministic test seam standing in for the
     // Darwin kernel flag. Keep that simulated state scoped to one supervisor
     // so final verification remains meaningful without weakening production,
     // which always reads the native flag.
-    simulatedFlags?.set(path, enabled);
+    if (changed !== false) simulatedFlags?.set(path, enabled);
     return;
   }
+  if (process.platform !== 'darwin') return;
   const result = spawnSync('/usr/bin/chflags', [enabled ? 'uchg' : 'nouchg', path], { shell: false, stdio: 'ignore' });
   if (result.error || result.status !== 0) fail(`${path} could not be made immutable`);
 }
@@ -290,7 +293,12 @@ async function sealAuthoritySnapshot(root: string, override?: ImmutableSetter, s
   return before;
 }
 
-function immutableFlagSync(path: string, simulatedFlags?: ReadonlyMap<string, boolean>): boolean {
+function immutableFlagSync(path: string, simulatedFlags?: ReadonlyMap<string, boolean>, override?: ImmutableObserver): boolean {
+  if (override) {
+    const observed: unknown = override(path);
+    if (observed !== true && observed !== false) fail(`${path} immutable flag observation was not an exact state`);
+    return observed;
+  }
   const simulated = simulatedFlags?.get(path);
   if (simulated !== undefined) return simulated;
   const stat = lstatSync(path) as import('node:fs').Stats & { flags?: number };
@@ -298,11 +306,18 @@ function immutableFlagSync(path: string, simulatedFlags?: ReadonlyMap<string, bo
   // UF_IMMUTABLE is 0x00000002 on Darwin. Keep a synchronous stat fallback
   // for older bindings; it runs inside the final fence, before spawn, and is
   // never followed by an await or another mutable pathname operation.
-  if (typeof stat.flags === 'number') return (stat.flags & 0x00000002) !== 0;
+  if (typeof stat.flags === 'number') {
+    if (!Number.isSafeInteger(stat.flags) || stat.flags < 0 || stat.flags > 0xffffffff) fail(`${path} immutable flag observation was out of range`);
+    return (stat.flags & 0x00000002) !== 0;
+  }
   const result = spawnSync('/usr/bin/stat', ['-f', '%f', path], { shell: false, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
-  if (result.error || result.status !== 0) return false;
-  const value = Number.parseInt(String(result.stdout).trim(), 16);
-  return Number.isSafeInteger(value) && (value & 0x00000002) !== 0;
+  if (result.error) fail(`${path} immutable flag observation failed: ${result.error.message}`);
+  if (result.status !== 0) fail(`${path} immutable flag observation exited with status ${String(result.status)}`);
+  const output = String(result.stdout).trim();
+  if (!/^[0-9a-fA-F]+$/.test(output)) fail(`${path} immutable flag observation was unparseable`);
+  const value = Number.parseInt(output, 16);
+  if (!Number.isSafeInteger(value) || value < 0 || value > 0xffffffff) fail(`${path} immutable flag observation was out of range`);
+  return (value & 0x00000002) !== 0;
 }
 
 type ExecutableImage = Readonly<{ path: string; fd?: number; cleanup: () => Promise<void> }>;
@@ -407,6 +422,7 @@ function verifySealedLaunchInputsSync(args: Readonly<{
   workspaceBefore: SyncPathWitness | undefined;
   workspaceSealed: SyncPathWitness | undefined;
   simulatedFlags?: ReadonlyMap<string, boolean>;
+  observeImmutable?: ImmutableObserver;
 }>): void {
   const expectedBefore = new Map(args.snapshotBefore.map((entry) => [entry.path, entry]));
   const expectedSealed = new Map(args.snapshotSealed.map((entry) => [entry.path, entry]));
@@ -418,18 +434,18 @@ function verifySealedLaunchInputsSync(args: Readonly<{
     if (entry.uid !== prior.uid || entry.gid !== prior.gid || entry.nlink !== prior.nlink || entry.size !== prior.size || entry.mtimeMs !== prior.mtimeMs || entry.digest !== prior.digest || entry.ctimeMs !== sealed.ctimeMs) fail('Codex authority snapshot metadata changed before spawn');
     const expectedMode = entry.kind === 'directory' || entry.path === join(args.snapshotRoot, 'codex-executable') ? 0o500 : 0o400;
     if (entry.mode !== expectedMode) fail('Codex authority snapshot mode changed before spawn');
-    if (!immutableFlagSync(entry.path, args.simulatedFlags)) fail(`Codex authority snapshot ${entry.path} is not immutable before spawn`);
+    if (!immutableFlagSync(entry.path, args.simulatedFlags, args.observeImmutable)) fail(`Codex authority snapshot ${entry.path} is not immutable before spawn`);
   }
   const verifyRoot = (path: string, before: SyncPathWitness | undefined, sealed: SyncPathWitness | undefined, label: string): void => {
     const current = syncPathWitness(path);
     if (!current || !current.mode || !sameLaunchInputMetadata(before, current) || !sealed || current.ctimeMs !== sealed.ctimeMs) fail(`${label} changed before spawn`);
     if (!current || (current.mode & 0o170000) !== 0o040000) fail(`${label} is not a directory`);
-    if (!immutableFlagSync(path, args.simulatedFlags)) fail(`${label} is not immutable before spawn`);
+    if (!immutableFlagSync(path, args.simulatedFlags, args.observeImmutable)) fail(`${label} is not immutable before spawn`);
   };
   verifyRoot(args.runRoot, args.runRootBefore, args.runRootSealed, 'Codex run root');
   verifyRoot(args.workspace, args.workspaceBefore, args.workspaceSealed, 'Codex workspace');
   const executable = syncPathWitness(args.executablePath);
-  if (!executable || !executable.mode || (executable.mode & 0o170000) !== 0o100000 || (executable.mode & 0o777) !== 0o500 || executable.nlink !== 1 || sha256(readFileSync(args.executablePath)) !== args.executableDigest || !immutableFlagSync(args.executablePath, args.simulatedFlags)) fail('Codex launch executable changed before spawn');
+  if (!executable || !executable.mode || (executable.mode & 0o170000) !== 0o100000 || (executable.mode & 0o777) !== 0o500 || executable.nlink !== 1 || sha256(readFileSync(args.executablePath)) !== args.executableDigest || !immutableFlagSync(args.executablePath, args.simulatedFlags, args.observeImmutable)) fail('Codex launch executable changed before spawn');
 }
 
 type LaunchDirectoryBoundary = Readonly<{
@@ -621,6 +637,7 @@ export class CodexExecSupervisor {
   private readonly spawnProcess: typeof spawn;
   private readonly attest: (policy: CodexHostPolicy) => Promise<CodexBinaryAttestation>;
   private readonly sealImmutable?: ImmutableSetter;
+  private readonly observeImmutable?: ImmutableObserver;
   private readonly signalProcessTreeOverride?: (pid: number, signal: NodeJS.Signals) => void;
   private readonly writeLaunch: typeof writeLaunchRecord;
   private readonly simulatedImmutableFlags = new Map<string, boolean>();
@@ -634,6 +651,7 @@ export class CodexExecSupervisor {
   private executableImage?: ExecutableImage;
   private executableWitness?: SyncPathWitness;
   private immutableRoots = false;
+  private entryRootWitnesses?: Readonly<{ runRoot: SyncPathWitness; workspace: SyncPathWitness }>;
   private child?: ChildProcess;
   private token?: string;
   private commandDigest?: string;
@@ -658,15 +676,23 @@ export class CodexExecSupervisor {
   private readonly stdout: BoundedText = { text: '', bytes: 0, overflow: false };
   private readonly stderr: BoundedText = { text: '', bytes: 0, overflow: false };
 
+  private get usesDarwinEntryFence(): boolean {
+    // A custom immutable setter is a platform-neutral test seam. Production
+    // can enter this branch only on Darwin because the real spawn path rejects
+    // a custom setter in the constructor.
+    return process.platform === 'darwin' || this.sealImmutable !== undefined || this.observeImmutable !== undefined;
+  }
+
   constructor(options: CodexSupervisorOptions) {
     if (!options || typeof options !== 'object') fail('options are required');
     this.policy = options.policy;
     this.spawnProcess = options.spawnProcess ?? spawn;
     this.attest = options.attestExecutable ?? attestCodexExecutable;
     this.sealImmutable = options.sealImmutable;
+    this.observeImmutable = options.observeImmutable;
     this.signalProcessTreeOverride = options.signalProcessTree;
     this.writeLaunch = options.writeLaunch ?? writeLaunchRecord;
-    if (this.sealImmutable && this.spawnProcess === spawn) fail('sealImmutable is test-only and cannot replace Darwin kernel sealing');
+    if ((this.sealImmutable || this.observeImmutable) && this.spawnProcess === spawn) fail('immutable flag seams are test-only and cannot replace Darwin kernel sealing');
     this.now = options.now ?? (() => new Date());
   }
 
@@ -693,7 +719,7 @@ export class CodexExecSupervisor {
     // durable effect path named in their test callback.  The real path remains
     // descriptor-bound, while custom tests still exercise immutable snapshots
     // and all pre-entry fences.
-    const descriptorBound = process.platform === 'linux' && this.spawnProcess === spawn;
+    const descriptorBound = process.platform === 'linux' && !this.usesDarwinEntryFence && this.spawnProcess === spawn;
     const descriptorWorkspace = descriptorBound ? '/proc/self/fd/4' : undefined;
     const descriptorRunRoot = descriptorBound ? '/proc/self/fd/5' : undefined;
     const authorityPaths = descriptorBound ? launchAuthorityDescriptorPaths(this.policy, command) : launchAuthoritySnapshotPaths(this.policy, command);
@@ -744,7 +770,7 @@ export class CodexExecSupervisor {
     let launchAttestation = attestation;
     let attestationAtSpawn = launchAttestation;
     let reservedPaths: ReturnType<typeof effectPaths>;
-    if (process.platform === 'darwin') {
+    if (this.usesDarwinEntryFence) {
       // Reserve the one-shot intent before the second/third executable witness
       // so those witnesses cannot be blocked waiting for a name that has not
       // yet been published. The reservation is removed durably only when the
@@ -812,9 +838,9 @@ export class CodexExecSupervisor {
     // The pre-seal identities defend the sealing traversal itself; this
     // post-seal witness is the metadata baseline for the final synchronous
     // Darwin fence (chmod/chflags legitimately update ctime).
-    const snapshotSealed = process.platform === 'darwin' ? snapshotWitnessesSync(snapshotRoot) : undefined;
+    const snapshotSealed = this.usesDarwinEntryFence ? snapshotWitnessesSync(snapshotRoot) : undefined;
     if (descriptorBound) this.launchAuthority = await bindLaunchAuthorityFiles(this.policy, command, snapshotRoot);
-    if (process.platform !== 'darwin') {
+    if (!this.usesDarwinEntryFence) {
       // Recheck the immutable launch slot after reserving it. A stale
       // pre-upgrade process may have written launch.json without the intent;
       // never race it into a second child.
@@ -829,12 +855,15 @@ export class CodexExecSupervisor {
         || attestationAtSpawn.physicalPath !== launchAttestation.physicalPath || attestationAtSpawn.requestedPathIsSymlink !== launchAttestation.requestedPathIsSymlink
         || attestationAtSpawn.uid !== launchAttestation.uid || attestationAtSpawn.gid !== launchAttestation.gid || attestationAtSpawn.mode !== launchAttestation.mode) fail('Codex executable changed before spawn');
     }
-    if (process.platform === 'darwin') {
+    if (this.usesDarwinEntryFence) {
+      // Release admission is the last asynchronous gate. From the root seals
+      // below through spawn and their strict release there is no await.
+      await assertReleaseAdmissionOpen(this.policy.runRoot);
+      if (spec.signal?.aborted) fail('launch was cancelled before spawn');
       // macOS spawn(2) cannot use a directory descriptor as cwd. Seal both
       // pathname roots synchronously, then perform one complete synchronous
       // verification. There is intentionally no await, subprocess, or
       // mutable pathname operation between this fence and child_process.spawn.
-      this.immutableRoots = true;
       try {
         // Snapshot creation necessarily updates the run-root directory mtime;
         // capture the root/workspace witnesses after all launch preparation and
@@ -842,11 +871,18 @@ export class CodexExecSupervisor {
         // identity-only witnesses used by Linux's asynchronous fence.
         const rootWitnessBeforeSeal = syncPathWitness(this.policy.runRoot);
         const workspaceWitnessBeforeSeal = syncPathWitness(this.policy.workspace);
+        if (!rootWitnessBeforeSeal || !workspaceWitnessBeforeSeal) fail('Codex run root/workspace disappeared while sealing');
+        // Record exact ownership before the first flag mutation so even a
+        // partial seal failure can clear only flags placed on these inodes.
+        this.entryRootWitnesses = Object.freeze({ runRoot: rootWitnessBeforeSeal, workspace: workspaceWitnessBeforeSeal });
+        if (immutableFlagSync(this.policy.workspace, this.simulatedImmutableFlags, this.observeImmutable) || immutableFlagSync(this.policy.runRoot, this.simulatedImmutableFlags, this.observeImmutable)) fail('Codex run root/workspace was already immutable before entry sealing');
+        this.immutableRoots = true;
         setImmutableSync(this.policy.workspace, true, this.sealImmutable, this.simulatedImmutableFlags);
         setImmutableSync(this.policy.runRoot, true, this.sealImmutable, this.simulatedImmutableFlags);
         const rootWitnessAtSeal = syncPathWitness(this.policy.runRoot);
         const workspaceWitnessAtSeal = syncPathWitness(this.policy.workspace);
         if (!rootWitnessBeforeSeal || !workspaceWitnessBeforeSeal || !rootWitnessAtSeal || !workspaceWitnessAtSeal) fail('Codex run root/workspace disappeared while sealing');
+        this.entryRootWitnesses = Object.freeze({ runRoot: rootWitnessAtSeal, workspace: workspaceWitnessAtSeal });
         if (this.spawnProcess === spawn && !this.executableImage) fail('Codex launch executable image is unavailable');
         if (this.executableImage) verifySealedLaunchInputsSync({
           snapshotRoot,
@@ -861,11 +897,12 @@ export class CodexExecSupervisor {
           workspaceBefore: workspaceWitnessBeforeSeal,
           workspaceSealed: workspaceWitnessAtSeal,
           simulatedFlags: this.simulatedImmutableFlags,
+          observeImmutable: this.observeImmutable,
         });
         else if (!sameSyncPathWitness(this.executableWitness, executablePathWitness(attestationAtSpawn.requestedPath, attestationAtSpawn.physicalPath))) fail('Codex executable changed before spawn');
       }
       catch (error) {
-        this.releaseImmutableRoots();
+        this.releaseImmutableRootsBestEffort();
         throw error;
       }
     } else {
@@ -881,12 +918,9 @@ export class CodexExecSupervisor {
       if (!sameSyncPathIdentity(rootWitness, syncPathWitness(this.policy.runRoot)) || !sameSyncPathIdentity(workspaceWitness, syncPathWitness(this.policy.workspace))) fail('Codex run root/workspace changed before spawn');
       if (!sameSyncPathWitness(this.executableWitness, executablePathWitness(attestationAtSpawn.requestedPath, attestationAtSpawn.physicalPath))) fail('Codex executable changed before spawn');
       if (spec.signal?.aborted) fail('launch was cancelled before spawn');
+      await assertReleaseAdmissionOpen(this.policy.runRoot);
+      if (spec.signal?.aborted) fail('launch was cancelled before spawn');
     }
-    // This final synchronous check also covers Darwin's no-await sealing
-    // window and preserves the one-token cancellation fence immediately at
-    // child entry.
-    await assertReleaseAdmissionOpen(this.policy.runRoot);
-    if (spec.signal?.aborted) fail('launch was cancelled before spawn');
     const spawnStdio: SpawnOptions['stdio'] = ['pipe', 'pipe', 'pipe'];
     if (descriptorBound) {
       (spawnStdio as Array<unknown>)[3] = this.executableImage?.fd ?? 'ignore';
@@ -896,7 +930,7 @@ export class CodexExecSupervisor {
     }
     let child: ChildProcess;
     try {
-      const immutableExecutablePath = (descriptorBound || process.platform === 'darwin') ? this.executableImage?.path : undefined;
+      const immutableExecutablePath = (descriptorBound || this.usesDarwinEntryFence) ? this.executableImage?.path : undefined;
       child = this.spawnProcess(immutableExecutablePath ?? attestationAtSpawn.physicalPath, args, {
       cwd: this.launchBoundary?.cwd ?? this.policy.workspace,
       env: childEnvironment(this.policy),
@@ -906,16 +940,42 @@ export class CodexExecSupervisor {
       stdio: spawnStdio,
       } as SpawnOptions);
     } catch (error) {
-      this.releaseImmutableRoots();
+      this.releaseImmutableRootsBestEffort();
       throw error;
     }
     this.child = child;
     this.childClosedPromise = new Promise<void>((resolvePromise) => { this.resolveChildClosed = resolvePromise; });
+    // Keep the child observable if the strict synchronous post-entry
+    // transition fails before launch publication. Event delivery cannot occur
+    // inside the no-await transition, but these listeners let bounded teardown
+    // settle once the event loop resumes.
+    const onUnpublishedClose = (): void => { this.markChildClosed(); };
+    const onUnpublishedError = (): void => { this.markChildClosed(); };
+    child.once('close', onUnpublishedClose);
+    child.once('error', onUnpublishedError);
+    try {
+      if (this.usesDarwinEntryFence) this.releaseEntryRootsAfterSpawnSync();
+    } catch (error) {
+      // Begin termination synchronously, then bound the owned-tree reap. No
+      // launch record or success receipt exists at this point; the durable
+      // one-shot intent remains the conservative retry fence.
+      this.signalOwnedTree('SIGTERM');
+      await this.terminateUnpublishedChild();
+      child.removeListener('close', onUnpublishedClose);
+      child.removeListener('error', onUnpublishedError);
+      await this.cleanupAfterSettlement();
+      fail(`post-entry run-root/workspace immutable release failed before launch publication: ${(error as Error).message}`);
+    }
     const childPid = child.pid;
     if (!Number.isSafeInteger(childPid) || (childPid as number) < 1) {
-      try { child.kill('SIGTERM'); } catch { /* best effort; no receipt is returned */ }
+      this.signalOwnedTree('SIGTERM');
+      await this.terminateUnpublishedChild();
+      child.removeListener('close', onUnpublishedClose);
+      child.removeListener('error', onUnpublishedError);
       fail('Codex child did not expose a valid pid');
     }
+    child.removeListener('close', onUnpublishedClose);
+    child.removeListener('error', onUnpublishedError);
     this.onStdoutData = (chunk: unknown) => boundedPush(this.stdout, chunk, this.policy.maxOutputBytes);
     this.onStderrData = (chunk: unknown) => boundedPush(this.stderr, chunk, this.policy.maxErrorBytes);
     child.stdout?.on('data', this.onStdoutData);
@@ -1010,11 +1070,13 @@ export class CodexExecSupervisor {
 
   private signalOwnedTree(signal: NodeJS.Signals): void {
     const child = this.child; const pid = child?.pid;
-    if (!child || !Number.isSafeInteger(pid) || (pid as number) < 1) return;
-    try {
-      if (this.signalProcessTreeOverride) this.signalProcessTreeOverride(pid as number, signal);
-      else if (this.spawnProcess === spawn && process.platform !== 'win32') process.kill(-(pid as number), signal);
-    } catch { /* the group may already have exited */ }
+    if (!child) return;
+    if (Number.isSafeInteger(pid) && (pid as number) > 0) {
+      try {
+        if (this.signalProcessTreeOverride) this.signalProcessTreeOverride(pid as number, signal);
+        else if (this.spawnProcess === spawn && process.platform !== 'win32') process.kill(-(pid as number), signal);
+      } catch { /* the group may already have exited */ }
+    }
     try { child.kill(signal); } catch { /* terminal/close evidence remains authoritative */ }
   }
 
@@ -1164,7 +1226,7 @@ export class CodexExecSupervisor {
   }
 
   private async releaseLaunchInputs(): Promise<void> {
-    this.releaseImmutableRoots();
+    this.releaseImmutableRootsBestEffort();
     const image = this.executableImage; this.executableImage = undefined;
     const boundary = this.launchBoundary; this.launchBoundary = undefined;
     const authority = this.launchAuthority; this.launchAuthority = undefined;
@@ -1173,11 +1235,37 @@ export class CodexExecSupervisor {
     await boundary?.cleanup().catch(() => undefined);
   }
 
-  private releaseImmutableRoots(): void {
-    if (!this.immutableRoots) return;
+  private releaseEntryRootsAfterSpawnSync(): void {
+    const witnesses = this.entryRootWitnesses;
+    if (!this.immutableRoots || !witnesses) fail('Darwin entry flags are not owned by this launch');
+    const release = (path: string, witness: SyncPathWitness, label: string): void => {
+      if (!sameSyncPathIdentity(witness, syncPathWitness(path))) fail(`${label} identity changed before post-entry immutable release`);
+      if (!immutableFlagSync(path, this.simulatedImmutableFlags, this.observeImmutable)) fail(`${label} immutable flag was lost before post-entry release`);
+      setImmutableSync(path, false, this.sealImmutable, this.simulatedImmutableFlags);
+      if (!sameSyncPathIdentity(witness, syncPathWitness(path))) fail(`${label} identity changed during post-entry immutable release`);
+      if (immutableFlagSync(path, this.simulatedImmutableFlags, this.observeImmutable)) fail(`${label} remained immutable after child entry`);
+    };
+    release(this.policy.workspace, witnesses.workspace, 'Codex workspace');
+    release(this.policy.runRoot, witnesses.runRoot, 'Codex run root');
+    if (!sameSyncPathIdentity(witnesses.workspace, syncPathWitness(this.policy.workspace)) || !sameSyncPathIdentity(witnesses.runRoot, syncPathWitness(this.policy.runRoot))) fail('Codex run root/workspace changed during post-entry immutable release');
+    if (immutableFlagSync(this.policy.workspace, this.simulatedImmutableFlags, this.observeImmutable) || immutableFlagSync(this.policy.runRoot, this.simulatedImmutableFlags, this.observeImmutable)) fail('Codex run root/workspace remained immutable after child entry');
     this.immutableRoots = false;
-    try { setImmutableSync(this.policy.workspace, false, this.sealImmutable, this.simulatedImmutableFlags); } catch { /* preserve terminal evidence */ }
-    try { setImmutableSync(this.policy.runRoot, false, this.sealImmutable, this.simulatedImmutableFlags); } catch { /* preserve terminal evidence */ }
+    this.entryRootWitnesses = undefined;
+  }
+
+  private releaseImmutableRootsBestEffort(): void {
+    if (!this.immutableRoots) return;
+    const witnesses = this.entryRootWitnesses;
+    this.immutableRoots = false;
+    this.entryRootWitnesses = undefined;
+    const release = (path: string, witness: SyncPathWitness | undefined): void => {
+      if (!witness || !sameSyncPathIdentity(witness, syncPathWitness(path))) return;
+      try {
+        if (immutableFlagSync(path, this.simulatedImmutableFlags, this.observeImmutable)) setImmutableSync(path, false, this.sealImmutable, this.simulatedImmutableFlags);
+      } catch { /* preserve conservative intent/terminal evidence */ }
+    };
+    release(this.policy.workspace, witnesses?.workspace);
+    release(this.policy.runRoot, witnesses?.runRoot);
   }
 
   private async readFinal(path: string): Promise<Awaited<ReturnType<typeof readBoundedUtf8File>> & { result?: CodexWorkerResult }> {
