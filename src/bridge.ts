@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { canonicalString, digest, identityKey, parseCanonical } from './canonical.js';
 import { acceptedStartPlanDigests, makeComposedKernelForBridge, makeRunKernelForBridge, type DispatcherOptions, type RunKernel } from './public.js';
 import type { EffectDriver } from './driver.js';
-import { FileArtifactStore, type StoreSnapshot } from './store.js';
+import { FileArtifactStore, isFileArtifactStoreAbort, type StoreSnapshot } from './store.js';
 import { assertStableIdentity, ensurePrivateDirectory, filesystemIdentity, inspectTrustedPath, sameFilesystemIdentity, trustedIdentity, type FilesystemIdentity } from './filesystem.js';
 import { validatePlan } from './validator.js';
 import { BEADS_BUILD, BEADS_COMMIT, BEADS_SCHEMA_VERSION, BEADS_SNAPSHOT_SCHEMA, BEADS_VERSION, BeadsPlanSource, BeadsUnavailable, validateBeadsAcknowledgement, beadsPlanDigest, beadsSnapshotDigest, type BeadsAcknowledgement, type BeadsCapture } from './beads.js';
@@ -115,6 +115,22 @@ export type BridgeOptions = {
   driver?: EffectDriver;
   dispatcher?: DispatcherOptions;
 };
+
+/** Snapshot only supported own-enumerable dispatcher controls, once. */
+function projectBridgeDispatcher(dispatcher: DispatcherOptions | undefined): DispatcherOptions {
+  const projected = Object.create(null) as DispatcherOptions;
+  if (dispatcher === undefined || dispatcher === null) return projected;
+  const supported = new Set(['timeoutMs', 'signal', 'onYield']);
+  for (const key of Object.getOwnPropertyNames(dispatcher)) {
+    if (!supported.has(key)) continue;
+    const descriptor = Object.getOwnPropertyDescriptor(dispatcher, key);
+    if (!descriptor?.enumerable) continue;
+    if (key === 'timeoutMs') projected.timeoutMs = dispatcher.timeoutMs;
+    else if (key === 'signal') projected.signal = dispatcher.signal;
+    else projected.onYield = dispatcher.onYield;
+  }
+  return projected;
+}
 
 export type BridgeProjection = {
   statePath: string;
@@ -978,13 +994,14 @@ async function project(rootDir: string, options: BridgeOptions, state: MachineSt
   return { statePath, stepsPath, digest: digest(payload), revision: state.revision };
 }
 
-async function storeSnapshot(rootDir: string, counters: BridgeCounters, expectedRootIdentity?: FilesystemIdentity): Promise<StoreSnapshot> {
+async function storeSnapshot(rootDir: string, counters: BridgeCounters, expectedRootIdentity?: FilesystemIdentity, signal?: AbortSignal): Promise<StoreSnapshot> {
   try {
-    const snapshot = await new FileArtifactStore(rootDir, expectedRootIdentity).load();
+    const snapshot = await new FileArtifactStore(rootDir, expectedRootIdentity).load(signal);
     counters.runtimeReads += 1;
     counters.runtimeBytes += Buffer.byteLength(canonicalString(snapshot.state ?? { generation: snapshot.generation }));
     return snapshot;
   } catch (error) {
+    if (isFileArtifactStoreAbort(error)) throw error;
     if ((error as NodeJS.ErrnoException).code === 'ENOENT' || (error as Error).message.includes('ENOENT')) {
       const root = await lstatNoFollow(rootDir, 'runDir');
       const kernel = await lstatNoFollow(join(rootDir, '.kernel'), '.kernel');
@@ -1116,6 +1133,8 @@ export async function transition(options: BridgeOptions, transitionInput: Bridge
   const bridgeVersion = options.bridgeVersion;
   const runtimeVersion = options.runtimeVersion;
   const optionCounters = options.counters;
+  const dispatcher = projectBridgeDispatcher(options.dispatcher);
+  const dispatcherSignal = dispatcher.signal;
   if (mode === undefined) throw new BridgeError('Unavailable', 'bridge mode is required');
   if (typeof runDir !== 'string' || typeof runId !== 'string' || runId.length === 0) throw new BridgeError('Unavailable', 'bridge run identity is required');
   if (!transitionInput || typeof transitionInput !== 'object') throw new BridgeError('Unavailable', 'bridge transition identity is invalid');
@@ -1234,7 +1253,7 @@ export async function transition(options: BridgeOptions, transitionInput: Bridge
   return await withBridgeOperationLock(rootPath, async (lockedRootIdentity) => {
     const rootStat = await lstatNoFollow(rootPath, 'runDir');
     if (rootStat && !rootStat.isDirectory()) throw new BridgeError('PathMismatch', 'runDir is not a directory');
-    const currentSnapshot = await storeSnapshot(rootPath, counters, lockedRootIdentity);
+    const currentSnapshot = await storeSnapshot(rootPath, counters, lockedRootIdentity, dispatcherSignal);
     let manifest = await loadManifest(rootPath);
     if (await hasTombstone(rootPath)) throw new BridgeError('ManifestMismatch', 'runtime bridge metadata was deleted; reinitialize at a new run root');
     if (manifest?.status === 'disabled') throw new BridgeError('Disabled', 'runtime bridge is disabled; start an explicit markdown-mode run instead');
@@ -1397,15 +1416,16 @@ export async function transition(options: BridgeOptions, transitionInput: Bridge
     try {
       const kernel: RunKernel = options.driver === undefined
         ? makeRunKernelForBridge({ plan: kernelPlan, rootDir: rootPath }, lockedRootIdentity)
-        : makeComposedKernelForBridge({ plan: kernelPlan, rootDir: rootPath }, lockedRootIdentity, options.driver, options.dispatcher);
+        : makeComposedKernelForBridge({ plan: kernelPlan, rootDir: rootPath }, lockedRootIdentity, options.driver, dispatcher);
       yieldValue = await kernel.advance(input);
     } catch (error) {
       if (error instanceof BridgeError) throw error;
+      if (isFileArtifactStoreAbort(error)) throw error;
       const message = (error as Error).message;
       if (message.includes('ManifestMismatch')) throw new BridgeError('ManifestMismatch', message);
       throw error;
     }
-    const after = await storeSnapshot(rootPath, counters, lockedRootIdentity);
+    const after = await storeSnapshot(rootPath, counters, lockedRootIdentity, dispatcherSignal);
     if (!after.state) throw new BridgeError('ManifestMismatch', 'runtime transition committed no CURRENT state');
     if (manifest && after.state.planDigest === digest(plan) && manifest.planDigest !== digest(plan)) {
       const nextManifest = { ...manifest, planDigest: digest(plan), phaseId: plan.phaseId };

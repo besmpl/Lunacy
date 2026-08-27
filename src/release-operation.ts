@@ -79,7 +79,7 @@ export async function withReleaseExclusion<T>(options: ReleaseExclusionOptions, 
       acquired.push(claim); bridgeClaims.push(claim);
     }
     for (const root of manifest.runRoots) {
-      const claim = await acquireOwnedFileClaim(join(root, '.kernel', WRITER_LOCK), owner, { waitMs, signal: options.signal, reclaimStaleReleaseOwner: true, nonReleaseOwnerIsBusy: true, label: 'run writer exclusion' });
+      const claim = await acquireOwnedFileClaim(join(root, '.kernel', WRITER_LOCK), owner, { waitMs, signal: options.signal, reclaimStaleReleaseOwner: true, nonReleaseOwnerIsBusy: true, writerReclaimProtocol: true, label: 'run writer exclusion' });
       acquired.push(claim); writerClaims.push(claim);
     }
     const ownership = Object.freeze({

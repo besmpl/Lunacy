@@ -2,7 +2,7 @@ import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, rmdir, stat, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { canonicalString, digest } from '../dist/canonical.js';
@@ -75,6 +75,29 @@ test('writer held before acquisition settles before release ownership', async ()
   const started = Date.now();
   await withReleaseExclusion({ manifest: item.manifest, manifestDigest: item.manifestDigest, waitMs: 500 }, async () => undefined);
   assert.ok(Date.now() - started >= 25);
+});
+
+test('release writer claim waits behind the shared reclaim marker without residue', async () => {
+  const item = await fixture();
+  const writer = join(item.roots[0], '.kernel', '.writer.lock');
+  const marker = `${writer}.reclaim`;
+  await mkdir(marker, { mode: 0o700 });
+  let entered = false;
+  const acquiring = withReleaseExclusion(
+    { manifest: item.manifest, manifestDigest: item.manifestDigest, waitMs: 500 },
+    async (ownership) => {
+      entered = true;
+      assert.equal(ownership.writerClaims.length, 1);
+      assert.equal(await readFile(writer, 'utf8'), ownership.writerClaims[0].bytes);
+    },
+  );
+  await sleep(25);
+  assert.equal(entered, false);
+  await rmdir(marker);
+  await acquiring;
+  assert.equal(await exists(writer), false);
+  assert.equal(await exists(marker), false);
+  assert.deepEqual((await readdir(join(item.roots[0], '.kernel'))).filter((name) => name.startsWith('.writer.lock.new-')), []);
 });
 
 test('writer, drive, and newly created root cannot enter after release green', async () => {

@@ -7,12 +7,13 @@ import { canonicalString, digest, identityKey, parseCanonical } from './canonica
 import { validateDependencyTopology } from './dependency.js';
 import { CURRENT_BYTE_CEILING, JOURNAL_BYTE_CEILING, JOURNAL_EVENT_CEILING, MANAGED_METADATA_BYTE_CEILING, READ_ONLY_STATE_BYTE_CEILING } from './limits.js';
 import { assertStableIdentity, ensurePrivateDirectory, filesystemIdentity, inspectTrustedPath, sameFilesystemIdentity, trustedIdentity, type FilesystemIdentity } from './filesystem.js';
-import { assertReleaseAdmissionOpen } from './release-admission.js';
+import { assertReleaseAdmissionOpen, managedLaunchOwnerLiveness } from './release-admission.js';
 
 export type StoreSnapshot = { state: MachineState | undefined; generation: number };
 
 /** Private pre-publication generation CAS conflict. */
 const storeGenerationConflicts = new WeakSet<object>();
+const fileArtifactStoreAborts = new WeakSet<object>();
 
 function mintStoreGenerationConflict(): Error {
   const error = new Error('manifest revision conflict');
@@ -25,6 +26,19 @@ function mintStoreGenerationConflict(): Error {
 /** Internal authenticity predicate for pre-publication CAS conflicts. */
 export function isStoreGenerationConflict(error: unknown): boolean {
   return typeof error === 'object' && error !== null && storeGenerationConflicts.has(error);
+}
+
+function mintFileArtifactStoreAbort(): Error {
+  const error = new Error('file artifact store operation cancelled');
+  error.name = 'AbortError';
+  if (Error.captureStackTrace) Error.captureStackTrace(error, mintFileArtifactStoreAbort);
+  fileArtifactStoreAborts.add(error);
+  return error;
+}
+
+/** Authenticate cancellation minted only by FileArtifactStore's own signal. */
+export function isFileArtifactStoreAbort(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && fileArtifactStoreAborts.has(error);
 }
 
 /** Managed runtime identity read by the private Workfront inspection seam. */
@@ -87,15 +101,42 @@ const NEXT_ACTIONS = new Set(['start', 'blocked', 'advance-ready-steps', 'await-
 /** Serialize calls from one process. The filesystem fence below extends the
  * same CAS to independent kernel processes sharing a root directory. */
 const locks = new Map<string, Promise<void>>();
-async function withProcessLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+function throwIfFileStoreAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw mintFileArtifactStoreAbort();
+}
+
+async function awaitProcessTurn(previous: Promise<void>, signal?: AbortSignal): Promise<void> {
+  if (!signal) { await previous; return; }
+  throwIfFileStoreAborted(signal);
+  await new Promise<void>((resolvePromise, rejectPromise) => {
+    let settled = false;
+    const finish = (action: () => void): void => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener('abort', onAbort);
+      action();
+    };
+    const onAbort = (): void => finish(() => rejectPromise(mintFileArtifactStoreAbort()));
+    signal.addEventListener('abort', onAbort, { once: true });
+    previous.then(() => finish(resolvePromise));
+    if (signal.aborted) onAbort();
+  });
+  throwIfFileStoreAborted(signal);
+}
+
+async function withProcessLock<T>(key: string, fn: () => Promise<T>, signal?: AbortSignal): Promise<T> {
   const previous = locks.get(key) ?? Promise.resolve();
   let release!: () => void;
   const current = new Promise<void>((resolvePromise) => { release = resolvePromise; });
   const queued = previous.then(() => current);
   locks.set(key, queued);
-  await previous;
-  try { return await fn(); }
-  finally { release(); if (locks.get(key) === queued) locks.delete(key); }
+  try {
+    await awaitProcessTurn(previous, signal);
+    return await fn();
+  } finally {
+    release();
+    if (locks.get(key) === queued) void queued.then(() => { if (locks.get(key) === queued) locks.delete(key); });
+  }
 }
 
 function invariant(condition: unknown, message: string): asserts condition {
@@ -594,7 +635,31 @@ function validateCurrent(value: unknown): CurrentManifest {
   return current as CurrentManifest;
 }
 
-async function sleep(milliseconds: number): Promise<void> { await new Promise((resolvePromise) => setTimeout(resolvePromise, milliseconds)); }
+async function sleep(milliseconds: number, signal?: AbortSignal): Promise<void> {
+  if (!signal) { await new Promise((resolvePromise) => setTimeout(resolvePromise, milliseconds)); return; }
+  throwIfFileStoreAborted(signal);
+  await new Promise<void>((resolvePromise, rejectPromise) => {
+    let settled = false;
+    const finish = (action: () => void): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal.removeEventListener('abort', onAbort);
+      action();
+    };
+    const timer = setTimeout(() => finish(resolvePromise), milliseconds);
+    const onAbort = (): void => finish(() => rejectPromise(mintFileArtifactStoreAbort()));
+    signal.addEventListener('abort', onAbort, { once: true });
+    if (signal.aborted) onAbort();
+  });
+  throwIfFileStoreAborted(signal);
+}
+
+type FenceOwnerState = 'RETRY' | 'LIVE' | 'STALE' | 'CONTENDED';
+type FenceReclaimResult = Exclude<FenceOwnerState, 'STALE'>;
+const MAX_FENCE_RECLAIM_CONTENTION_POLLS = 500;
+const FENCE_POLL_MS = 5;
+const MAX_PROCESS_ID = 2_147_483_647;
 
 export class MemoryArtifactStore implements ArtifactStore {
   private state?: MachineState;
@@ -665,6 +730,7 @@ export class FileArtifactStore implements ArtifactStore {
   private kernelIdentity?: FilesystemIdentity;
   private fenceIdentity?: FilesystemIdentity;
   private fenceOwner?: string;
+  private staleFenceObservation?: { text: string; identity: FilesystemIdentity };
   /** One-shot proof captured by load(); never durable or shared. */
   private verifiedGenerationMemo?: VerifiedGenerationMemo;
 
@@ -713,8 +779,8 @@ export class FileArtifactStore implements ArtifactStore {
    * between those two operations. */
   private async readRegular(path: string, label: string, byteCeiling?: number): Promise<string> {
     await this.assertRegular(path, label);
-    const before = await inspectTrustedPath(path, label, { surface: true, kind: 'file' });
-    if (!before) throw new Error(`ManifestMismatch: ${label} is absent`);
+    const before = await inspectTrustedPath(path, label, { allowMissing: true, surface: true, kind: 'file' });
+    if (!before) { const error = new Error(`ENOENT: ${label} is absent`) as NodeJS.ErrnoException; error.code = 'ENOENT'; throw error; }
     let handle;
     try { handle = await fs.open(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW); }
     catch (error) {
@@ -725,8 +791,9 @@ export class FileArtifactStore implements ArtifactStore {
       const stat = await handle.stat();
       if (!stat.isFile()) throw new Error(`ManifestMismatch: ${label} is not a regular file`);
       if (!sameFilesystemIdentity(filesystemIdentity(stat), before.identity)) throw new Error(`ManifestMismatch: ${label} changed before descriptor binding`);
-      const after = await inspectTrustedPath(path, label, { surface: true, kind: 'file' });
-      if (!after || !sameFilesystemIdentity(filesystemIdentity(stat), after.identity)) throw new Error(`ManifestMismatch: ${label} changed during descriptor binding`);
+      const after = await inspectTrustedPath(path, label, { allowMissing: true, surface: true, kind: 'file' });
+      if (!after) { const error = new Error(`ENOENT: ${label} is absent`) as NodeJS.ErrnoException; error.code = 'ENOENT'; throw error; }
+      if (!sameFilesystemIdentity(filesystemIdentity(stat), after.identity)) throw new Error(`ManifestMismatch: ${label} changed during descriptor binding`);
       if (byteCeiling === undefined) return await handle.readFile('utf8');
       if (!Number.isSafeInteger(byteCeiling) || byteCeiling < 0 || !Number.isSafeInteger(stat.size) || stat.size < 0 || stat.size > byteCeiling) throw new Error(`ManifestMismatch: ${label} exceeds its byte ceiling`);
       const expected = stat.size;
@@ -880,49 +947,133 @@ export class FileArtifactStore implements ArtifactStore {
     }
   }
 
-  private async reclaimFence(): Promise<boolean> {
+  private async writerReclaimMarkerPresent(): Promise<boolean> {
+    const marker = `${this.lockPath}.reclaim`;
+    let markerStat;
+    try { markerStat = await fs.lstat(marker); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error; }
+    if (markerStat.isSymbolicLink() || !markerStat.isDirectory()) throw new Error('ManifestMismatch: writer lock reclaim marker is not a directory');
+    try { await this.assertDirectory(marker, 'writer lock reclaim marker'); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error; }
+    return true;
+  }
+
+  private async classifyFenceOwner(): Promise<FenceOwnerState> {
+    this.staleFenceObservation = undefined;
+    let lockStat;
+    try { lockStat = await fs.lstat(this.lockPath); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 'RETRY'; throw error; }
+    if (lockStat.isSymbolicLink() || !lockStat.isFile()) throw new Error('ManifestMismatch: writer lock is not a regular file');
+    let lockText: string;
+    try { lockText = await this.readRegular(this.lockPath, 'writer lock'); }
+    catch (error) {
+      // A disappearing lock is an ordinary owner transition. Trust-boundary
+      // failures remain authoritative and are never interpreted as staleness.
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 'RETRY';
+      throw error;
+    }
+    let afterStat;
+    try { afterStat = await fs.lstat(this.lockPath); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 'RETRY'; throw error; }
+    if (afterStat.isSymbolicLink() || !afterStat.isFile()) throw new Error('ManifestMismatch: writer lock is not a regular file');
+    const observedIdentity = filesystemIdentity(afterStat);
+    if (!sameFilesystemIdentity(filesystemIdentity(lockStat), observedIdentity)) return 'CONTENDED';
+    const managedLiveness = managedLaunchOwnerLiveness(lockText);
+    if (managedLiveness !== undefined) {
+      if (managedLiveness === 'STALE') this.staleFenceObservation = { text: lockText, identity: observedIdentity };
+      return managedLiveness;
+    }
+    let parsed: unknown;
+    try { parsed = JSON.parse(lockText); }
+    catch { this.staleFenceObservation = { text: lockText, identity: observedIdentity }; return 'STALE'; }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) { this.staleFenceObservation = { text: lockText, identity: observedIdentity }; return 'STALE'; }
+    const record = parsed as { pid?: number };
+    if (typeof record.pid !== 'number') { this.staleFenceObservation = { text: lockText, identity: observedIdentity }; return 'STALE'; }
+    // Only a canonical managed-launch owner with authenticated process-start
+    // evidence may wait without bound. Invalid or merely live legacy owners
+    // retain the historical bounded contention behavior and their lock bytes.
+    if (!Number.isSafeInteger(record.pid) || record.pid <= 0 || record.pid > MAX_PROCESS_ID) return 'CONTENDED';
+    try { process.kill(record.pid, 0); return 'CONTENDED'; }
+    catch (probeError) {
+      if ((probeError as NodeJS.ErrnoException).code !== 'ESRCH') return 'CONTENDED';
+      this.staleFenceObservation = { text: lockText, identity: observedIdentity };
+      return 'STALE';
+    }
+  }
+
+  private async unlinkClassifiedStaleFence(): Promise<FenceReclaimResult> {
+    const observed = this.staleFenceObservation;
+    if (!observed) return 'CONTENDED';
+    let actual: string;
+    try { actual = await this.readRegular(this.lockPath, 'writer lock'); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 'RETRY'; throw error; }
+    let currentStat;
+    try { currentStat = await fs.lstat(this.lockPath); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 'RETRY'; throw error; }
+    if (currentStat.isSymbolicLink() || !currentStat.isFile()) throw new Error('ManifestMismatch: writer lock is not a regular file');
+    if (actual !== observed.text || !sameFilesystemIdentity(filesystemIdentity(currentStat), observed.identity)) return 'CONTENDED';
+    await fs.unlink(this.lockPath).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'ENOENT') throw error; });
+    await this.fsyncDir(this.kernelDir);
+    return 'RETRY';
+  }
+
+  private async reclaimFence(): Promise<FenceReclaimResult> {
     const marker = `${this.lockPath}.reclaim`;
     try { await fs.mkdir(marker, { mode: 0o700 }); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false; throw error; }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      if (!await this.writerReclaimMarkerPresent()) return 'RETRY';
+      // A marker loser has no mutation authority. It may still read the lock
+      // through the full trust boundary so a verified live owner is not charged
+      // against the bounded reclaimer-contention budget.
+      const owner = await this.classifyFenceOwner();
+      if (owner === 'RETRY' || owner === 'LIVE') return owner;
+      return 'CONTENDED';
+    }
     try {
-      let lockStat;
-      try { lockStat = await fs.lstat(this.lockPath); }
-      catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return true; throw error; }
-      if (lockStat.isSymbolicLink() || !lockStat.isFile()) throw new Error('ManifestMismatch: writer lock is not a regular file');
-      let stale = true;
-      let lockText: string | undefined;
-      try { lockText = await this.readRegular(this.lockPath, 'writer lock'); }
-      catch (error) {
-        // A disappearing lock is a normal contender race.  Trust-boundary
-        // failures (ownership, mode, type, ancestor, or descriptor drift)
-        // are not malformed lock content and must not be converted into
-        // permission to unlink an unsafe authoritative object.
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      }
-      if (lockText !== undefined) {
-        try {
-          const record = JSON.parse(lockText) as { pid?: number };
-          if (typeof record.pid === 'number' && record.pid !== process.pid) {
-            try { process.kill(record.pid, 0); stale = false; }
-            catch (probeError) { if ((probeError as NodeJS.ErrnoException).code !== 'ESRCH') stale = false; }
-          } else if (record.pid === process.pid) stale = false;
-        } catch { /* malformed/partial lock is recoverable only under marker */ }
-      }
-      if (!stale) return false;
-      await fs.unlink(this.lockPath).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'ENOENT') throw error; });
-      await this.fsyncDir(this.kernelDir);
-      return true;
+      const owner = await this.classifyFenceOwner();
+      if (owner === 'RETRY' || owner === 'LIVE' || owner === 'CONTENDED') return owner;
+      return await this.unlinkClassifiedStaleFence();
     } finally {
       await fs.rmdir(marker).catch(() => undefined);
       await this.fsyncDir(this.kernelDir).catch(() => undefined);
     }
   }
 
-  private async acquireFence(): Promise<void> {
+  private async acquireFence(signal?: AbortSignal): Promise<void> {
     const owner = canonicalString({ pid: process.pid, started: Date.now(), nonce: Math.random().toString(16).slice(2) });
-    for (let attempt = 0; attempt < 500; attempt += 1) {
+    let contendedPolls = 0;
+    while (true) {
+      throwIfFileStoreAborted(signal);
+      if (await this.writerReclaimMarkerPresent()) {
+        const reclaim = await this.reclaimFence();
+        throwIfFileStoreAborted(signal);
+        if (reclaim === 'LIVE') {
+          contendedPolls = 0;
+          await sleep(FENCE_POLL_MS, signal);
+          continue;
+        }
+        contendedPolls += 1;
+        await sleep(FENCE_POLL_MS, signal);
+        if (contendedPolls >= MAX_FENCE_RECLAIM_CONTENTION_POLLS) break;
+        continue;
+      }
       if (await this.createExclusiveFence(owner)) {
         this.fenceOwner = owner;
+        let markerAppeared: boolean;
+        try { markerAppeared = await this.writerReclaimMarkerPresent(); }
+        catch (error) { await this.releaseFence(); throw error; }
+        if (markerAppeared) {
+          await this.releaseFence();
+          contendedPolls += 1;
+          await sleep(FENCE_POLL_MS, signal);
+          if (contendedPolls >= MAX_FENCE_RECLAIM_CONTENTION_POLLS) break;
+          continue;
+        }
+        if (signal?.aborted) {
+          await this.releaseFence();
+          throw mintFileArtifactStoreAbort();
+        }
         return;
       }
       try {
@@ -933,8 +1084,20 @@ export class FileArtifactStore implements ArtifactStore {
         } catch (lockError) {
           if ((lockError as Error).message.startsWith('ManifestMismatch:')) throw lockError;
         }
-        if (await this.reclaimFence()) continue;
-        await sleep(5);
+        const reclaim = await this.reclaimFence();
+        throwIfFileStoreAborted(signal);
+        if (reclaim === 'RETRY') {
+          contendedPolls = 0;
+          continue;
+        }
+        if (reclaim === 'LIVE') {
+          contendedPolls = 0;
+          await sleep(FENCE_POLL_MS, signal);
+          continue;
+        }
+        contendedPolls += 1;
+        await sleep(FENCE_POLL_MS, signal);
+        if (contendedPolls >= MAX_FENCE_RECLAIM_CONTENTION_POLLS) break;
       } catch (error) {
         throw error;
       }
@@ -979,24 +1142,31 @@ export class FileArtifactStore implements ArtifactStore {
     if (await this.readRegular(this.lockPath, 'writer lock') !== owner) throw new Error('ManifestMismatch: writer lock ownership changed');
   }
 
-  private async withFence<T>(fn: () => Promise<T>): Promise<T> {
+  private async withFence<T>(fn: () => Promise<T>, signal?: AbortSignal): Promise<T> {
     // The ancestor release marker is the common production admission gate.
     // Check before any store setup and again after the per-run writer claim:
     // either a writer is already inside (and release waits for this fence), or
     // the release marker wins and this writer cannot enter.
+    throwIfFileStoreAborted(signal);
     await assertReleaseAdmissionOpen(this.rootDir);
     await this.ensure();
+    throwIfFileStoreAborted(signal);
     return withProcessLock(this.kernelDir, async () => {
+      throwIfFileStoreAborted(signal);
       await assertReleaseAdmissionOpen(this.rootDir);
       if (!this.rootIdentity) throw new Error('ManifestMismatch: root directory identity is unavailable');
       await assertStableIdentity(this.rootDir, this.rootIdentity, 'root directory', { surface: true, kind: 'directory' }).catch((error) => { throw new Error(`ManifestMismatch: ${(error as Error).message.replace(/^FilesystemTrust:\s*/, '')}`); });
-      await this.acquireFence();
+      let acquired = false;
       try {
+        await this.acquireFence(signal);
+        acquired = true;
+        throwIfFileStoreAborted(signal);
         await assertReleaseAdmissionOpen(this.rootDir);
+        throwIfFileStoreAborted(signal);
         return await fn();
       }
-      finally { await this.releaseFence(); }
-    });
+      finally { if (acquired) await this.releaseFence(); }
+    }, signal);
   }
 
   private async readCurrent(): Promise<CurrentManifest | undefined> {
@@ -1462,7 +1632,7 @@ export class FileArtifactStore implements ArtifactStore {
     });
   }
 
-  async load(): Promise<StoreSnapshot> {
+  async load(signal?: AbortSignal): Promise<StoreSnapshot> {
     // Invalidate only after entering the writer fence so a queued load cannot
     // clear proof that an earlier queued commit still owns.
     return this.withFence(async () => {
@@ -1491,7 +1661,7 @@ export class FileArtifactStore implements ArtifactStore {
         }
       }
       return { state: verified.state, generation: verified.generation };
-    });
+    }, signal);
   }
 
   async commit(previousGeneration: number, state: MachineState): Promise<number> {

@@ -1,7 +1,7 @@
 import { canonicalString, digest } from './canonical.js';
 import { resolve } from 'node:path';
 import { canonicalizeDeclaration, transition, type BridgeOptions, type BridgeResult, type BridgeTransition } from './bridge.js';
-import { FileArtifactStore } from './store.js';
+import { FileArtifactStore, isFileArtifactStoreAbort } from './store.js';
 import { inspectTrustedPath, sameFilesystemIdentity, type FilesystemIdentity } from './filesystem.js';
 import type { EffectDriver } from './driver.js';
 import type { Event, MachineState, OutboxCommand, Plan, Ref, Yield } from './model.js';
@@ -151,6 +151,9 @@ export class BridgeDrivePump {
     try {
       try { return await this.runLoop(); }
       catch (error) {
+        if (isFileArtifactStoreAbort(error) && aborted(this.signal)) {
+          return this.last ? this.finish('cancelled', this.last) : this.emptyResult('cancelled');
+        }
         // A competing pump may win the bridge lock and advance the same exact
         // frame between our verified load and transition. Treat that stale
         // caller view as a parent wake-up, never as a second launch or a retry.
@@ -281,7 +284,7 @@ export class BridgeDrivePump {
   private async load(): Promise<Loaded> {
     const trusted = await inspectTrustedPath(this.options.runDir, 'drive run root', { allowMissing: true, surface: true, kind: 'directory' });
     if (!trusted) return { state: undefined };
-    const snapshot = await new FileArtifactStore(this.options.runDir, trusted.identity).load();
+    const snapshot = await new FileArtifactStore(this.options.runDir, trusted.identity).load(this.signal);
     await this.verifyManagedAuthority(snapshot.state);
     return { state: snapshot.state };
   }
@@ -316,7 +319,12 @@ export class BridgeDrivePump {
         driver: driverOverride,
         dispatcher: { ...prior, signal: this.signal ?? prior?.signal, onYield },
     };
-    const result = await transition(options, input);
+    let result: BridgeResult;
+    try { result = await transition(options, input); }
+    catch (error) {
+      if (isFileArtifactStoreAbort(error) && aborted(this.signal) && input.launchToken !== undefined) await this.cancel(input.launchToken);
+      throw error;
+    }
     this.last = result;
     return result;
   }

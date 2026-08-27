@@ -8,6 +8,7 @@ import { inspectTrustedPath, sameFilesystemIdentity, syncDirectory } from './fil
 export const RELEASE_EXCLUSION_LOCK = '.lunacy-release-exclusion.lock';
 export const BRIDGE_OPERATION_LOCK = '.bridge.lock';
 export const WRITER_LOCK = '.writer.lock';
+const MAX_CLAIM_ACQUISITION_WAIT_MS = 120_000;
 const MANIFEST_V1_SCHEMA = 'lunacy-release-operation/v1';
 const MANIFEST_V2_SCHEMA = 'lunacy-release-operation/v2';
 const DEPLOYMENT_IDENTITY_SCHEMA = 'lunacy-deployment-identity/v1';
@@ -16,6 +17,7 @@ const MAX_MANIFEST_BYTES = 1024 * 1024;
 const MAX_DISCOVERY_DIRECTORIES = 65_536;
 const MAX_DISCOVERY_DEPTH = 64;
 const SHA256 = /^[0-9a-f]{64}$/;
+const MAX_PROCESS_ID = 2_147_483_647;
 const MANAGED_LAUNCH_DIGEST = createHash('sha256').update('lunacy-managed-launch-admission/v1').digest('hex');
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
@@ -63,6 +65,15 @@ export type OwnedFileClaim = Readonly<{
   bytes: string;
   owner: ReleaseOwner;
   release(): Promise<void>;
+}>;
+type ManagedLaunchOwnerState = 'LIVE' | 'STALE' | 'CONTENDED';
+type OwnedFileClaimOptions = Readonly<{
+  waitMs: number;
+  signal?: AbortSignal;
+  reclaimStaleReleaseOwner?: boolean;
+  nonReleaseOwnerIsBusy?: boolean;
+  writerReclaimProtocol?: boolean;
+  label: string;
 }>;
 
 function fail(message: string): never { throw new Error(`ReleaseExclusion: ${message}`); }
@@ -156,7 +167,7 @@ export async function readReleaseManifest(path: string): Promise<{ manifest: Rel
 // undefined proves that the pid does not exist; null means that liveness or
 // exact start evidence could not be established and must be treated as live.
 function processStart(pid: number): string | null | undefined {
-  if (!Number.isSafeInteger(pid) || pid <= 0) return undefined;
+  if (!Number.isSafeInteger(pid) || pid <= 0 || pid > MAX_PROCESS_ID) return undefined;
   try { process.kill(pid, 0); }
   catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ESRCH') return undefined;
@@ -190,6 +201,17 @@ export function releaseOwnerIsLive(owner: ReleaseOwner): boolean {
   return started === null || (started !== undefined && started === owner.processStartedAt);
 }
 
+/** Classify only the exact canonical owner record minted by managed launch. */
+export function managedLaunchOwnerLiveness(text: string): ManagedLaunchOwnerState | undefined {
+  let owner: ReleaseOwner;
+  try { owner = parseOwner(text); }
+  catch { return undefined; }
+  if (canonicalString(owner) !== text || owner.pid > MAX_PROCESS_ID || owner.manifestDigest !== MANAGED_LAUNCH_DIGEST) return undefined;
+  const started = processStart(owner.pid);
+  if (started === null) return 'CONTENDED';
+  return started !== undefined && started === owner.processStartedAt ? 'LIVE' : 'STALE';
+}
+
 async function readExact(path: string, label: string): Promise<{ text: string; identity: { dev: string; ino: string } }> {
   const before = await inspectTrustedPath(path, label, { allowMissing: true, surface: true, kind: 'file' }).catch((error) => fail(`${label} is unreadable: ${(error as Error).message}`));
   if (!before) { const error = new Error(`${label} is absent`) as NodeJS.ErrnoException; error.code = 'ENOENT'; throw error; }
@@ -211,40 +233,84 @@ async function unlinkExact(path: string, expectedText: string, expectedIdentity:
   await syncDirectory(directory, `${label} parent`);
 }
 
-export async function acquireOwnedFileClaim(path: string, owner: ReleaseOwner, options: Readonly<{ waitMs: number; signal?: AbortSignal; reclaimStaleReleaseOwner?: boolean; nonReleaseOwnerIsBusy?: boolean; label: string }>): Promise<OwnedFileClaim> {
+export async function acquireOwnedFileClaim(path: string, owner: ReleaseOwner, options: OwnedFileClaimOptions): Promise<OwnedFileClaim> {
   const canonical = canonicalPath(path, options.label);
   const directory = dirname(canonical);
   const directoryTrusted = await inspectTrustedPath(directory, `${options.label} parent`, { surface: true, kind: 'directory' }).catch((error) => fail(`${options.label} parent is unreadable: ${(error as Error).message}`));
   if (!directoryTrusted) fail(`${options.label} parent is absent`);
-  if (!Number.isSafeInteger(options.waitMs) || options.waitMs < 0 || options.waitMs > 120_000) fail(`${options.label} wait is invalid`);
+  if (!Number.isSafeInteger(options.waitMs) || options.waitMs < 0 || options.waitMs > MAX_CLAIM_ACQUISITION_WAIT_MS) fail(`${options.label} wait is invalid`);
   const bytes = canonicalString(owner);
   const deadline = Date.now() + options.waitMs;
+  const reclaimMarker = options.writerReclaimProtocol ? `${canonical}.reclaim` : undefined;
+  const markerPresent = async (): Promise<boolean> => {
+    if (!reclaimMarker) return false;
+    const marker = await inspectTrustedPath(reclaimMarker, `${options.label} reclaim marker`, { allowMissing: true, surface: true, kind: 'directory' })
+      .catch((error) => fail(`${options.label} reclaim marker is unsafe: ${(error as Error).message}`));
+    return marker !== undefined;
+  };
+  const waitForContention = async (): Promise<void> => {
+    if (Date.now() >= deadline) fail(`${options.label} is busy`);
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 5));
+  };
+  const reclaimExisting = async (): Promise<boolean> => {
+    let observed: Awaited<ReturnType<typeof readExact>>;
+    try { observed = await readExact(canonical, options.label); }
+    catch (readError) {
+      // A contender may remove its exact claim between the two identity
+      // reads. Retry acquisition, but never interpret an identity change
+      // as authority to unlink either the old or replacement owner.
+      if ((readError as NodeJS.ErrnoException).code === 'ENOENT' || (readError as Error).message.endsWith('changed during read')) return true;
+      throw readError;
+    }
+    let observedOwner: ReleaseOwner | undefined;
+    try { observedOwner = parseOwner(observed.text); }
+    catch (parseError) { if (!options.nonReleaseOwnerIsBusy) throw parseError; }
+    if (!observedOwner || releaseOwnerIsLive(observedOwner)) return false;
+    try { await unlinkExact(canonical, observed.text, observed.identity, directory, options.label); }
+    catch (unlinkError) {
+      if ((unlinkError as NodeJS.ErrnoException).code === 'ENOENT' || (unlinkError as Error).message.endsWith('changed during read')) return true;
+      throw unlinkError;
+    }
+    return true;
+  };
+  const observeExisting = async (): Promise<void> => {
+    let observed: Awaited<ReturnType<typeof readExact>>;
+    try { observed = await readExact(canonical, options.label); }
+    catch (readError) {
+      if ((readError as NodeJS.ErrnoException).code === 'ENOENT' || (readError as Error).message.endsWith('changed during read')) return;
+      throw readError;
+    }
+    try { parseOwner(observed.text); }
+    catch (parseError) { if (!options.nonReleaseOwnerIsBusy) throw parseError; }
+  };
   while (true) {
     if (options.signal?.aborted) { const error = new Error(`${options.label} acquisition cancelled`); error.name = 'AbortError'; throw error; }
+    if (await markerPresent()) { await observeExisting(); await waitForContention(); continue; }
     let handle;
     try { handle = await fs.open(canonical, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_NOFOLLOW, 0o600); }
     catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
       if (options.reclaimStaleReleaseOwner) {
-        let observed: Awaited<ReturnType<typeof readExact>>;
-        try { observed = await readExact(canonical, options.label); }
-        catch (readError) {
-          // A contender may remove its exact claim between the two identity
-          // reads. Retry acquisition, but never interpret an identity change
-          // as authority to unlink either the old or replacement owner.
-          if ((readError as NodeJS.ErrnoException).code === 'ENOENT' || (readError as Error).message.endsWith('changed during read')) continue;
-          throw readError;
+        let ownsMarker = false;
+        if (reclaimMarker) {
+          try { await fs.mkdir(reclaimMarker, { mode: 0o700 }); ownsMarker = true; }
+          catch (markerError) {
+            if ((markerError as NodeJS.ErrnoException).code !== 'EEXIST') throw markerError;
+            await observeExisting();
+            await waitForContention();
+            continue;
+          }
         }
-        let observedOwner: ReleaseOwner | undefined;
-        try { observedOwner = parseOwner(observed.text); }
-        catch (parseError) { if (!options.nonReleaseOwnerIsBusy) throw parseError; }
-        if (observedOwner && !releaseOwnerIsLive(observedOwner)) {
-          await unlinkExact(canonical, observed.text, observed.identity, directory, options.label);
-          continue;
+        try {
+          if (await reclaimExisting()) continue;
+        } finally {
+          if (ownsMarker) {
+            await fs.rmdir(reclaimMarker!).catch(() => undefined);
+            await syncDirectory(directory, `${options.label} parent`).catch(() => undefined);
+          }
         }
       }
-      if (Date.now() >= deadline) fail(`${options.label} is busy`);
-      await new Promise((resolvePromise) => setTimeout(resolvePromise, 5));
+      await waitForContention();
       continue;
     }
     let identity: { dev: string; ino: string };
@@ -256,6 +322,19 @@ export async function acquireOwnedFileClaim(path: string, owner: ReleaseOwner, o
       await fs.unlink(canonical).catch(() => undefined);
       await syncDirectory(directory, `${options.label} parent`).catch(() => undefined);
       throw error;
+    }
+    let markerAppeared: boolean;
+    try { markerAppeared = await markerPresent(); }
+    catch (error) {
+      try { await unlinkExact(canonical, bytes, identity, directory, options.label); }
+      finally { await handle.close(); }
+      throw error;
+    }
+    if (markerAppeared) {
+      try { await unlinkExact(canonical, bytes, identity, directory, options.label); }
+      finally { await handle.close(); }
+      await waitForContention();
+      continue;
     }
     let released = false;
     return Object.freeze({
@@ -301,7 +380,7 @@ export async function withManagedLaunchAdmission<T>(runRoot: string, signal: Abo
   const current = await inspectTrustedPath(join(root, '.kernel', 'CURRENT'), 'managed launch CURRENT', { allowMissing: true, surface: true, kind: 'file' }).catch((error) => fail(`managed launch CURRENT is unsafe: ${(error as Error).message}`));
   if (!current) { await assertReleaseAdmissionOpen(root); return operation(); }
   const owner = currentReleaseOwner(MANAGED_LAUNCH_DIGEST);
-  const claim = await acquireOwnedFileClaim(join(root, '.kernel', WRITER_LOCK), owner, { waitMs: 120_000, signal, reclaimStaleReleaseOwner: true, nonReleaseOwnerIsBusy: true, label: 'managed launch writer admission' });
+  const claim = await acquireOwnedFileClaim(join(root, '.kernel', WRITER_LOCK), owner, { waitMs: MAX_CLAIM_ACQUISITION_WAIT_MS, signal, reclaimStaleReleaseOwner: true, nonReleaseOwnerIsBusy: true, writerReclaimProtocol: true, label: 'managed launch writer admission' });
   try { await assertReleaseAdmissionOpen(root); return await operation(); }
   finally { await claim.release(); }
 }
