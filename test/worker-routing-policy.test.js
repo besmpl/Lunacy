@@ -21,6 +21,51 @@ const expectedRoutes = [
   { route: 'sol-high', model: 'gpt-5.6-sol', reasoningEffort: 'high' },
 ];
 
+test('canonical default role policy keeps routine work on Luna and bounds Sol judgment', async () => {
+  const skill = await source('SKILL.md');
+
+  // Assert the policy concepts independently so harmless prose edits do not break the contract.
+  for (const invariant of [
+    /parent judgment\/gate/,
+    /Luna\/xhigh is the default for [^.\n]*repository-heavy implementation/,
+    /repository-heavy implementation/,
+    /tests/,
+    /ordinary repairs/,
+    /documentation/,
+    /read-only scouts/,
+    /ordinary adversarial reviews/,
+    /optional Sol\/high bounded judgment/,
+    /Sol\/high is opt-in only for bounded consequential judgment/,
+    /architecture\/contract choice/,
+    /conflicting-evidence adjudication/,
+    /narrow named acceptance question/,
+    /Sol\/high is not an automatic independent verifier/,
+    /independent verification is conditional on a named risk/,
+    /implementation returns to Luna unless [^.\n]*explicitly assigns Sol/,
+    /Luna implementation of decisions/,
+    /parent acceptance/,
+    /parent (?:remains )?the acceptance owner/,
+    /GPT-5\.6 Sol at `high` is the preferred parent\/orchestrator when the host lets the user select it/,
+    /current allowed non-Sol parent remains valid/,
+    /never spawn a shadow\/duplicate parent/,
+    /host-level preference is separate from the explicit worker `sol-high` route and its attempt binding/,
+    /does not create a Sol attempt binding/,
+  ]) {
+    assert.match(skill, invariant);
+  }
+
+  // Secondary guidance may be rephrased, but must not reverse the canonical boundaries.
+  const secondary = await Promise.all([
+    source('orchestrator/PLANNING.md'), source('README.md'),
+  ]);
+  for (const markdown of secondary) {
+    assert.doesNotMatch(markdown, /Sol\/high is the default/i);
+    assert.doesNotMatch(markdown, /Sol\/high is (?:an? )?(?:automatic|generic)/i);
+    assert.doesNotMatch(markdown, /implementation returns to Sol/i);
+    assert.doesNotMatch(markdown, /parent (?:is not|does not remain) the acceptance owner/i);
+  }
+});
+
 test('direct worker route table is closed and omission preserves Luna/xhigh', async () => {
   const skill = await source('SKILL.md');
   assert.deepEqual(routeRows(skill), expectedRoutes);

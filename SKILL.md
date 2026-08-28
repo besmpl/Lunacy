@@ -9,6 +9,12 @@ description: Execute a coding plan or task with Codex, GPT-5.6 Sol, or GPT-5.6 T
 
 Worker routing is a closed choice: omitted route means Luna at `xhigh`; Luna may use a justified `max`; explicit `sol-high` means exactly GPT-5.6 Sol at `high`. Never silently fall back, downgrade, or substitute another pair.
 
+## Default role policy
+
+The simple default flow is **parent judgment/gate → Luna/xhigh repository execution/self-verification → optional Sol/high bounded judgment → Luna implementation of decisions → parent acceptance**. Luna/xhigh is the default for repository-heavy implementation, tests, ordinary repairs, documentation, read-only scouts, and ordinary adversarial reviews. Sol/high is opt-in only for bounded consequential judgment such as an architecture/contract choice, conflicting-evidence adjudication, or a narrow named acceptance question. Sol/high is not an automatic independent verifier or a generic escalation tier; independent verification is conditional on a named risk, not automatic. When Sol advice changes code, implementation returns to Luna unless the user or project explicitly assigns Sol implementation; the parent remains the acceptance owner.
+
+Host parent selection: GPT-5.6 Sol at `high` is the preferred parent/orchestrator when the host lets the user select it, because the parent owns consequential judgment. A current allowed non-Sol parent remains valid; never spawn a shadow/duplicate parent to simulate the preference. This host-level preference is separate from the explicit worker `sol-high` route and its attempt binding, and it does not create a Sol attempt binding.
+
 ## Invariants
 
 1. **Project intent is authority.** Goal, current user constraints, ethos, architecture, contracts, and authoritative plan drive decisions.

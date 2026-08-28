@@ -22,6 +22,12 @@ Only those exact case-sensitive pairs are valid. The parent resolves one route, 
 
 Before every explicit Sol launch, the parent records `workerRoute: sol-high; phaseId: <id>; stepId: <id>; attemptEpoch: <n>` in the run's `DECISIONS.md`. Resume preserves that exact binding or blocks; changing routes requires a fresh attempt and new authority. Luna `max` keeps its existing one-line hard-reasoning justification. Step size or role name alone never justifies it.
 
+### Default role policy
+
+The simple default flow is **parent judgment/gate → Luna/xhigh repository execution/self-verification → optional Sol/high bounded judgment → Luna implementation of decisions → parent acceptance**. Luna/xhigh is the default for repository-heavy implementation, tests, ordinary repairs, documentation, read-only scouts, and ordinary adversarial reviews. Sol/high is opt-in only for bounded consequential judgment—an architecture/contract choice, conflicting-evidence adjudication, or a narrow named acceptance question. Sol/high is not an automatic independent verifier or a generic escalation tier; independent verification is conditional on a named risk, not automatic. When Sol advice changes code, implementation returns to Luna unless the user or project explicitly assigns Sol implementation; the parent remains the acceptance owner.
+
+Host parent selection: GPT-5.6 Sol at `high` is the preferred parent/orchestrator when the host lets the user select it, because the parent owns consequential judgment. A current allowed non-Sol parent remains valid; never spawn a shadow/duplicate parent to simulate the preference. This host-level preference is separate from the explicit worker `sol-high` route and its attempt binding, and it does not create a Sol attempt binding.
+
 The direct/manual worker route is separate from the private managed runtime drive. Managed drive remains its independently attested, closed Sol `codex exec` policy; the new direct choice does not change runtime schemas, policy digests, or driver behavior.
 
 ## Mechanical context controls

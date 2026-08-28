@@ -27,6 +27,12 @@ Do not select Luna `max` merely because a step is large, touches many files, is 
 
 The orchestrator resolves the route before spawn and passes the exact model and effort explicitly. Before each `sol-high` launch it records the canonical phase/step/attempt binding required by `SKILL.md`; resume must preserve it or block. No permanent route/effort column is required unless the project benefits from one. If Luna `max` is selected for an otherwise ordinary-looking step, a one-line rationale in the handoff is enough—do not create a routing bureaucracy.
 
+## Default role policy
+
+Use this simple flow when assigning work: **parent judgment/gate → Luna/xhigh repository execution/self-verification → optional Sol/high bounded judgment → Luna implementation of decisions → parent acceptance**. Route repository-heavy implementation, tests, ordinary repairs, documentation, read-only scouts, and ordinary adversarial reviews to Luna/xhigh by default. Sol/high is opt-in only for bounded consequential judgment—an architecture/contract choice, conflicting-evidence adjudication, or a narrow named acceptance question. Sol/high is not an automatic independent verifier or a generic escalation tier; independent verification is conditional on a named risk, not automatic. When Sol advice changes code, implementation returns to Luna unless the user or project explicitly assigns Sol implementation; the parent owns acceptance.
+
+Host parent selection: GPT-5.6 Sol at `high` is the preferred parent/orchestrator when the host lets the user select it, because the parent owns consequential judgment. A current allowed non-Sol parent remains valid; never spawn a shadow/duplicate parent to simulate the preference. This host-level preference is separate from the explicit worker `sol-high` route and its attempt binding, and it does not create a Sol attempt binding.
+
 ## Multi-run boundary
 
 A run owns one coherent plan/scope. Multiple runs may coexist when repository ownership is safely independent.
