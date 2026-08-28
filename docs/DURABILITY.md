@@ -36,14 +36,39 @@ missing-with-history `CURRENT` is rejected without moving canonical
 generations. The disposable `reuse/` namespace is reconciled on load only when
 it already exists; default-off loads do not create an empty accelerator tree.
 
-## Journal ceiling
+## Journal formats and ceiling
 
-The current format is intentionally finite: **10,000 records or 1 MiB of
+The legacy format is intentionally finite: **10,000 records or 1 MiB of
 canonical journal bytes**, whichever comes first. An attempted event that
 would cross either ceiling returns `BLOCKED` with code `JournalCeiling` and
-leaves the committed state untouched. The runtime never truncates, rewrites,
-or silently compacts a journal. Long-lived runs require a separately designed
-segment/compaction schema before promotion.
+leaves the committed state untouched.
+
+An operator may explicitly select the private `segmented/v1` format (or call
+the resumable `migrateToSegmented()` operation on `FileArtifactStore`). A
+segmented generation contains immutable, canonical NDJSON files named by
+contiguous revision ranges plus a canonical `head.json`; the final range is a
+bounded active suffix (default 1,000 records). `CURRENT.format` and
+`CURRENT.headDigest` select and bind the segmented reader. Readers validate
+all ranges, chained digests, byte counts, checkpoint digest, writer fence, and
+logical replay before state/effect use; unknown versions, gaps, overlaps,
+mixed files, unsafe names, or digest mismatches fail closed. Legacy generations
+remain loadable and are never implicitly converted.
+
+Segmented publication stages and fsyncs every segment, state, and head, then
+atomically swaps `CURRENT`; a failure leaves either the previous complete head
+or a fully verified successor authoritative. A renamed-but-unreferenced future
+generation is quarantined on restart so the same generation can be retried.
+Ordinary append never prunes history. Retention is explicit via `compact()`
+only, after the successor head is verified; cleanup validates exact descriptors,
+unlinks only named children, is idempotent across partial GC, and preserves
+generation references in pending migration/rollback markers. `rollbackSegmented()`
+publishes a verified legacy successor while retaining segmented generations until
+a later explicit retention pass.
+
+The segmented protocol changes storage layout only: reducer/event semantics,
+generation CAS, writer fences, outbox/effect records, and replay bytes remain
+unchanged. Measurements belong to the paired release corpus; no latency,
+byte, fsync, provider, or token-saving claim is implied by segmentation.
 
 ## Restart and effects
 

@@ -1,12 +1,14 @@
 import { canonicalString, digest } from './canonical.js';
 import { resolve } from 'node:path';
-import { canonicalizeDeclaration, transition, type BridgeOptions, type BridgeResult, type BridgeTransition } from './bridge.js';
+import { canonicalizeDeclaration, transition, type BridgeOptions, type BridgeProjection, type BridgeResult, type BridgeTransition } from './bridge.js';
 import { FileArtifactStore, isFileArtifactStoreAbort } from './store.js';
 import { inspectTrustedPath, sameFilesystemIdentity, type FilesystemIdentity } from './filesystem.js';
 import type { EffectDriver } from './driver.js';
 import type { Event, MachineState, OutboxCommand, Plan, Ref, Yield } from './model.js';
 import { validateTerminalRecord, type TerminalRecord } from './codex-effect-records.js';
 import { codexHostPolicyDigest, validateCodexHostPolicy, type CodexHostPolicy } from './codex-host-policy.js';
+import { makeCodexExecDriver } from './codex-exec-driver.js';
+import type { DispatcherOptions } from './public.js';
 import { assertReleaseAdmissionOpen } from './release-admission.js';
 
 /** Optional evidence waiter implemented by managed effect drivers.  It is
@@ -509,4 +511,298 @@ export class BridgeDrivePump {
 
 export async function drive(options: BridgeDriveOptions): Promise<BridgeDriveResult> {
   return new BridgeDrivePump(options).run();
+}
+
+
+/**
+ * Private, additive per-run lifecycle boundary.  This module composes the
+ * existing bridge transition and mechanical drive pump; it owns no durable
+ * state and is intentionally not exported from the package root.
+ */
+export const LIFECYCLE_SCHEMA = 'lunacy-lifecycle/v1' as const;
+export const LIFECYCLE_VERSION = 1 as const;
+
+export type LifecycleCommand = 'init' | 'run' | 'resume';
+export type LifecycleStatus = 'terminal' | 'attention';
+export type LifecycleStop = 'initialized' | BridgeDriveStop;
+
+export type LifecycleOptions = Readonly<{
+  command?: LifecycleCommand;
+  runDir: string;
+  runId: string;
+  /** Parent-owned canonical runtime declaration. Markdown is never parsed. */
+  plan: Plan;
+  statePath?: string;
+  stepsPath?: string;
+  driver?: TerminalEffectDriver;
+  /** Closed managed host policy. A driver and policy are mutually exclusive. */
+  policy?: CodexHostPolicy;
+  dispatcher?: DispatcherOptions;
+  signal?: AbortSignal;
+  maxTransitions?: number;
+  /** Stable START identity; retries use the same event id for exact replay. */
+  startEventId?: string;
+}>;
+
+export type LifecycleAttention = Readonly<{
+  stop: LifecycleStop;
+  kind?: Yield['kind'];
+  code?: string;
+  token?: string;
+}>;
+
+export type LifecycleResult = Readonly<{
+  schema: typeof LIFECYCLE_SCHEMA;
+  version: typeof LIFECYCLE_VERSION;
+  command: LifecycleCommand;
+  status: LifecycleStatus;
+  stop: LifecycleStop;
+  /** Alias used by structured hosts; `stop` remains the canonical key. */
+  stopReason: LifecycleStop;
+  transitions: number;
+  projected: boolean;
+  projection?: BridgeProjection;
+  counters: BridgeResult['counters'];
+  yield?: Yield;
+  terminal?: BridgeDriveResult['terminal'];
+  attention?: LifecycleAttention;
+}>;
+
+export type LifecycleErrorCode =
+  | 'InvalidInput'
+  | 'InvalidPlan'
+  | 'InvalidPolicy'
+  | 'PolicyMismatch'
+  | 'ProjectionFailed';
+
+/** Stable, non-sensitive controller input/error boundary. */
+export class LifecycleError extends Error {
+  constructor(public readonly code: LifecycleErrorCode, message: string) {
+    super(message);
+    this.name = `Lifecycle${code}`;
+  }
+}
+
+function plainObject(value: unknown): value is Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function validateInput(options: LifecycleOptions, command: LifecycleCommand): Plan {
+  if (!plainObject(options)) throw new LifecycleError('InvalidInput', 'lifecycle options are required');
+  if (!['init', 'run', 'resume'].includes(command)) throw new LifecycleError('InvalidInput', 'lifecycle command is invalid');
+  if (typeof options.runDir !== 'string' || options.runDir.length === 0 || !options.runDir.startsWith('/') || resolve(options.runDir) !== options.runDir) throw new LifecycleError('InvalidInput', 'runDir must be an absolute path');
+  if (typeof options.runId !== 'string' || options.runId.length === 0) throw new LifecycleError('InvalidInput', 'runId is required');
+  if (options.startEventId !== undefined && (typeof options.startEventId !== 'string' || options.startEventId.length === 0)) throw new LifecycleError('InvalidInput', 'startEventId is invalid');
+  if (options.maxTransitions !== undefined && (!Number.isSafeInteger(options.maxTransitions) || options.maxTransitions < 1)) throw new LifecycleError('InvalidInput', 'maxTransitions must be positive');
+  let plan: Plan;
+  try { plan = canonicalizeDeclaration(options.plan); }
+  catch (error) { throw new LifecycleError('InvalidPlan', error instanceof Error ? error.message : String(error)); }
+  return plan;
+}
+
+function validatePolicyBinding(options: LifecycleOptions, plan: Plan): void {
+  if (options.driver !== undefined && options.policy !== undefined) throw new LifecycleError('InvalidPolicy', 'driver and policy are mutually exclusive');
+  let suppliedPolicy: CodexHostPolicy | undefined;
+  try { suppliedPolicy = options.policy ?? options.driver?.hostPolicy; }
+  catch { throw new LifecycleError('InvalidPolicy', 'managed driver policy is unavailable'); }
+  if (suppliedPolicy === undefined) return;
+  let policy: CodexHostPolicy;
+  try { policy = validateCodexHostPolicy(suppliedPolicy); }
+  catch (error) { throw new LifecycleError('InvalidPolicy', error instanceof Error ? error.message : String(error)); }
+  const expectedPlanDigest = digest(plan);
+  if (policy.runId !== options.runId || policy.runRoot !== resolve(options.runDir) || policy.planDigest !== expectedPlanDigest) {
+    throw new LifecycleError('PolicyMismatch', 'managed policy does not match run identity or plan');
+  }
+}
+
+function bindDriver(options: LifecycleOptions, plan: Plan): TerminalEffectDriver {
+  validatePolicyBinding(options, plan);
+  let driver = options.driver;
+  if (options.policy !== undefined) {
+    try { driver = makeCodexExecDriver({ policy: validateCodexHostPolicy(options.policy) }); }
+    catch (error) { throw new LifecycleError('InvalidPolicy', error instanceof Error ? error.message : String(error)); }
+  }
+  if (!driver || typeof driver !== 'object' || typeof driver.dispatch !== 'function') throw new LifecycleError('InvalidPolicy', 'run/resume requires a valid effect driver or closed policy');
+  return driver;
+}
+
+function bridgeOptions(options: LifecycleOptions, plan: Plan, driver?: TerminalEffectDriver): BridgeOptions {
+  return {
+    runDir: options.runDir,
+    runId: options.runId,
+    mode: 'runtime',
+    plan,
+    ...(options.statePath === undefined ? {} : { statePath: options.statePath }),
+    ...(options.stepsPath === undefined ? {} : { stepsPath: options.stepsPath }),
+    ...(driver === undefined ? {} : { driver }),
+    ...(options.dispatcher === undefined ? {} : { dispatcher: options.dispatcher }),
+  };
+}
+
+function resultStatus(yieldValue: Yield | undefined, stop: LifecycleStop): LifecycleStatus {
+  if (yieldValue?.kind === 'FINAL' && (yieldValue.status === 'phase-ready' || yieldValue.status === 'complete')) return 'terminal';
+  if (stop === 'initialized' && yieldValue?.kind === 'FINAL') return 'terminal';
+  return 'attention';
+}
+
+function attentionFor(yieldValue: Yield | undefined, stop: LifecycleStop): LifecycleAttention | undefined {
+  if (stop === 'initialized') return undefined;
+  if (yieldValue?.kind === 'BLOCKED') return { stop, kind: yieldValue.kind, code: yieldValue.code, ...(yieldValue.launchToken === undefined ? {} : { token: yieldValue.launchToken }) };
+  if (yieldValue?.kind === 'DECISION_REQUIRED') return { stop, kind: yieldValue.kind, token: yieldValue.token };
+  if (yieldValue !== undefined && yieldValue.kind !== 'FINAL') return { stop, kind: yieldValue.kind };
+  if (stop !== 'parent-boundary') return { stop };
+  return undefined;
+}
+
+function fromBridge(command: LifecycleCommand, bridge: BridgeResult, stop: LifecycleStop = 'initialized', transitions = bridge.counters.transitions, terminal?: BridgeDriveResult['terminal']): LifecycleResult {
+  const yieldValue = bridge.yield;
+  const status = resultStatus(yieldValue, stop);
+  const attention = attentionFor(yieldValue, stop);
+  return Object.freeze({
+    schema: LIFECYCLE_SCHEMA,
+    version: LIFECYCLE_VERSION,
+    command,
+    status,
+    stop,
+    stopReason: stop,
+    transitions,
+    projected: bridge.projected,
+    ...(bridge.projection === undefined ? {} : { projection: bridge.projection }),
+    counters: bridge.counters,
+    ...(yieldValue === undefined ? {} : { yield: yieldValue }),
+    ...(terminal === undefined ? {} : { terminal }),
+    ...(attention === undefined ? {} : { attention }),
+  });
+}
+
+function fromDrive(command: LifecycleCommand, result: BridgeDriveResult): LifecycleResult {
+  return Object.freeze({
+    schema: LIFECYCLE_SCHEMA,
+    version: LIFECYCLE_VERSION,
+    command,
+    status: resultStatus(result.yield, result.stopped),
+    stop: result.stopped,
+    stopReason: result.stopped,
+    transitions: result.transitions,
+    projected: result.projected,
+    ...(result.projection === undefined ? {} : { projection: result.projection }),
+    counters: result.counters,
+    ...(result.yield === undefined ? {} : { yield: result.yield }),
+    ...(result.terminal === undefined ? {} : { terminal: result.terminal }),
+    ...(attentionFor(result.yield, result.stopped) === undefined ? {} : { attention: attentionFor(result.yield, result.stopped) }),
+  });
+}
+
+function emptyLifecycle(command: LifecycleCommand, stop: LifecycleStop): LifecycleResult {
+  const counters: BridgeResult['counters'] = Object.freeze({
+    declarationReads: 0,
+    declarationBytes: 0,
+    runtimeReads: 0,
+    runtimeBytes: 0,
+    projectionReads: 0,
+    projectionBytesRead: 0,
+    projectionWrites: 0,
+    projectionBytesWritten: 0,
+    routineWakeups: 0,
+    transitions: 0,
+  });
+  return Object.freeze({
+    schema: LIFECYCLE_SCHEMA,
+    version: LIFECYCLE_VERSION,
+    command,
+    status: 'attention' as const,
+    stop,
+    stopReason: stop,
+    transitions: 0,
+    projected: false,
+    counters,
+    attention: { stop },
+  });
+}
+
+/** Submit the canonical START once. A retry uses bridge/kernel replay and
+ * therefore returns the exact committed yield without appending another row. */
+export async function initRun(options: LifecycleOptions): Promise<LifecycleResult> {
+  const command: LifecycleCommand = 'init';
+  const plan = validateInput(options, command);
+  validatePolicyBinding(options, plan);
+  if (options.signal?.aborted) return emptyLifecycle(command, 'cancelled');
+  const event: Event = { kind: 'START', intentRef: { id: 'plan', scope: 'plan', digest: digest(plan), bytes: canonicalString(plan) } };
+  const eventId = options.startEventId ?? 'lifecycle-start';
+  try {
+    const bridge = await transition(bridgeOptions(options, plan), { event, eventId, phaseId: plan.phaseId, stepId: 'run' });
+    return fromBridge(command, bridge);
+  } catch (error) {
+    // Keep established bridge error classes and messages (including
+    // ProjectionFailed) visible to callers; the durable START has already been
+    // committed if the failure is a post-commit projection fault.
+    throw error;
+  }
+}
+
+/** Drive one selected run to an existing parent boundary. Fresh roots are
+ * started by BridgeDrivePump; existing roots resume from verified CURRENT. */
+export async function runRun(options: LifecycleOptions): Promise<LifecycleResult> {
+  const command: LifecycleCommand = 'run';
+  const plan = validateInput(options, command);
+  const driver = bindDriver(options, plan);
+  const result = await drive({
+    ...bridgeOptions(options, plan, driver),
+    plan,
+    driver,
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
+    ...(options.maxTransitions === undefined ? {} : { maxTransitions: options.maxTransitions }),
+  } as BridgeDriveOptions);
+  return fromDrive(command, result);
+}
+
+/** Resume is intentionally the same ephemeral operation as run: the pump
+ * decides from verified CURRENT whether this is a fresh START or continuation. */
+export async function resumeRun(options: LifecycleOptions): Promise<LifecycleResult> {
+  const command: LifecycleCommand = 'resume';
+  const plan = validateInput(options, command);
+  const driver = bindDriver(options, plan);
+  const result = await drive({
+    ...bridgeOptions(options, plan, driver),
+    plan,
+    driver,
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
+    ...(options.maxTransitions === undefined ? {} : { maxTransitions: options.maxTransitions }),
+  } as BridgeDriveOptions);
+  return fromDrive(command, result);
+}
+
+/** Dispatch a private lifecycle command. */
+export async function lifecycle(options: LifecycleOptions): Promise<LifecycleResult> {
+  const command = options?.command ?? 'run';
+  if (command === 'init') return initRun(options);
+  if (command === 'resume') return resumeRun(options);
+  return runRun(options);
+}
+
+// Host-friendly aliases; these remain private because this module is not a
+// package-root export.
+export const init = initRun;
+export const run = runRun;
+export const resume = resumeRun;
+
+/** Build a compact, canonical result for embedding callers that need bytes. */
+export function lifecycleResultBytes(result: LifecycleResult): string {
+  return canonicalString(result);
+}
+
+/** Small state-free facade for hosts that prefer an object seam. Each method
+ * still constructs a fresh bridge/pump invocation; no cursor or scheduler is
+ * retained between calls. */
+export class LifecycleController {
+  private readonly options: LifecycleOptions;
+  constructor(options: LifecycleOptions) {
+    this.options = Object.freeze({ ...options });
+  }
+  init(): Promise<LifecycleResult> { return initRun({ ...this.options, command: 'init' }); }
+  run(): Promise<LifecycleResult> { return runRun({ ...this.options, command: 'run' }); }
+  resume(): Promise<LifecycleResult> { return resumeRun({ ...this.options, command: 'resume' }); }
+  drive(): Promise<LifecycleResult> { return this.run(); }
 }

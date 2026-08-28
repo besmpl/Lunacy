@@ -42,7 +42,9 @@ test('R2 complete-tree publication removes owned stale files but preserves unrel
     result = runDeploy(repo, target, '--check');
     assert.equal(result.status, 0, result.stderr);
     const report = JSON.parse(result.stdout);
-    assert.equal(report.managedFiles, 152);
+    // R4 carries the private recovery route's two modules (JS, declaration,
+    // and source-map artifacts) in the signed managed runtime inventory.
+    assert.equal(report.managedFiles, 164);
     assert.match(report.managedAggregate, /^[0-9a-f]{64}$/);
   } finally {
     await rm(repo, { recursive: true, force: true });
@@ -121,5 +123,22 @@ test('R2 rejects a malformed transaction identity before constructing a sibling 
   } finally {
     await rm(repo, { recursive: true, force: true });
     await rm(container, { recursive: true, force: true });
+  }
+});
+
+test('R4 managed wrapper carries and resolves the private recovery route', async () => {
+  const repo = await sourceFixture();
+  const target = await mkdtemp(join(tmpdir(), 'lunacy-r4-managed-target-'));
+  try {
+    const deployed = runDeploy(repo, target);
+    assert.equal(deployed.status, 0, deployed.stderr);
+    const bridge = join(target, 'runtime', 'bridge.mjs');
+    const result = spawnSync(process.execPath, [bridge, 'inspect-recovery', '--help'], { cwd: repo, encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /inspect-recovery/);
+    assert.equal(result.stderr, '');
+  } finally {
+    await rm(repo, { recursive: true, force: true });
+    await rm(target, { recursive: true, force: true });
   }
 });

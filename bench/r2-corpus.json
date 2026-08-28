@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "purpose": "paired legacy/segmented durability observations; authorization evidence only",
+  "repetitions": 30,
+  "eventCounts": [100, 1000, 9999, 10000, 10001, 20000],
+  "stateSizes": [1, 8, 32],
+  "metrics": ["bytesRead", "bytesWritten", "fsyncCount", "wallClockMs"],
+  "claimPolicy": "Do not infer latency, byte, fsync, provider, or token savings from this corpus."
+}

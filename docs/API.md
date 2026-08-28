@@ -75,6 +75,11 @@ context, reuse, metrics, cell, and snapshot are private optional accelerators;
 there is no public graph/cache lifecycle. All modes preserve the direct
 validator/reducer/store path. The default for every accelerator is `OFF`.
 
+The package-root `KernelOptions` intentionally has no journal-format switch.
+Long-lived local runs may select the private `FileArtifactStore` format through
+the operator/store seam described in [durability](DURABILITY.md); ordinary
+append never implicitly migrates or compacts a run.
+
 The private driver hook is documented in [installation](INSTALL.md). Only the
 composition subpath documented there is intentionally available for host binding;
 other `dist/` modules are not package exports and may change between releases.

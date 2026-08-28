@@ -140,18 +140,36 @@ export async function readBoundedUtf8File(path: string, label: string, ceiling: 
   catch { return { kind: 'unreadable' }; }
   if (!trusted) return { kind: 'absent' };
   if (trusted.stat.size > ceiling) return { kind: 'oversized' };
+  // Bind and consume one descriptor in bounded chunks.  A pathname
+  // `stat` followed by an unbounded `readFile` leaves a growth window where
+  // an attacker can force an arbitrary allocation or swap the target to a
+  // different inode.  O_NOFOLLOW plus descriptor identity and an explicit
+  // ceiling keep both allocation and authority bounded.
+  let handle: fs.FileHandle;
+  try { handle = await fs.open(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW); }
+  catch { return { kind: 'unreadable' }; }
   let bytes: Buffer;
-  try { bytes = await fs.readFile(path); }
-  catch { return { kind: 'unreadable' }; }
-  let after: Awaited<ReturnType<typeof inspectTrustedPath>>;
-  try { after = await inspectTrustedPath(path, label, { surface: true, kind: 'file' }); }
-  catch { return { kind: 'unreadable' }; }
-  if (!after || !sameFilesystemIdentity(trusted.identity, after.identity) || after.stat.size !== trusted.stat.size) return { kind: 'unreadable' };
+  try {
+    const descriptorStat = await handle.stat();
+    if (!descriptorStat.isFile() || !sameFilesystemIdentity(trusted.identity, { dev: String(descriptorStat.dev), ino: String(descriptorStat.ino) })) return { kind: 'unreadable' };
+    if (!Number.isSafeInteger(descriptorStat.size) || descriptorStat.size < 0 || descriptorStat.size > ceiling) return { kind: 'oversized' };
+    const chunks: Buffer[] = [];
+    const chunk = Buffer.allocUnsafe(Math.min(64 * 1024, Math.max(1, ceiling + 1)));
+    let total = 0;
+    while (true) {
+      const result = await handle.read(chunk, 0, chunk.length, null);
+      if (result.bytesRead === 0) break;
+      total += result.bytesRead;
+      if (total > ceiling || total > descriptorStat.size) return { kind: 'oversized' };
+      chunks.push(Buffer.from(chunk.subarray(0, result.bytesRead)));
+    }
+    if (total !== descriptorStat.size) return { kind: 'unreadable' };
+    bytes = Buffer.concat(chunks, total);
+    const after = await handle.stat();
+    if (!sameFilesystemIdentity(trusted.identity, { dev: String(after.dev), ino: String(after.ino) }) || after.size !== descriptorStat.size) return { kind: 'unreadable' };
+  } catch { return { kind: 'unreadable' }; }
+  finally { await handle.close().catch(() => undefined); }
   const digestValue = sha256(bytes);
-  let bytesAfter: Buffer;
-  try { bytesAfter = await fs.readFile(path); }
-  catch { return { kind: 'unreadable' }; }
-  if (!bytesAfter.equals(bytes)) return { kind: 'unreadable' };
   const text = bytes.toString('utf8');
   if (!Buffer.from(text, 'utf8').equals(bytes)) return { kind: 'invalid-utf8', bytes, digest: digestValue };
   return { kind: 'ok', bytes, text, digest: digestValue };

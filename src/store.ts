@@ -18,6 +18,8 @@ import {
 } from './release-admission.js';
 
 export type StoreSnapshot = { state: MachineState | undefined; generation: number };
+export type ArtifactFormat = 'legacy' | 'segmented';
+export type ArtifactStoreOptions = { format?: ArtifactFormat; segmentEventCeiling?: number; faultInjector?: (point: string) => void };
 
 /** Private pre-publication generation CAS conflict. */
 const storeGenerationConflicts = new WeakSet<object>();
@@ -90,6 +92,9 @@ export type ReuseRecord = {
 export interface ArtifactStore {
   load(): Promise<StoreSnapshot>;
   commit(previousGeneration: number, state: MachineState): Promise<number>;
+  /** Private format hint used by the kernel to lift the legacy journal ceiling
+   * only after an explicit segmented selection or a verified segmented head. */
+  readonly journalFormat?: ArtifactFormat;
   /** Optional private fixed-cell transaction hooks. Implementations supplied
    * by this repository always provide them; absence is a fail-closed miss. */
   reuseLookup?(key: string): Promise<ReuseRecord | undefined>;
@@ -428,13 +433,16 @@ function yieldBytesAreValid(bytes: string): boolean {
   } catch { return false; }
 }
 
-function validateJournal(state: MachineState, journalText: string): Array<Record<string, unknown>> {
+function validateJournal(state: MachineState, journalText: string, options: { segmented?: boolean } = {}): Array<Record<string, unknown>> {
   const lines = journalText.length === 0 ? [] : journalText.split('\n');
   if (lines.length && lines.at(-1) === '') lines.pop();
   invariant(lines.every((line) => line.length > 0), 'journal contains blank records');
   const entries: Array<Record<string, unknown>> = [];
-  invariant(lines.length <= JOURNAL_EVENT_CEILING, 'journal event ceiling exceeded');
-  invariant(Buffer.byteLength(journalText) <= JOURNAL_BYTE_CEILING, 'journal byte ceiling exceeded');
+  if (!options.segmented) {
+    if (lines.length > JOURNAL_EVENT_CEILING || Buffer.byteLength(journalText) > JOURNAL_BYTE_CEILING) {
+      const error = new Error('JournalCeiling'); error.name = 'JournalCeiling'; throw error;
+    }
+  }
   let previousRevision = 0;
   for (let index = 0; index < lines.length; index += 1) {
     let parsed: Record<string, unknown>;
@@ -586,6 +594,11 @@ type CurrentManifest = {
   stateDigest: string;
   journalEnd: number;
   journalDigest: string;
+  format?: 'segmented/v1';
+  headDigest?: string;
+  checkpointRevision?: number;
+  segmentCount?: number;
+  activeCeiling?: number;
 };
 
 type VerifiedReadOnlySnapshot = StoreSnapshot & {
@@ -629,18 +642,94 @@ type VerifiedGenerationMemo = Readonly<{
 type VerifiedCurrentResult = StoreSnapshot & { current?: CurrentManifest };
 
 const CURRENT_KEYS = ['schema', 'generation', 'revision', 'authorityEpoch', 'attemptEpoch', 'barrierEpoch', 'modeEpoch', 'writerFence', 'stateDigest', 'journalEnd', 'journalDigest'] as const;
+const SEGMENTED_CURRENT_KEYS = [...CURRENT_KEYS, 'activeCeiling', 'checkpointRevision', 'format', 'headDigest', 'segmentCount'] as const;
 
 function validateCurrent(value: unknown): CurrentManifest {
   invariant(value && typeof value === 'object', 'CURRENT is not an object');
   const current = value as Record<string, unknown>;
-  exactKeys(current, CURRENT_KEYS, 'CURRENT');
+  const keys = Object.keys(current);
+  const segmented = keys.includes('format');
+  exactKeys(current, segmented ? SEGMENTED_CURRENT_KEYS : CURRENT_KEYS, 'CURRENT');
   invariant(current.schema === 1, 'CURRENT schema is invalid');
   nonNegativeInteger(current.generation, 'CURRENT generation'); invariant((current.generation as number) > 0, 'CURRENT generation must be positive');
   for (const field of ['revision', 'authorityEpoch', 'attemptEpoch', 'barrierEpoch', 'modeEpoch', 'journalEnd']) nonNegativeInteger(current[field], `CURRENT ${field}`);
   invariant(typeof current.writerFence === 'string' && current.writerFence.length > 0, 'CURRENT writerFence is invalid');
   invariant(typeof current.stateDigest === 'string' && SHA256.test(current.stateDigest), 'CURRENT stateDigest is invalid');
   invariant(typeof current.journalDigest === 'string' && SHA256.test(current.journalDigest), 'CURRENT journalDigest is invalid');
+  if (segmented) {
+    invariant(current.format === 'segmented/v1', 'CURRENT format is invalid');
+    nonNegativeInteger(current.checkpointRevision, 'CURRENT checkpointRevision');
+    nonNegativeInteger(current.segmentCount, 'CURRENT segmentCount');
+    invariant(Number.isSafeInteger(current.activeCeiling) && (current.activeCeiling as number) > 0 && (current.activeCeiling as number) <= 10_000, 'CURRENT activeCeiling is invalid');
+    invariant(typeof current.headDigest === 'string' && SHA256.test(current.headDigest), 'CURRENT headDigest is invalid');
+    invariant((current.checkpointRevision as number) <= (current.journalEnd as number), 'CURRENT checkpointRevision exceeds journalEnd');
+  }
   return current as CurrentManifest;
+}
+
+type SegmentDescriptor = { name: string; startRevision: number; endRevision: number; bytes: number; digest: string; previousDigest: string };
+type SegmentedHead = {
+  schema: 1;
+  format: 'segmented/v1';
+  generation: number;
+  runId: string;
+  phaseId: string;
+  writerFence: string;
+  revision: number;
+  journalEnd: number;
+  checkpointRevision: number;
+  checkpointDigest: string;
+  segments: SegmentDescriptor[];
+  active: SegmentDescriptor;
+  activeCeiling: number;
+};
+const SEGMENTED_HEAD_KEYS = ['active', 'activeCeiling', 'checkpointDigest', 'checkpointRevision', 'format', 'generation', 'journalEnd', 'phaseId', 'revision', 'runId', 'schema', 'segments', 'writerFence'] as const;
+const SEGMENT_KEYS = ['bytes', 'digest', 'endRevision', 'name', 'previousDigest', 'startRevision'] as const;
+
+function validateSegmentDescriptor(value: unknown, label: string): SegmentDescriptor {
+  invariant(value && typeof value === 'object' && !Array.isArray(value), `${label} is invalid`);
+  const item = value as Record<string, unknown>;
+  exactKeys(item, SEGMENT_KEYS, label);
+  invariant(typeof item.name === 'string' && /^segment-\d+-\d+\.ndjson$/.test(item.name), `${label} name is invalid`);
+  for (const field of ['startRevision', 'endRevision', 'bytes'] as const) nonNegativeInteger(item[field], `${label} ${field}`);
+  const empty = item.startRevision === 1 && item.endRevision === 0;
+  invariant(empty || ((item.startRevision as number) > 0 && (item.endRevision as number) >= (item.startRevision as number)), `${label} range is invalid`);
+  invariant(typeof item.digest === 'string' && SHA256.test(item.digest), `${label} digest is invalid`);
+  invariant(typeof item.previousDigest === 'string' && SHA256.test(item.previousDigest), `${label} previousDigest is invalid`);
+  return item as SegmentDescriptor;
+}
+
+function validateSegmentedHead(value: unknown): SegmentedHead {
+  invariant(value && typeof value === 'object' && !Array.isArray(value), 'segmented head is invalid');
+  const head = value as Record<string, unknown>;
+  exactKeys(head, SEGMENTED_HEAD_KEYS, 'segmented head');
+  invariant(head.schema === 1 && head.format === 'segmented/v1', 'segmented head version is invalid');
+  for (const field of ['generation', 'revision', 'journalEnd', 'checkpointRevision'] as const) nonNegativeInteger(head[field], `segmented head ${field}`);
+  invariant((head.generation as number) > 0 && head.revision === head.journalEnd, 'segmented head revision is invalid');
+  invariant((head.checkpointRevision as number) <= (head.journalEnd as number), 'segmented head checkpoint is invalid');
+  for (const field of ['runId', 'phaseId', 'writerFence'] as const) invariant(typeof head[field] === 'string' && (head[field] as string).length > 0, `segmented head ${field} is invalid`);
+  invariant(typeof head.checkpointDigest === 'string' && SHA256.test(head.checkpointDigest), 'segmented head checkpointDigest is invalid');
+  invariant(Array.isArray(head.segments) && head.segments.every((item, index) => validateSegmentDescriptor(item, `segmented segment ${index + 1}`)), 'segmented head segments are invalid');
+  invariant(head.active && typeof head.active === 'object', 'segmented active suffix is invalid');
+  validateSegmentDescriptor(head.active, 'segmented active suffix');
+  invariant(Number.isSafeInteger(head.activeCeiling) && (head.activeCeiling as number) > 0 && (head.activeCeiling as number) <= 10_000, 'segmented active ceiling is invalid');
+  const descriptors = [...head.segments as SegmentDescriptor[], head.active as SegmentDescriptor];
+  let expected = 1; let previous: string = digest('');
+  for (const descriptor of descriptors) {
+    if (descriptor.endRevision === 0) invariant(descriptors.length === 1, 'segmented empty suffix must be the only segment');
+    invariant(descriptor.startRevision === expected, 'segmented journal has a gap or overlap');
+    invariant(descriptor.previousDigest === previous, 'segmented digest chain is invalid');
+    expected = descriptor.endRevision === 0 ? 1 : descriptor.endRevision + 1;
+    previous = descriptor.digest;
+  }
+  invariant(expected - 1 === head.journalEnd, 'segmented journal end is invalid');
+  invariant((head.active as SegmentDescriptor).endRevision - (head.active as SegmentDescriptor).startRevision + 1 <= (head.activeCeiling as number), 'segmented active suffix exceeds bound');
+  invariant(head.segments.length === 0 || (head.segments.at(-1) as SegmentDescriptor).endRevision < (head.active as SegmentDescriptor).startRevision, 'segmented active suffix overlaps sealed segment');
+  return head as SegmentedHead;
+}
+
+function segmentBytes(entries: readonly Record<string, unknown>[]): string {
+  return entries.length ? `${entries.map((entry) => canonicalString(entry)).join('\n')}\n` : '';
 }
 
 async function sleep(milliseconds: number, signal?: AbortSignal): Promise<void> {
@@ -670,6 +759,9 @@ const FENCE_POLL_MS = 5;
 const MAX_PROCESS_ID = 2_147_483_647;
 
 export class MemoryArtifactStore implements ArtifactStore {
+  private format: ArtifactFormat;
+  get journalFormat(): ArtifactFormat { return this.format; }
+  private readonly segmentEventCeiling: number;
   private state?: MachineState;
   private generation = 0;
   private fence: Promise<void> = Promise.resolve();
@@ -677,6 +769,10 @@ export class MemoryArtifactStore implements ArtifactStore {
   /** Keep the small committed-generation fence history needed to reject a
    * delayed publication in deterministic/in-memory tests as well as on disk. */
   private readonly generationFences = new Map<number, { writerFence: string; runId: string; authorityEpoch: number }>();
+  constructor(options: ArtifactStoreOptions = {}) {
+    this.format = options.format ?? 'legacy';
+    this.segmentEventCeiling = Number.isSafeInteger(options.segmentEventCeiling) && (options.segmentEventCeiling as number) > 0 ? Math.min(options.segmentEventCeiling as number, 10_000) : 1000;
+  }
   private async withFence<T>(fn: () => T | Promise<T>): Promise<T> {
     const previous = this.fence;
     let release!: () => void;
@@ -688,19 +784,28 @@ export class MemoryArtifactStore implements ArtifactStore {
     finally { release(); if (this.fence === queued) this.fence = Promise.resolve(); }
   }
   async load(): Promise<StoreSnapshot> {
-    return this.withFence(() => ({ state: this.state ? cloneState(this.state) : undefined, generation: this.generation }));
+    return this.withFence(() => {
+      const state = this.state ? cloneState(this.state) : undefined;
+      return { state, generation: this.generation };
+    });
   }
   async commit(previousGeneration: number, state: MachineState): Promise<number> {
     return this.withFence(() => {
       if (previousGeneration !== this.generation) throw mintStoreGenerationConflict();
       validateStateShape(state);
       const journalText = state.journal.map((entry) => canonicalString(entry)).join('\n') + (state.journal.length ? '\n' : '');
-      validateJournal(state, journalText);
+      validateJournal(state, journalText, { segmented: this.format === 'segmented' });
       this.state = cloneState(state); this.generation += 1;
       this.generationFences.set(this.generation, { writerFence: state.writerFence, runId: state.runId, authorityEpoch: state.authorityEpoch });
       return this.generation;
     });
   }
+  async selectFormat(format: ArtifactFormat): Promise<void> { if (format !== 'legacy' && format !== 'segmented') throw new Error('ManifestMismatch: unknown artifact format'); this.format = format; }
+  async migrateToSegmented(): Promise<number> { this.format = 'segmented'; return this.generation; }
+  async migrate(): Promise<number> { return this.migrateToSegmented(); }
+  async rollbackSegmented(): Promise<number> { this.format = 'legacy'; return this.generation; }
+  async rollback(): Promise<number> { return this.rollbackSegmented(); }
+  async compact(): Promise<{ removed: number }> { return { removed: 0 }; }
   [STORE_LINEARIZED_DISPATCH](request: StoreLinearizedDispatchRequest, marker: EntryMarker): Promise<InternalDispatchResult> {
     return this.withFence(() => invokeIfCurrent({ state: this.state, generation: this.generation }, request, marker));
   }
@@ -725,6 +830,9 @@ export class MemoryArtifactStore implements ArtifactStore {
 }
 
 export class FileArtifactStore implements ArtifactStore {
+  private format: ArtifactFormat;
+  get journalFormat(): ArtifactFormat { return this.format; }
+  private readonly segmentEventCeiling: number;
   private readonly rootDir: string;
   private readonly kernelDir: string;
   private readonly generationsDir: string;
@@ -734,6 +842,8 @@ export class FileArtifactStore implements ArtifactStore {
   private readonly reusePinsDir: string;
   private readonly reuseIndexPath: string;
   private readonly expectedRootIdentity?: FilesystemIdentity;
+  private readonly faultInjector?: (point: string) => void;
+  private rollbackRequested = false;
   private rootIdentity?: FilesystemIdentity;
   private kernelIdentity?: FilesystemIdentity;
   private fenceIdentity?: FilesystemIdentity;
@@ -742,7 +852,7 @@ export class FileArtifactStore implements ArtifactStore {
   /** One-shot proof captured by load(); never durable or shared. */
   private verifiedGenerationMemo?: VerifiedGenerationMemo;
 
-  constructor(rootDir: string, expectedRootIdentity?: FilesystemIdentity) {
+  constructor(rootDir: string, expectedRootIdentity?: FilesystemIdentity | ArtifactStoreOptions, options: ArtifactStoreOptions = {}) {
     this.rootDir = resolve(rootDir);
     this.kernelDir = join(this.rootDir, '.kernel');
     this.generationsDir = join(this.kernelDir, 'generations');
@@ -751,9 +861,18 @@ export class FileArtifactStore implements ArtifactStore {
     this.reuseBlobsDir = join(this.reuseDir, 'blobs');
     this.reusePinsDir = join(this.reuseDir, 'pins');
     this.reuseIndexPath = join(this.reuseDir, 'index.json');
-    this.expectedRootIdentity = expectedRootIdentity;
-    this.rootIdentity = expectedRootIdentity;
+    const maybeOptions = expectedRootIdentity && ('format' in expectedRootIdentity || 'segmentEventCeiling' in expectedRootIdentity || 'faultInjector' in expectedRootIdentity) ? expectedRootIdentity as ArtifactStoreOptions : undefined;
+    const identity = maybeOptions ? undefined : expectedRootIdentity as FilesystemIdentity | undefined;
+    const selected = options.format ?? maybeOptions?.format;
+    this.expectedRootIdentity = identity;
+    this.rootIdentity = identity;
+    this.format = selected ?? 'legacy';
+    const bound = options.segmentEventCeiling ?? maybeOptions?.segmentEventCeiling;
+    this.segmentEventCeiling = Number.isSafeInteger(bound) && (bound as number) > 0 ? Math.min(bound as number, 10_000) : 1000;
+    this.faultInjector = options.faultInjector ?? maybeOptions?.faultInjector;
   }
+
+  private injectFault(point: string): void { this.faultInjector?.(point); }
 
   private async assertDirectory(path: string, label: string): Promise<void> {
     try {
@@ -1220,7 +1339,7 @@ export class FileArtifactStore implements ArtifactStore {
 
   private uniqueQuarantineName(name: string): string { return `${name}-${Date.now()}-${process.pid}-${Math.random().toString(16).slice(2)}`; }
 
-  private async quarantineOrphans(currentGeneration?: number): Promise<void> {
+  private async quarantineOrphans(currentGeneration?: number, retainHistory = false): Promise<void> {
     // Validate every candidate before moving any one of them.  In particular,
     // a malformed CURRENT or a trust failure in a sibling must never turn
     // recovery into a partially-mutating cleanup pass.
@@ -1232,7 +1351,11 @@ export class FileArtifactStore implements ArtifactStore {
       const isTmp = entry.name.includes('.tmp');
       const candidate = match ? Number(match[1]) : undefined;
       const canonical = candidate !== undefined && Number.isSafeInteger(candidate) && candidate > 0 && entry.name === `g${candidate}`;
-      const keep = Boolean(canonical && (candidate === currentGeneration || candidate === predecessorGeneration));
+      // During segmented recovery retain only committed history at or below
+      // CURRENT. A future canonical gN is an interrupted successor (the
+      // common crash window after generation rename and before CURRENT); it
+      // must be quarantined so the next retry can stage the same generation.
+      const keep = Boolean(canonical && (candidate === currentGeneration || (retainHistory && currentGeneration !== undefined && candidate < currentGeneration) || (!retainHistory && candidate === predecessorGeneration)));
       if (keep) {
         if (entry.isSymbolicLink() || !entry.isDirectory()) throw new Error(`ManifestMismatch: retained generation ${entry.name} is not a directory`);
         await this.assertDirectory(join(this.generationsDir, entry.name), `retained generation ${entry.name}`);
@@ -1381,6 +1504,76 @@ export class FileArtifactStore implements ArtifactStore {
     } catch { return false; }
   }
 
+  /** Verify a segmented generation before any state/effect use.  Segments are
+   * immutable canonical NDJSON files named by their revision range; the head
+   * is the sole authority for ordering, digest chaining, and the bounded active
+   * suffix. */
+  private async readVerifiedSegmentedGeneration(current: CurrentManifest): Promise<{ state: MachineState; head: SegmentedHead }> {
+    const generationDir = join(this.generationsDir, `g${current.generation}`);
+    const statePath = join(generationDir, 'state.json');
+    const headPath = join(generationDir, 'head.json');
+    let stateText: string; let headText: string;
+    try {
+      await this.assertDirectory(generationDir, `generation ${current.generation}`);
+      await this.assertRegular(statePath, `generation ${current.generation} state`);
+      await this.assertRegular(headPath, `generation ${current.generation} head`);
+      [stateText, headText] = await Promise.all([
+        this.readRegular(statePath, `generation ${current.generation} state`),
+        this.readRegular(headPath, `generation ${current.generation} head`, CURRENT_BYTE_CEILING),
+      ]);
+    } catch (error) { throw new Error(`ManifestMismatch: CURRENT segmented generation ${current.generation} is incomplete: ${(error as Error).message}`); }
+    let state: MachineState; let head: SegmentedHead;
+    try { state = parseCanonical<MachineState>(stateText); validateStateShape(state); }
+    catch (error) { throw new Error(`ManifestMismatch: segmented state is invalid: ${(error as Error).message}`); }
+    try { head = validateSegmentedHead(parseCanonical<unknown>(headText)); }
+    catch (error) { throw new Error(`ManifestMismatch: segmented head is invalid: ${(error as Error).message}`); }
+    // The active suffix ceiling is part of the signed head, so a reader may
+    // inspect a run created with a non-default ceiling without guessing the
+    // writer's private constructor options.
+    invariant(head.active.endRevision - head.active.startRevision + 1 <= head.activeCeiling, 'segmented active suffix exceeds head bound');
+    invariant(head.generation === current.generation && head.runId === state.runId && head.phaseId === state.phaseId && head.writerFence === state.writerFence, 'segmented head identity disagrees with state');
+    const descriptors = [...head.segments, head.active];
+    const generationEntries = await this.readDirectoryBounded(generationDir, `generation ${current.generation}`, descriptors.length + 2);
+    const expectedNames = new Set(['state.json', 'head.json', ...descriptors.map((descriptor) => descriptor.name)]);
+    invariant(generationEntries.length === expectedNames.size && generationEntries.every((entry) => !entry.isSymbolicLink() && expectedNames.has(entry.name)), 'segmented generation contains unexpected files');
+    const entries: Array<Record<string, unknown>> = [];
+    for (const descriptor of descriptors) {
+      const path = join(generationDir, descriptor.name);
+      if (descriptor.name.includes('/') || descriptor.name.includes('\\') || descriptor.name.startsWith('.') || !/^segment-\d+-\d+\.ndjson$/.test(descriptor.name)) throw new Error('ManifestMismatch: segmented segment path is unsafe');
+      const text = await this.readRegular(path, `segmented ${descriptor.name}`, JOURNAL_BYTE_CEILING * 16);
+      invariant(Buffer.byteLength(text) === descriptor.bytes, `segmented ${descriptor.name} byte count mismatch`);
+      invariant(digest(text) === descriptor.digest, `segmented ${descriptor.name} digest mismatch`);
+      const parsedLines = text.length === 0 ? [] : text.split('\n');
+      if (parsedLines.at(-1) === '') parsedLines.pop();
+      invariant(parsedLines.length === descriptor.endRevision - descriptor.startRevision + 1, `segmented ${descriptor.name} range mismatch`);
+      for (const line of parsedLines) {
+        let entry: Record<string, unknown>;
+        try { entry = parseCanonical<Record<string, unknown>>(line); } catch { throw new Error(`ManifestMismatch: segmented ${descriptor.name} record is not canonical JSON`); }
+        entries.push(entry);
+      }
+    }
+    const journalText = segmentBytes(entries);
+    validateJournal(state, journalText, { segmented: true });
+    invariant(state.revision === head.revision && state.journal.length === head.journalEnd, 'segmented state revision disagrees with head');
+    invariant(digest(state) === current.stateDigest && digest(state.journal) === current.journalDigest, 'segmented state digest mismatch');
+    invariant(current.revision === head.revision && current.journalEnd === head.journalEnd && current.checkpointRevision === head.checkpointRevision && current.headDigest === digest(head), 'segmented CURRENT disagrees with head');
+    // CURRENT is a compact CAS pointer, not an independent authority.  Bind
+    // every continuity field to the fully verified state/head before exposing
+    // the generation or allowing a successor commit.  Legacy verification
+    // performs the same state comparison; segmented format must not weaken it.
+    for (const [field, value] of Object.entries({
+      writerFence: state.writerFence,
+      authorityEpoch: state.authorityEpoch,
+      attemptEpoch: state.attemptEpoch,
+      barrierEpoch: state.barrierEpoch,
+      modeEpoch: state.modeEpoch,
+    })) invariant(current[field as keyof CurrentManifest] === value, `segmented CURRENT ${field} disagrees with state`);
+    invariant(current.segmentCount === descriptors.length, 'segmented CURRENT segmentCount disagrees with head');
+    invariant(current.activeCeiling === head.activeCeiling, 'segmented CURRENT activeCeiling disagrees with head');
+    invariant(head.checkpointDigest === digest(entries.slice(0, head.checkpointRevision)), 'segmented checkpoint digest mismatch');
+    return { state, head };
+  }
+
   private async readVerifiedCurrent(includeCurrent = false): Promise<VerifiedCurrentResult> {
     let current: CurrentManifest | undefined;
     current = await this.readCurrent();
@@ -1397,6 +1590,11 @@ export class FileArtifactStore implements ArtifactStore {
       // to mutate, and this preserves the historical empty-quarantine shape.
       await this.quarantineOrphans(undefined);
       return { state: undefined, generation: 0 };
+    }
+    if (current.format === 'segmented/v1') {
+      const verified = await this.readVerifiedSegmentedGeneration(current);
+      await this.quarantineOrphans(current.generation, true);
+      return includeCurrent ? { state: verified.state, generation: current.generation, current } : { state: verified.state, generation: current.generation };
     }
     const generationDir = join(this.generationsDir, `g${current.generation}`);
     const statePath = join(generationDir, 'state.json');
@@ -1453,7 +1651,10 @@ export class FileArtifactStore implements ArtifactStore {
     });
     if (!generation) return;
     const generationIdentity = generation.identity;
-    const entries = await this.readDirectoryBounded(generationPath, `predecessor generation ${predecessorGeneration}`, 2);
+    const entries = await this.readDirectoryBounded(generationPath, `predecessor generation ${predecessorGeneration}`, JOURNAL_EVENT_CEILING + 2);
+    // A rollback successor may intentionally retain a segmented predecessor;
+    // legacy retirement owns only the historical two-file generation shape.
+    if (entries.some((entry) => entry.name === 'head.json' || entry.name.startsWith('segment-'))) return;
     const children: Array<{ path: string; identity: FilesystemIdentity }> = [];
     for (const entry of entries) {
       if (entry.name !== 'state.json' && entry.name !== 'journal.ndjson') throw new Error(`ManifestMismatch: predecessor generation contains unexpected file ${entry.name}`);
@@ -1511,6 +1712,19 @@ export class FileArtifactStore implements ArtifactStore {
     catch (error) { throw new Error(`ManifestMismatch: ${(error as Error).message.replace(/^FilesystemTrust:\s*/, '')}`); }
     if (!generationsIdentity) throw new Error('ManifestMismatch: generations directory is absent');
     await this.validateReadOnlyNamespace(current.generation);
+    if (current.format === 'segmented/v1') {
+      const verified = await this.readVerifiedSegmentedGeneration(current);
+      const generationDir = join(this.generationsDir, `g${current.generation}`);
+      const generationIdentity = await trustedIdentity(generationDir, `generation ${current.generation}`, { surface: true, kind: 'directory' });
+      const stateIdentity = await trustedIdentity(join(generationDir, 'state.json'), 'segmented state', { surface: true, kind: 'file' });
+      const headIdentity = await trustedIdentity(join(generationDir, 'head.json'), 'segmented head', { surface: true, kind: 'file' });
+      if (!generationIdentity || !stateIdentity || !headIdentity) throw new Error('ManifestMismatch: segmented generation identity is unavailable');
+      const afterIdentity = await trustedIdentity(currentPath, 'CURRENT', { surface: true, kind: 'file' });
+      if (!afterIdentity || !sameFilesystemIdentity(currentIdentity, afterIdentity)) throw new Error('ManifestMismatch: CURRENT changed during read');
+      const after = await this.readCurrent();
+      if (!after || canonicalString(after) !== canonicalString(current)) throw new Error('ManifestMismatch: CURRENT changed during read');
+      return { state: verified.state, generation: current.generation, current, proof: { current: afterIdentity, generations: generationsIdentity, generation: generationIdentity, state: stateIdentity, journal: headIdentity } };
+    }
     const generationDir = join(this.generationsDir, `g${current.generation}`);
     const statePath = join(generationDir, 'state.json');
     const journalPath = join(generationDir, 'journal.ndjson');
@@ -1640,7 +1854,9 @@ export class FileArtifactStore implements ArtifactStore {
           // work solely to close the metadata-read window.
           const generationDir = join(this.generationsDir, `g${snapshot.generation}`);
           const statePath = join(generationDir, 'state.json');
-          const journalPath = join(generationDir, 'journal.ndjson');
+          // A segmented generation has no journal.ndjson. Its verified head
+          // is the immutable journal proof and must be rebound instead.
+          const journalPath = snapshot.current?.format === 'segmented/v1' ? join(generationDir, 'head.json') : join(generationDir, 'journal.ndjson');
           let afterCurrentIdentity: FilesystemIdentity | undefined; let afterGenerationsIdentity: FilesystemIdentity | undefined; let afterGenerationIdentity: FilesystemIdentity | undefined; let afterStateIdentity: FilesystemIdentity | undefined; let afterJournalIdentity: FilesystemIdentity | undefined;
           try {
             afterCurrentIdentity = await trustedIdentity(join(this.kernelDir, 'CURRENT'), 'CURRENT', { surface: true, kind: 'file' });
@@ -1676,6 +1892,7 @@ export class FileArtifactStore implements ArtifactStore {
       // proof.
       this.verifiedGenerationMemo = undefined;
       const verified = await this.readVerifiedCurrent(true);
+      if (verified.current?.format === 'segmented/v1') this.format = 'segmented';
       // A staged pin is intentionally allowed to survive the commit call so
       // publication can consume it.  Reconcile only at a load/restart
       // boundary, where no in-flight caller can still prove ownership.
@@ -1699,6 +1916,60 @@ export class FileArtifactStore implements ArtifactStore {
     }, signal);
   }
 
+  private async commitSegmented(previousGeneration: number, state: MachineState, currentBefore: CurrentManifest | undefined): Promise<number> {
+    const loadedGeneration = currentBefore?.generation ?? 0;
+    if (loadedGeneration !== previousGeneration) throw mintStoreGenerationConflict();
+    const generation = loadedGeneration + 1;
+    const stage = join(this.generationsDir, `.g${generation}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+    const target = join(this.generationsDir, `g${generation}`);
+    await this.ensureDirectory(stage, 'staged segmented generation directory');
+    const entries = state.journal as unknown as Array<Record<string, unknown>>;
+    const descriptors: SegmentDescriptor[] = [];
+    const chunkSize = this.segmentEventCeiling;
+    let priorHead: SegmentedHead | undefined;
+    const priorGenerationDir = currentBefore?.format === 'segmented/v1' ? join(this.generationsDir, `g${currentBefore.generation}`) : undefined;
+    if (priorGenerationDir) {
+      try { priorHead = validateSegmentedHead(parseCanonical(await this.readRegular(join(priorGenerationDir, 'head.json'), 'prior segmented head', CURRENT_BYTE_CEILING))); } catch { priorHead = undefined; }
+    }
+    for (let offset = 0; offset < entries.length; offset += chunkSize) {
+      const chunk = entries.slice(offset, Math.min(entries.length, offset + chunkSize));
+      const startRevision = offset + 1; const endRevision = offset + chunk.length;
+      const text = segmentBytes(chunk);
+      const descriptor: SegmentDescriptor = { name: `segment-${String(startRevision).padStart(8, '0')}-${String(endRevision).padStart(8, '0')}.ndjson`, startRevision, endRevision, bytes: Buffer.byteLength(text), digest: digest(text), previousDigest: descriptors.length ? descriptors.at(-1)!.digest : digest('') };
+      const priorDescriptor = priorHead && [...priorHead.segments, priorHead.active].find((item) => item.name === descriptor.name && item.digest === descriptor.digest);
+      if (priorDescriptor && priorGenerationDir) {
+        try { this.injectFault('hard-link'); await fs.link(join(priorGenerationDir, descriptor.name), join(stage, descriptor.name)); }
+        catch { await this.writeRegular(join(stage, descriptor.name), text, 'staged segmented journal segment', true); }
+      } else await this.writeRegular(join(stage, descriptor.name), text, 'staged segmented journal segment', true);
+      this.injectFault('segment-fsync'); await this.fsyncFile(join(stage, descriptor.name));
+      descriptors.push(descriptor);
+    }
+    if (descriptors.length === 0) {
+      const text = '';
+      const descriptor: SegmentDescriptor = { name: 'segment-00000001-00000000.ndjson', startRevision: 1, endRevision: 0, bytes: 0, digest: digest(text), previousDigest: digest('') };
+      await this.writeRegular(join(stage, descriptor.name), text, 'staged segmented journal segment', true);
+      this.injectFault('segment-fsync'); await this.fsyncFile(join(stage, descriptor.name)); descriptors.push(descriptor);
+    }
+    const active = descriptors.at(-1)!;
+    const sealed = descriptors.slice(0, -1);
+    const checkpointRevision = sealed.length ? sealed.at(-1)!.endRevision : 0;
+    const head: SegmentedHead = { schema: 1, format: 'segmented/v1', generation, runId: state.runId, phaseId: state.phaseId, writerFence: state.writerFence, revision: state.revision, journalEnd: state.journal.length, checkpointRevision, checkpointDigest: digest(entries.slice(0, checkpointRevision)), segments: sealed, active, activeCeiling: this.segmentEventCeiling };
+    await this.writeRegular(join(stage, 'state.json'), canonicalString(state), 'staged segmented state', true);
+    await this.writeRegular(join(stage, 'head.json'), canonicalString(head), 'staged segmented head', true);
+    await this.fsyncFile(join(stage, 'state.json')); this.injectFault('head-fsync'); await this.fsyncFile(join(stage, 'head.json')); this.injectFault('seal-fsync'); await this.fsyncDir(stage);
+    const existingTarget = await inspectTrustedPath(target, `generation ${generation}`, { allowMissing: true, surface: true, kind: 'directory' });
+    if (existingTarget) throw new Error(`ManifestMismatch: generation ${generation} already exists`);
+    this.injectFault('generation-rename'); await fs.rename(stage, target); this.injectFault('generation-published'); await this.fsyncDir(this.generationsDir);
+    const manifest: CurrentManifest = { schema: 1, generation, revision: state.revision, authorityEpoch: state.authorityEpoch, attemptEpoch: state.attemptEpoch, barrierEpoch: state.barrierEpoch, modeEpoch: state.modeEpoch, writerFence: state.writerFence, stateDigest: digest(state), journalEnd: state.journal.length, journalDigest: digest(state.journal), format: 'segmented/v1', headDigest: digest(head), checkpointRevision, segmentCount: descriptors.length, activeCeiling: this.segmentEventCeiling };
+    const currentPath = join(this.kernelDir, 'CURRENT');
+    const currentTmp = join(this.kernelDir, `.CURRENT.tmp-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+    const currentIdentityBefore = await trustedIdentity(currentPath, 'CURRENT', { allowMissing: true, surface: true, kind: 'file' });
+    const currentNow = await trustedIdentity(currentPath, 'CURRENT', { allowMissing: true, surface: true, kind: 'file' });
+    if ((currentIdentityBefore === undefined) !== (currentNow === undefined) || (currentIdentityBefore && currentNow && !sameFilesystemIdentity(currentIdentityBefore, currentNow))) throw new Error('ManifestMismatch: CURRENT changed before segmented commit');
+    await this.writeRegular(currentTmp, canonicalString(manifest), 'staged CURRENT', true); this.injectFault('CURRENT-fsync'); await this.fsyncFile(currentTmp); this.injectFault('CURRENT-rename'); await fs.rename(currentTmp, currentPath); this.injectFault('CURRENT-published'); await this.fsyncDir(this.kernelDir);
+    return generation;
+  }
+
   async commit(previousGeneration: number, state: MachineState): Promise<number> {
     nonNegativeInteger(previousGeneration, 'previous generation');
     validateStateShape(state);
@@ -1706,11 +1977,30 @@ export class FileArtifactStore implements ArtifactStore {
     // not be able to publish a state whose journal projection is malformed,
     // non-canonical, or disconnected from its event digests.
     const candidateJournalText = state.journal.map((entry) => canonicalString(entry)).join('\n') + (state.journal.length ? '\n' : '');
-    validateJournal(state, candidateJournalText);
+    validateJournal(state, candidateJournalText, { segmented: this.format === 'segmented' });
     return this.withFence(async () => {
       // Consume before probing: no failure path may leave proof that a later
       // commit could accidentally reuse.  A miss falls through to the
       // unchanged full verifier and never refreshes this one-shot memo.
+      let currentManifest: CurrentManifest | undefined;
+      try { currentManifest = await this.readCurrent(); }
+      catch (error) {
+        // Preserve the historical cold-verifier path (and its diagnostics) on
+        // malformed legacy CURRENT rather than short-circuiting through the
+        // segmented format probe.
+        try { await this.readVerifiedCurrent(); } catch { /* retain original parse error */ }
+        throw error;
+      }
+      const segmented = !this.rollbackRequested && (this.format === 'segmented' || currentManifest?.format === 'segmented/v1');
+      this.rollbackRequested = false;
+      if (segmented) {
+        this.format = 'segmented';
+        this.verifiedGenerationMemo = undefined;
+        // Reader-before-writer: a segmented successor is staged only after
+        // the complete predecessor head/state/segment chain has verified.
+        const verifiedPrior = previousGeneration > 0 ? await this.readVerifiedCurrent(true) : undefined;
+        return this.commitSegmented(previousGeneration, state, verifiedPrior?.current ?? currentManifest);
+      }
       const memo = this.verifiedGenerationMemo;
       this.verifiedGenerationMemo = undefined;
       const memoHit = await this.probeVerifiedGenerationMemo(memo, previousGeneration);
@@ -1731,16 +2021,212 @@ export class FileArtifactStore implements ArtifactStore {
       const journalText = state.journal.map((entry) => canonicalString(entry)).join('\n') + (state.journal.length ? '\n' : '');
       await this.writeRegular(join(stage, 'state.json'), stateText, 'staged state', true);
       await this.writeRegular(join(stage, 'journal.ndjson'), journalText, 'staged journal', true);
-      await this.fsyncFile(join(stage, 'state.json')); await this.fsyncFile(join(stage, 'journal.ndjson')); await this.fsyncDir(stage);
+      this.injectFault('state-fsync'); await this.fsyncFile(join(stage, 'state.json')); this.injectFault('journal-fsync'); await this.fsyncFile(join(stage, 'journal.ndjson')); await this.fsyncDir(stage);
       const existingTarget = await inspectTrustedPath(target, `generation ${generation}`, { allowMissing: true, surface: true, kind: 'directory' });
       if (existingTarget) throw new Error(`ManifestMismatch: generation ${generation} already exists`);
-      await fs.rename(stage, target); await this.fsyncDir(this.generationsDir);
+      this.injectFault('generation-rename'); await fs.rename(stage, target); this.injectFault('generation-published'); await this.fsyncDir(this.generationsDir);
       const manifest: CurrentManifest = { schema: 1, generation, revision: state.revision, authorityEpoch: state.authorityEpoch, attemptEpoch: state.attemptEpoch, barrierEpoch: state.barrierEpoch, modeEpoch: state.modeEpoch, writerFence: state.writerFence, stateDigest: digest(state), journalEnd: state.journal.length, journalDigest: digest(state.journal) };
       const currentTmp = join(this.kernelDir, `.CURRENT.tmp-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`);
       const currentNow = await trustedIdentity(currentPath, 'CURRENT', { allowMissing: true, surface: true, kind: 'file' });
       if ((currentBefore === undefined) !== (currentNow === undefined) || (currentBefore && currentNow && !sameFilesystemIdentity(currentBefore, currentNow))) throw new Error('ManifestMismatch: CURRENT changed before commit');
-      await this.writeRegular(currentTmp, canonicalString(manifest), 'staged CURRENT', true); await this.fsyncFile(currentTmp); await fs.rename(currentTmp, currentPath); await this.fsyncDir(this.kernelDir);
+      await this.writeRegular(currentTmp, canonicalString(manifest), 'staged CURRENT', true); this.injectFault('CURRENT-fsync'); await this.fsyncFile(currentTmp); this.injectFault('CURRENT-rename'); await fs.rename(currentTmp, currentPath); this.injectFault('CURRENT-published'); await this.fsyncDir(this.kernelDir);
       return generation;
+    });
+  }
+
+  /** Explicitly opt this store instance into the private segmented writer.
+   * Existing generations must first be migrated; ordinary append never
+   * changes format implicitly. */
+  async selectFormat(format: ArtifactFormat): Promise<void> {
+    if (format !== 'legacy' && format !== 'segmented') throw new Error('ManifestMismatch: unknown artifact format');
+    await this.withFence(async () => {
+      const current = await this.readCurrent();
+      if (current?.format === 'segmented/v1' && format === 'legacy') throw new Error('ManifestMismatch: segmented format requires explicit rollback');
+      this.format = format;
+    });
+  }
+
+  /** Resumable one-generation migration.  The old CURRENT/generation remains
+   * intact until the complete segmented successor is verified and published. */
+  async migrateToSegmented(): Promise<number> {
+    const loaded = await this.load();
+    if (!loaded.state) throw new Error('ManifestMismatch: cannot migrate an empty store');
+    const migrationMarker = join(this.kernelDir, 'MIGRATION.json');
+    if (this.format === 'segmented') {
+      // A crash after CURRENT publication but before marker cleanup is already
+      // the verified new authority. Retire only that exact marker on retry.
+      await fs.unlink(migrationMarker).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'ENOENT') throw error; });
+      return loaded.generation;
+    }
+    await this.ensure();
+    this.injectFault('migration-marker');
+    await this.writeRegular(migrationMarker, canonicalString({ schema: 1, from: 'legacy', to: 'segmented/v1', priorGeneration: loaded.generation }), 'migration marker', true).catch(async (error) => {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      const existing = parseCanonical<Record<string, unknown>>(await this.readRegular(migrationMarker, 'migration marker', CURRENT_BYTE_CEILING));
+      invariant(existing.schema === 1 && existing.from === 'legacy' && existing.to === 'segmented/v1' && existing.priorGeneration === loaded.generation, 'migration marker conflicts with current generation');
+    });
+    this.format = 'segmented';
+    try {
+      const generation = await this.commit(loaded.generation, loaded.state);
+      await fs.unlink(migrationMarker).catch(() => undefined);
+      await this.fsyncDir(this.kernelDir).catch(() => undefined);
+      return generation;
+    } catch (error) { throw error; }
+  }
+  async migrate(): Promise<number> { return this.migrateToSegmented(); }
+
+  /** Roll back by publishing a verified legacy successor while retaining all
+   * segmented generations for explicit later retention. */
+  async rollbackSegmented(): Promise<number> {
+    const loaded = await this.load();
+    if (!loaded.state) throw new Error('ManifestMismatch: cannot roll back an empty store');
+    await this.ensure();
+    const rollbackMarker = join(this.kernelDir, 'ROLLBACK.json');
+    const currentAfterLoad = await this.readCurrent();
+    if (currentAfterLoad && currentAfterLoad.format === undefined) {
+      // CURRENT already names the verified legacy successor. A prior process
+      // may have crashed after the swap and before marker cleanup; clear that
+      // exact marker and converge without publishing a second successor.
+      const marker = await inspectTrustedPath(rollbackMarker, 'rollback marker', { allowMissing: true, surface: true, kind: 'file' });
+      if (marker) {
+        const existing = parseCanonical<Record<string, unknown>>(await this.readRegular(rollbackMarker, 'rollback marker', CURRENT_BYTE_CEILING));
+        exactKeys(existing, ['from', 'priorGeneration', 'schema', 'to'], 'rollback marker');
+        invariant(existing.schema === 1 && existing.from === 'segmented/v1' && existing.to === 'legacy' && Number.isSafeInteger(existing.priorGeneration) && (existing.priorGeneration as number) > 0, 'rollback marker is invalid');
+        await fs.unlink(rollbackMarker).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'ENOENT') throw error; });
+        await this.fsyncDir(this.kernelDir);
+      }
+      this.format = 'legacy';
+      return loaded.generation;
+    }
+    this.injectFault('rollback-marker');
+    await this.writeRegular(rollbackMarker, canonicalString({ schema: 1, from: 'segmented/v1', to: 'legacy', priorGeneration: loaded.generation }), 'rollback marker', true).catch(async (error) => {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      // An earlier interrupted rollback is resumable only when it names the
+      // same predecessor; never overwrite a foreign marker.
+      const existing = parseCanonical<Record<string, unknown>>(await this.readRegular(rollbackMarker, 'rollback marker', CURRENT_BYTE_CEILING));
+      invariant(existing.schema === 1 && existing.from === 'segmented/v1' && existing.to === 'legacy' && existing.priorGeneration === loaded.generation, 'rollback marker conflicts with current generation');
+    });
+    this.format = 'legacy';
+    this.rollbackRequested = true;
+    try {
+      const generation = await this.commit(loaded.generation, loaded.state);
+      await fs.unlink(rollbackMarker).catch(() => undefined);
+      await this.fsyncDir(this.kernelDir).catch(() => undefined);
+      return generation;
+    } catch (error) { throw error; }
+  }
+  async rollback(): Promise<number> { return this.rollbackSegmented(); }
+
+  /** Read the explicit migration/rollback retention pins.  These markers are
+   * tiny, canonical operator records; a malformed marker blocks GC rather
+   * than risking deletion of a generation still needed for recovery. */
+  private async readRetentionGenerationRefs(): Promise<Set<number>> {
+    const refs = new Set<number>();
+    for (const [name, expected] of [['ROLLBACK.json', ['schema', 'from', 'to', 'priorGeneration']], ['MIGRATION.json', ['schema', 'from', 'to', 'priorGeneration']]] as const) {
+      const path = join(this.kernelDir, name);
+      const trusted = await inspectTrustedPath(path, name, { allowMissing: true, surface: true, kind: 'file' });
+      if (!trusted) continue;
+      const value = parseCanonical<Record<string, unknown>>(await this.readRegular(path, name, CURRENT_BYTE_CEILING));
+      exactKeys(value, expected, name);
+      invariant(value.schema === 1 && typeof value.from === 'string' && typeof value.to === 'string', `${name} identity is invalid`);
+      invariant(Number.isSafeInteger(value.priorGeneration) && (value.priorGeneration as number) > 0, `${name} priorGeneration is invalid`);
+      refs.add(value.priorGeneration as number);
+    }
+    return refs;
+  }
+
+  /** Remove one unreachable generation without recursive deletion. Every
+   * child is named by the generation descriptor (or the legacy fixed pair),
+   * digest/identity checked, then unlinked idempotently before the directory
+   * itself is removed. */
+  private async removeGenerationExactly(generation: number): Promise<boolean> {
+    const path = join(this.generationsDir, `g${generation}`);
+    const trusted = await inspectTrustedPath(path, `generation ${generation}`, { allowMissing: true, surface: true, kind: 'directory' });
+    if (!trusted) return false;
+    const generationIdentity = trusted.identity;
+    const entries = await this.readDirectoryBounded(path, `generation ${generation}`, JOURNAL_EVENT_CEILING + 16);
+    const names = entries.map((entry) => entry.name);
+    const segmented = names.includes('head.json') || names.some((entry) => entry.startsWith('segment-'));
+    let expected: string[];
+    let removalOrder: string[];
+    if (segmented) {
+      invariant(names.includes('head.json') || (names.length === 1 && names[0] === 'state.json'), `generation ${generation} segmented descriptor is incomplete`);
+      const state = names.includes('state.json') ? parseCanonical<MachineState>(await this.readRegular(join(path, 'state.json'), `generation ${generation} state`, READ_ONLY_STATE_BYTE_CEILING)) : undefined;
+      if (state) validateStateShape(state);
+      const head = validateSegmentedHead(parseCanonical(await this.readRegular(join(path, 'head.json'), `generation ${generation} head`, CURRENT_BYTE_CEILING)));
+      invariant(head.generation === generation && (!state || (head.runId === state.runId && head.phaseId === state.phaseId && head.writerFence === state.writerFence)), `generation ${generation} head identity is invalid`);
+      expected = ['state.json', 'head.json', ...head.segments.map((item) => item.name), head.active.name];
+      const unique = new Set(expected);
+      invariant(unique.size === expected.length && names.every((name) => unique.has(name)), `generation ${generation} contains unexpected files`);
+      const records: Array<Record<string, unknown>> = [];
+      for (const descriptor of [...head.segments, head.active]) {
+        const segmentPath = join(path, descriptor.name);
+        const text = await this.readRegular(segmentPath, `generation ${generation} ${descriptor.name}`, JOURNAL_BYTE_CEILING * 16);
+        invariant(Buffer.byteLength(text) === descriptor.bytes && digest(text) === descriptor.digest, `generation ${generation} ${descriptor.name} digest mismatch`);
+        const lines = text.length === 0 ? [] : text.split('\n');
+        if (lines.at(-1) === '') lines.pop();
+        for (const line of lines) records.push(parseCanonical<Record<string, unknown>>(line));
+      }
+      if (state) {
+        validateJournal(state, segmentBytes(records), { segmented: true });
+        invariant(state.revision === head.revision && state.journal.length === head.journalEnd, `generation ${generation} state/head revision mismatch`);
+      }
+      removalOrder = [...head.segments.map((item) => item.name), head.active.name, 'state.json', 'head.json'];
+    } else {
+      expected = ['state.json', 'journal.ndjson'];
+      invariant(names.every((name) => expected.includes(name)), `generation ${generation} legacy shape is invalid`);
+      if (names.includes('state.json') && names.includes('journal.ndjson')) {
+        const state = parseCanonical<MachineState>(await this.readRegular(join(path, 'state.json'), `generation ${generation} state`, READ_ONLY_STATE_BYTE_CEILING));
+        validateStateShape(state);
+        validateJournal(state, await this.readRegular(join(path, 'journal.ndjson'), `generation ${generation} journal`, JOURNAL_BYTE_CEILING));
+      }
+      removalOrder = ['journal.ndjson', 'state.json'];
+    }
+    const parentIdentity = await trustedIdentity(this.generationsDir, 'generations directory', { surface: true, kind: 'directory' });
+    if (!parentIdentity) throw new Error('ManifestMismatch: generations directory is absent');
+    await assertStableIdentity(this.generationsDir, parentIdentity, 'generations directory', { surface: true, kind: 'directory' }).catch((error) => { throw new Error(`ManifestMismatch: ${(error as Error).message.replace(/^FilesystemTrust:\s*/, '')}`); });
+    await assertStableIdentity(path, generationIdentity, `generation ${generation}`, { surface: true, kind: 'directory' }).catch((error) => { throw new Error(`ManifestMismatch: ${(error as Error).message.replace(/^FilesystemTrust:\s*/, '')}`); });
+    for (const name of removalOrder) {
+      const childPath = join(path, name);
+      const child = await inspectTrustedPath(childPath, `generation ${generation} ${name}`, { allowMissing: true, surface: true, kind: 'file' });
+      if (!child) continue;
+      this.injectFault('gc-unlink');
+      await assertStableIdentity(childPath, child.identity, `generation ${generation} ${name}`, { surface: true, kind: 'file' }).catch((error) => { throw new Error(`ManifestMismatch: ${(error as Error).message.replace(/^FilesystemTrust:\s*/, '')}`); });
+      await fs.unlink(childPath).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'ENOENT') throw error; });
+    }
+    this.injectFault('gc-rmdir');
+    await assertStableIdentity(path, generationIdentity, `generation ${generation}`, { surface: true, kind: 'directory' }).catch((error) => { throw new Error(`ManifestMismatch: ${(error as Error).message.replace(/^FilesystemTrust:\s*/, '')}`); });
+    try { await fs.rmdir(path); }
+    catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT') return true;
+      if (code === 'ENOTEMPTY' || code === 'EEXIST') throw new Error(`ManifestMismatch: generation ${generation} changed during compaction`);
+      throw error;
+    }
+    return true;
+  }
+
+  /** Operator-initiated retention.  Publication never calls this method; only
+   * exact, fully trusted generation names unreachable from CURRENT are removed.
+   */
+  async compact(): Promise<{ removed: number }> {
+    return this.withFence(async () => {
+      const current = await this.readCurrent();
+      if (!current) return { removed: 0 };
+      await this.readVerifiedCurrent();
+      const retained = await this.readRetentionGenerationRefs();
+      const entries = await this.readDirectoryBounded(this.generationsDir, 'generations directory', JOURNAL_EVENT_CEILING + 64);
+      let removed = 0;
+      for (const entry of entries) {
+        const match = /^g(\d+)$/.exec(entry.name);
+        if (!match || Number(match[1]) === current.generation) continue;
+        const generation = Number(match[1]);
+        if (retained.has(generation)) continue;
+        if (entry.isSymbolicLink() || !entry.isDirectory()) throw new Error(`ManifestMismatch: generation ${entry.name} is not a directory`);
+        if (await this.removeGenerationExactly(generation)) removed += 1;
+      }
+      await this.fsyncDir(this.generationsDir);
+      return { removed };
     });
   }
 
@@ -2114,4 +2600,4 @@ export class FileArtifactStore implements ArtifactStore {
   }
 }
 
-export function storeForRoot(rootDir?: string, expectedRootIdentity?: FilesystemIdentity): ArtifactStore { return rootDir ? new FileArtifactStore(rootDir, expectedRootIdentity) : new MemoryArtifactStore(); }
+export function storeForRoot(rootDir?: string, expectedRootIdentity?: FilesystemIdentity, options?: ArtifactStoreOptions): ArtifactStore { return rootDir ? new FileArtifactStore(rootDir, expectedRootIdentity, options) : new MemoryArtifactStore(options); }

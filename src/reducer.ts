@@ -34,7 +34,18 @@ export type PreparedAdmission = Readonly<{
   completeFrontierDigest: Sha256;
 }>;
 
-function copy<T>(value: T): T { return JSON.parse(JSON.stringify(value)) as T; }
+/** @deprecated Kept as a no-op for old private fixtures. Format authority is
+ * now carried explicitly through reducer/store options; this marker never
+ * influences admission or publication. */
+export function markUnboundedJournal(_state: MachineState): void { /* compatibility no-op */ }
+/** @deprecated See markUnboundedJournal. */
+export function isUnboundedJournal(_state: MachineState): boolean { return false; }
+/** @deprecated See markUnboundedJournal. */
+export function clearUnboundedJournal(_state: MachineState): void { /* compatibility no-op */ }
+
+function copy<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
 /** Per-event writer fence.  Keeping this distinct for each target generation
  * prevents a delayed writer with the same base state from publishing against
  * another writer's successful CAS. */
@@ -106,12 +117,13 @@ function snapshotReason(state: MachineState): void {
 }
 
 /** Append one authoritative event to the in-memory candidate state. */
-export function appendJournal(state: MachineState, identity: EventIdentity, event: Event): void {
+export function appendJournal(state: MachineState, identity: EventIdentity, event: Event, allowUnbounded = false): void {
   if (!Number.isSafeInteger(state.revision + 1)) throw new Error('JournalCeiling');
   const entry = { identity: copy(identity), event: copy(event), digest: digest(event), revision: state.revision + 1 };
   const entryBytes = canonicalString(entry);
-  const journalBytes = state.journal.length ? `${state.journal.map((item) => canonicalString(item)).join('\n')}\n` : '';
-  if (state.journal.length >= JOURNAL_EVENT_CEILING || Buffer.byteLength(journalBytes) + Buffer.byteLength(entryBytes) + 1 > JOURNAL_BYTE_CEILING) throw new Error('JournalCeiling');
+  const unbounded = allowUnbounded;
+  const journalBytes = unbounded ? '' : (state.journal.length ? `${state.journal.map((item) => canonicalString(item)).join('\n')}\n` : '');
+  if (!unbounded && (state.journal.length >= JOURNAL_EVENT_CEILING || Buffer.byteLength(journalBytes) + Buffer.byteLength(entryBytes) + 1 > JOURNAL_BYTE_CEILING)) throw new Error('JournalCeiling');
   state.journal.push(entry);
   state.revision += 1;
 }
@@ -124,7 +136,7 @@ export function refreshAdmission(state: MachineState, plan: Plan, maxInFlight: n
 
 /** Apply only the pure event delta.  No ready scan, command, or finality is
  * performed, making the resulting state suitable for post-event graph build. */
-export function previewReduce(current: MachineState | undefined, plan: Plan, identity: EventIdentity, event: Event, admissionOk: boolean): ReduceResult {
+export function previewReduce(current: MachineState | undefined, plan: Plan, identity: EventIdentity, event: Event, admissionOk: boolean, allowUnbounded = false): ReduceResult {
   if (event.kind === 'START') {
     if (current) return { state: current, outcome: 'BLOCKED', reason: 'run already started' };
     if (!admissionOk) return { state: current as never, outcome: 'BLOCKED', reason: 'CrossRunUnproven' };
@@ -132,7 +144,7 @@ export function previewReduce(current: MachineState | undefined, plan: Plan, ide
     // The durable commit layer assigns the target-generation writer fence;
     // preview state stays an ordinary pre-CAS candidate.
     const state = createInitialState(String(identity.runId), validated.plan, digest(validated.plan), 'none');
-    appendJournal(state, identity, event);
+    appendJournal(state, identity, event, allowUnbounded);
     return { state, outcome: 'WAITING' };
   }
   if (!current) return { state: current as never, outcome: 'BLOCKED', reason: 'run has not started' };
@@ -145,7 +157,7 @@ export function previewReduce(current: MachineState | undefined, plan: Plan, ide
     const command = commandForToken(state, identity.launchToken);
     if (!command || command.state !== 'ACKED') {
       if (command) command.noEffectEvidence = [...(command.noEffectEvidence ?? []), event.ref];
-      appendJournal(state, identity, event);
+      appendJournal(state, identity, event, allowUnbounded);
       return { state, outcome: 'DECISION_REQUIRED', reason: 'early or unmatched worker envelope', brief: event.ref, token: `evidence-${identity.eventId}` };
     }
     const step = state.steps[command.stepId];
@@ -155,7 +167,7 @@ export function previewReduce(current: MachineState | undefined, plan: Plan, ide
     // no-effect evidence and ask the parent to reconcile the old identity.
     if (!step || !commandInCurrentFrame(state, command) || step.attempt !== command.attemptEpoch || step.status !== 'ACTIVE') {
       command.noEffectEvidence = [...(command.noEffectEvidence ?? []), event.ref];
-      appendJournal(state, identity, event);
+      appendJournal(state, identity, event, allowUnbounded);
       return { state, outcome: 'DECISION_REQUIRED', reason: 'old worker envelope has no current execution frame', brief: event.ref, token: `evidence-${identity.eventId}` };
     }
     let payload: { status?: unknown };
@@ -175,7 +187,7 @@ export function previewReduce(current: MachineState | undefined, plan: Plan, ide
       if (command?.state === 'UNKNOWN' && recovery.status === 'NEVER_LAUNCHED' && recovery.commandDigest === command.commandDigest && identity.launchToken === command.launchToken) command.state = 'PENDING';
     }
   }
-  appendJournal(state, identity, event);
+  appendJournal(state, identity, event, allowUnbounded);
   return { state, outcome: 'WAITING' };
 }
 
@@ -208,8 +220,8 @@ export function createInitialState(runId: string, plan: Plan, planDigest: Return
   return { schema: 1, runId, phaseId: plan.phaseId, revision: 0, authorityEpoch: 0, attemptEpoch: 0, barrierEpoch: 0, modeEpoch: 0, writerFence, status: 'ACTIVE', gate: 'NOT-DUE', barrier: 'OPEN', steps, outbox: {}, processed: {}, decisionTokens: {}, planDigest, nextAction: 'start', journal: [] };
 }
 
-export function reduce(current: MachineState | undefined, plan: Plan, identity: EventIdentity, event: Event, maxInFlight: number, admissionOk: boolean, prepared?: PreparedAdmission): ReduceResult {
-  const preview = previewReduce(current, plan, identity, event, admissionOk);
+export function reduce(current: MachineState | undefined, plan: Plan, identity: EventIdentity, event: Event, maxInFlight: number, admissionOk: boolean, prepared?: PreparedAdmission, allowUnbounded = false): ReduceResult {
+  const preview = previewReduce(current, plan, identity, event, admissionOk, allowUnbounded);
   if (preview.outcome === 'BLOCKED' || preview.outcome === 'DECISION_REQUIRED') return preview;
   const state = preview.state;
   let proposedIds: readonly string[] | undefined;
@@ -241,7 +253,7 @@ export function reduce(current: MachineState | undefined, plan: Plan, identity: 
   return { state, outcome: 'WAITING' };
 }
 
-export function applyParentDecision(current: MachineState, identity: EventIdentity, token: string, value: unknown): ReduceResult {
+export function applyParentDecision(current: MachineState, identity: EventIdentity, token: string, value: unknown, allowUnbounded = false): ReduceResult {
   // Use an own-property check: a caller-supplied token such as "__proto__"
   // must not resolve to Object.prototype and mutate the decision map.
   if (!Object.prototype.hasOwnProperty.call(current.decisionTokens, token)) return { state: current, outcome: 'BLOCKED', reason: 'decision token already consumed or unknown' };
@@ -252,7 +264,7 @@ export function applyParentDecision(current: MachineState, identity: EventIdenti
   // submit the only supported PASS/FINDINGS decision.
   if (record.kind !== 'GATE' || (value !== 'PASS' && value !== 'FINDINGS')) return { state: current, outcome: 'BLOCKED', reason: 'unsupported decision' };
   record.consumed = true;
-  appendJournal(state, identity, { kind: 'PARENT_DECISION', token, value });
+  appendJournal(state, identity, { kind: 'PARENT_DECISION', token, value }, allowUnbounded);
   if (value === 'PASS') { state.gate = 'PASS'; state.status = 'COMPLETE'; state.nextAction = 'complete'; return { state, outcome: 'COMPLETE' }; }
   // FINDINGS is a new mutable repair attempt, not a terminal blocked state.
   // Keep the old generation/report immutable by fencing the new attempt with
@@ -272,7 +284,7 @@ export function applyParentDecision(current: MachineState, identity: EventIdenti
  * deliberately keeps old outbox identities (including commands whose step was
  * removed) and rebuilds only the current attempt's step projection.
  */
-export function applyAuthorityAdoption(current: MachineState, identity: EventIdentity, token: string, value: unknown, targetPlan: Plan, targetDigest: Sha256): ReduceResult {
+export function applyAuthorityAdoption(current: MachineState, identity: EventIdentity, token: string, value: unknown, targetPlan: Plan, targetDigest: Sha256, allowUnbounded = false): ReduceResult {
   if (targetPlan.phaseId !== current.phaseId) return { state: current, outcome: 'BLOCKED', reason: 'phase fence mismatch' };
   if (!Object.prototype.hasOwnProperty.call(current.decisionTokens, token)) return { state: current, outcome: 'BLOCKED', reason: 'authority token unknown' };
   const state = copy(current);
@@ -287,7 +299,7 @@ export function applyAuthorityAdoption(current: MachineState, identity: EventIde
   // the original canonical parent event can be journaled byte-for-byte.
   if (!requestedKind || !['ADOPT', 'ADOPT_AUTHORITY', 'AUTHORITY_ADOPT'].includes(requestedKind)) return { state: current, outcome: 'BLOCKED', reason: 'unsupported authority adoption decision' };
   record.consumed = true;
-  appendJournal(state, identity, { kind: 'PARENT_DECISION', token, value });
+  appendJournal(state, identity, { kind: 'PARENT_DECISION', token, value }, allowUnbounded);
   state.authorityEpoch += 1;
   state.attemptEpoch += 1;
   state.barrierEpoch += 1;

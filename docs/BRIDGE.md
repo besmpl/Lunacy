@@ -47,6 +47,42 @@ one-event route does not spawn Codex workers, call providers, install packages,
 use Beads, or claim token/native capability. An absent driver therefore remains
 the runtime's truthful `HumanReceiptRequired` result.
 
+## Per-run lifecycle controller
+
+The private lifecycle route composes the bridge transition and
+`BridgeDrivePump` into one explicit per-run operation. It accepts an absolute
+run root, run ID, and canonical parent-owned plan; `run` and `resume` also
+require an injected effect driver or an attested closed host policy. It does
+not parse Markdown, discover ambient runs, schedule multiple roots, synthesize
+plans, approve decisions, or resolve gates.
+
+```sh
+"$NODE" runtime/bridge.mjs init --run-dir /path/to/run --run-id example \
+  --mode runtime --plan /tmp/plan.json
+"$NODE" runtime/bridge.mjs run --run-dir /path/to/run --run-id example \
+  --mode runtime --plan /tmp/plan.json --policy /tmp/policy.json \
+  --max-transitions 128
+```
+
+`init` submits one deterministic `START` identity (`lifecycle-start`). A
+repeat replays the committed kernel yield byte-for-byte and never appends a
+second event. `run` and `resume` recreate the ephemeral pump: a fresh root is
+started once, while an existing root resumes only from verified `CURRENT`.
+The canonical `lunacy-lifecycle/v1` result is bounded to terminal/attention
+status, stop reason, transition count, projection status, and the compact
+machine yield. Parent boundaries, cancellation, and transition limits remain
+visible. A claimed/unknown external effect receives at most the pump's one
+exact-token `observe` opportunity after restart; uncertain work is never
+blindly relaunched.
+
+The original one-event/manual bridge command remains the compatibility
+fallback and is unchanged. Disable the lifecycle route simply by invoking the
+one-event command (or redeploying the prior package); never delete `CURRENT`,
+journal, outbox, effect records, or projections to recover a failed lifecycle
+invocation. A projection failure after a committed transition remains the
+existing `ProjectionFailed` error and can be retried through the same
+deterministic event identity.
+
 ## Runtime drive mode
 
 The managed skill also provides a private event-driven pump for an explicitly

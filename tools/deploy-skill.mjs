@@ -1410,6 +1410,9 @@ async function executeOperation({ target, check, restore, exactLegacyDeploy, pay
     } catch (error) { throw new Error(error.message.replace(/^FilesystemTrust:\s*/, '')); }
   };
   const nodeAttestation = await attestNodeRuntime();
+  // The recovery route is private at the package-export boundary, but the
+  // managed bridge launcher must carry its exact compiled modules so the
+  // installed `inspect-recovery` route is a real, verifiable deployment.
   const distFiles = await collect(distRoot);
   const sourceFiles = [
     ...distFiles.map((item) => ({ source: item.source, relative: `runtime/dist/${item.relative}` })),
@@ -1459,6 +1462,8 @@ drive route.  The managed runtime also carries the exact closed Codex result,
 launch-intent, launch, and terminal schemas plus the capability probe under runtime/schemas/
 and runtime/tools/; all are covered by DEPLOYMENT.json.
 Use "$NODE" runtime/bridge.mjs workfront --help for a read-only dependency capsule.
+Use "$NODE" runtime/bridge.mjs inspect-recovery --help for the token-scoped,
+read-only recovery/effect forensics capsule.
 The optional read-only Beads v1.2.2 adapter is documented in runtime/BEADS.md
 and requires an operator-provisioned absolute bd path; it never installs or
 searches PATH.

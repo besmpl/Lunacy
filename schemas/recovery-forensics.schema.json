@@ -1,0 +1,414 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "lunacy-recovery-v1",
+  "title": "Lunacy token-scoped recovery forensics capsule",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "request",
+    "run",
+    "journal",
+    "outbox",
+    "effects",
+    "unknown",
+    "fence",
+    "nextProof"
+  ],
+  "properties": {
+    "schema": {
+      "const": "lunacy-recovery/v1"
+    },
+    "request": {
+      "$ref": "#/$defs/request"
+    },
+    "run": {
+      "$ref": "#/$defs/run"
+    },
+    "journal": {
+      "$ref": "#/$defs/journal"
+    },
+    "outbox": {
+      "$ref": "#/$defs/outbox"
+    },
+    "effects": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "launchIntent",
+        "launch",
+        "terminal"
+      ],
+      "properties": {
+        "launchIntent": {
+          "$ref": "#/$defs/evidence"
+        },
+        "launch": {
+          "$ref": "#/$defs/evidence"
+        },
+        "terminal": {
+          "$ref": "#/$defs/evidence"
+        }
+      }
+    },
+    "unknown": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "active",
+        "cause"
+      ],
+      "properties": {
+        "active": {
+          "type": "boolean"
+        },
+        "cause": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 128
+        }
+      }
+    },
+    "fence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "root",
+        "current",
+        "writer",
+        "lock",
+        "namespace"
+      ],
+      "properties": {
+        "root": {
+          "const": "VERIFIED"
+        },
+        "current": {
+          "const": "VERIFIED"
+        },
+        "writer": {
+          "enum": [
+            "VERIFIED",
+            "MISMATCH"
+          ]
+        },
+        "lock": {
+          "enum": [
+            "ABSENT",
+            "PRESENT",
+            "MALFORMED",
+            "UNREADABLE"
+          ]
+        },
+        "namespace": {
+          "enum": [
+            "UNCHANGED",
+            "CHANGED"
+          ]
+        }
+      }
+    },
+    "nextProof": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 256
+    }
+  },
+  "$defs": {
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "runId",
+        "launchTokenDigest",
+        "commandDigest"
+      ],
+      "properties": {
+        "runId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "launchTokenDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "commandDigest": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "runId",
+        "phaseId",
+        "generation",
+        "revision",
+        "planDigest",
+        "epochs",
+        "writerFenceDigest",
+        "verified"
+      ],
+      "properties": {
+        "runId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "phaseId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "generation": {
+          "$ref": "#/$defs/nonNegative"
+        },
+        "revision": {
+          "$ref": "#/$defs/nonNegative"
+        },
+        "planDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "writerFenceDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "verified": {
+          "const": true
+        },
+        "epochs": {
+          "$ref": "#/$defs/epochs"
+        }
+      }
+    },
+    "epochs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attempt",
+        "authority",
+        "barrier",
+        "mode"
+      ],
+      "properties": {
+        "attempt": {
+          "$ref": "#/$defs/nonNegative"
+        },
+        "authority": {
+          "$ref": "#/$defs/nonNegative"
+        },
+        "barrier": {
+          "$ref": "#/$defs/nonNegative"
+        },
+        "mode": {
+          "$ref": "#/$defs/nonNegative"
+        }
+      }
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "used",
+        "ceiling",
+        "remaining"
+      ],
+      "properties": {
+        "used": {
+          "$ref": "#/$defs/nonNegative"
+        },
+        "ceiling": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "remaining": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        }
+      }
+    },
+    "journal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "format",
+        "events",
+        "bytes",
+        "activeSuffix"
+      ],
+      "properties": {
+        "format": {
+          "enum": [
+            "legacy",
+            "segmented"
+          ]
+        },
+        "events": {
+          "$ref": "#/$defs/budget"
+        },
+        "bytes": {
+          "$ref": "#/$defs/budget"
+        },
+        "activeSuffix": {
+          "$ref": "#/$defs/budget"
+        }
+      }
+    },
+    "lease": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "present",
+        "status",
+        "digest"
+      ],
+      "properties": {
+        "present": {
+          "type": "boolean"
+        },
+        "status": {
+          "enum": [
+            "ABSENT",
+            "VALID",
+            "STALE",
+            "MALFORMED"
+          ]
+        },
+        "digest": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "outbox": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "found",
+        "state",
+        "stepId",
+        "commandDigest",
+        "binding",
+        "lease"
+      ],
+      "properties": {
+        "found": {
+          "type": "boolean"
+        },
+        "state": {
+          "anyOf": [
+            {
+              "enum": [
+                "PENDING",
+                "CLAIMED",
+                "UNKNOWN",
+                "ACKED",
+                "REJECTED",
+                "CANCELLED"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "stepId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 256,
+          "pattern": "^(?:sha256:[0-9a-f]{64}|[^/\\\\\\u0000-\\u001f\\u007f]+)$"
+        },
+        "commandDigest": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "binding": {
+          "enum": [
+            "MATCH",
+            "MISMATCH",
+            "ABSENT"
+          ]
+        },
+        "lease": {
+          "$ref": "#/$defs/lease"
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "present",
+        "status",
+        "verified",
+        "binding",
+        "digest"
+      ],
+      "properties": {
+        "present": {
+          "type": "boolean"
+        },
+        "status": {
+          "enum": [
+            "ABSENT",
+            "VALID",
+            "MALFORMED",
+            "INVALID_UTF8",
+            "OVERSIZED",
+            "UNREADABLE",
+            "MISMATCH",
+            "UNVERIFIABLE"
+          ]
+        },
+        "verified": {
+          "type": "boolean"
+        },
+        "binding": {
+          "enum": [
+            "MATCH",
+            "MISMATCH",
+            "ABSENT",
+            "UNVERIFIABLE"
+          ]
+        },
+        "digest": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "nonNegative": {
+      "type": "integer",
+      "minimum": 0
+    }
+  }
+}

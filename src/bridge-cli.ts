@@ -8,6 +8,7 @@ import type { BeadsBridgeMode, BridgeMode, BridgeOptions, BridgeTransition } fro
 import type { BeadsAcknowledgement } from './beads.js';
 import type { Event, Plan } from './model.js';
 import { drive, type TerminalEffectDriver } from './orchestration.js';
+import { lifecycle, type LifecycleCommand, type LifecycleResult } from './orchestration.js';
 
 type Flags = {
   runDir?: string; runId?: string; mode?: BridgeMode; modeProvided: boolean; plan?: string; event?: string; eventId?: string; phaseId?: string; stepId?: string;
@@ -19,9 +20,12 @@ type Flags = {
 function usage(): string {
   return `Usage: lunacy-bridge --run-dir RUN --run-id ID --mode runtime --plan PLAN.json --event EVENT.json [options]
        lunacy-bridge drive --run-dir RUN --run-id ID --mode runtime --plan PLAN.json --policy POLICY.json [options]
+       lunacy-bridge init|run|resume --run-dir RUN --run-id ID --mode runtime --plan PLAN.json [--policy POLICY.json]
+       lunacy-bridge lifecycle --command init|run|resume --run-dir RUN --run-id ID --mode runtime --plan PLAN.json [options]
 
 Read-only dependency explanation:
   lunacy-bridge workfront --run-root RUN --run-id ID [--limit 16] [--focus STEP]
+       lunacy-bridge inspect-recovery --run-root RUN --run-id ID --launch-token TOKEN [--command-digest HEX] [--policy POLICY.json]
 
 Invoke one private runtime-to-skill transition. The bridge calls only
 RunKernel.advance and projects machine-owned sections into STATE.md/STEPS.md;
@@ -56,6 +60,30 @@ Options:
   --help                  Show this help
 
 All JSON files must be canonical. Use '-' for one JSON document from stdin.`;
+}
+
+type LifecycleFlags = { command: LifecycleCommand; runDir?: string; runId?: string; mode?: BridgeMode; modeProvided: boolean; plan?: string; policy?: string; state?: string; steps?: string; maxTransitions?: number; help: boolean };
+
+function parseLifecycleArgs(argv: string[], positionalCommand?: LifecycleCommand): LifecycleFlags {
+  const flags: LifecycleFlags = { command: positionalCommand ?? 'run', modeProvided: false, help: false };
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === '--help' || arg === '-h') { flags.help = true; continue; }
+    if (!arg.startsWith('--')) throw new Error(`unknown lifecycle argument ${arg}`);
+    const name = arg.slice(2); const value = argv[++index];
+    if (value === undefined || value.startsWith('--')) throw new Error(`--${name} requires a value`);
+    if (name === 'command') { if (value !== 'init' && value !== 'run' && value !== 'resume') throw new Error('--command must be init, run, or resume'); flags.command = value; }
+    else if (name === 'run-dir') flags.runDir = value;
+    else if (name === 'run-id') flags.runId = value;
+    else if (name === 'mode') { if (value !== 'runtime') throw new Error('lifecycle requires --mode runtime'); flags.mode = value; flags.modeProvided = true; }
+    else if (name === 'plan') flags.plan = value;
+    else if (name === 'policy') flags.policy = value;
+    else if (name === 'state') flags.state = value;
+    else if (name === 'steps') flags.steps = value;
+    else if (name === 'max-transitions') flags.maxTransitions = numberFlag(name, value);
+    else throw new Error(`unknown lifecycle option --${name}`);
+  }
+  return flags;
 }
 
 type DriveFlags = { runDir?: string; runId?: string; mode?: BridgeMode; modeProvided: boolean; plan?: string; policy?: string; maxTransitions?: number; help: boolean };
@@ -142,8 +170,92 @@ function eventFrom(value: unknown): Event {
   return value as Event;
 }
 
+/** Execute the additive per-run lifecycle controller. This private route is
+ * deliberately separate from the legacy one-event and drive commands. */
+async function runLifecycleCli(argv: string[], injectedDriver?: TerminalEffectDriver, externalSignal?: AbortSignal, positionalCommand?: LifecycleCommand): Promise<number> {
+  const flags = parseLifecycleArgs(argv, positionalCommand);
+  if (flags.help) { await writeOutput('Usage: lunacy-bridge init|run|resume --run-dir RUN --run-id ID --mode runtime --plan PLAN.json [--policy POLICY.json] [--max-transitions N]\n'); return 0; }
+  if (!flags.modeProvided || flags.mode !== 'runtime') throw new Error('--mode runtime is required for lifecycle');
+  if (!flags.runDir || !flags.runId || !flags.plan) throw new Error('--run-dir, --run-id, and --plan are required for lifecycle');
+  const plan = planFrom(await readCanonical(flags.plan));
+  let policy: unknown;
+  if (flags.policy) policy = await readCanonical(flags.policy);
+  if (flags.command !== 'init' && !injectedDriver && !flags.policy) throw new Error('--policy is required for run/resume when no driver is injected');
+  const controller = new AbortController();
+  const abort = (): void => { if (!controller.signal.aborted) controller.abort(); };
+  const onSigint = (): void => abort();
+  const onSigterm = (): void => abort();
+  externalSignal?.addEventListener('abort', abort, { once: true });
+  process.once('SIGINT', onSigint); process.once('SIGTERM', onSigterm);
+  if (externalSignal?.aborted) abort();
+  try {
+    const result: LifecycleResult = await lifecycle({ command: flags.command, runDir: flags.runDir, runId: flags.runId, plan, ...(flags.state === undefined ? {} : { statePath: flags.state }), ...(flags.steps === undefined ? {} : { stepsPath: flags.steps }), ...(injectedDriver === undefined ? {} : { driver: injectedDriver }), ...(policy === undefined ? {} : { policy: policy as any }), signal: controller.signal, ...(flags.maxTransitions === undefined ? {} : { maxTransitions: flags.maxTransitions }) });
+    await writeOutput(`${canonicalString(result)}\n`); return 0;
+  } finally {
+    externalSignal?.removeEventListener('abort', abort); process.removeListener('SIGINT', onSigint); process.removeListener('SIGTERM', onSigterm);
+  }
+}
+
+
+type RecoveryFlags = { runRoot?: string; kernelRoot?: string; runId?: string; expectedRunId?: string; launchToken?: string; token?: string; commandDigest?: string; policy?: string; effectsRoot?: string; authorityDigest?: string; policyDigest?: string; help: boolean };
+
+function parseRecoveryArgs(argv: string[]): RecoveryFlags {
+  const flags: RecoveryFlags = { help: false };
+  const set = <K extends keyof RecoveryFlags>(key: K, value: RecoveryFlags[K], label: string): void => {
+    const previous = flags[key];
+    if (previous !== undefined && previous !== value) throw new Error(`${label} selectors conflict`);
+    flags[key] = value;
+  };
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === '--help' || arg === '-h') { flags.help = true; continue; }
+    if (!arg.startsWith('--')) throw new Error(`unknown inspect-recovery argument ${arg}`);
+    const value = argv[++index];
+    if (value === undefined || value.startsWith('--')) throw new Error(`${arg} requires a value`);
+    if (arg === '--run-root') set('runRoot', value, 'runRoot');
+    else if (arg === '--kernel-root') set('kernelRoot', value, 'kernelRoot');
+    else if (arg === '--run-id') set('runId', value, 'runId');
+    else if (arg === '--expected-run-id') set('expectedRunId', value, 'expectedRunId');
+    else if (arg === '--launch-token') set('launchToken', value, 'launchToken');
+    else if (arg === '--token') set('token', value, 'token');
+    else if (arg === '--command-digest') set('commandDigest', value, 'commandDigest');
+    else if (arg === '--policy') set('policy', value, 'policy');
+    else if (arg === '--effects-root') set('effectsRoot', value, 'effectsRoot');
+    else if (arg === '--authority-digest') set('authorityDigest', value, 'authorityDigest');
+    else if (arg === '--policy-digest') set('policyDigest', value, 'policyDigest');
+    else throw new Error(`unknown inspect-recovery option ${arg}`);
+  }
+  return flags;
+}
+
+function safeRecoveryError(error: unknown): Error {
+  const message = error instanceof Error ? error.message : String(error);
+  let code = 'RecoveryInspectionFailed';
+  if (message.includes('output ceiling') || message.includes('inspection ceiling')) code = 'CapsuleLimit';
+  else if (message.includes('ManifestMismatch') || message.includes('FilesystemTrust') || message.includes('changed during read')) code = 'ManifestMismatch';
+  else if (message.startsWith('Recovery:') || message.includes('selectors conflict') || message.includes('requires a value') || message.includes('unknown inspect-recovery') || message.includes('--run-root') || message.includes('--kernel-root') || message.includes('--run-id') || message.includes('--expected-run-id') || message.includes('--launch-token') || message.includes('--token')) code = 'InvalidRecoveryInput';
+  const result = new Error(code); result.name = 'RecoveryError'; return result;
+}
+
+async function runRecoveryCli(argv: string[]): Promise<number> {
+  const flags = parseRecoveryArgs(argv);
+  if (flags.help) { await writeOutput('Usage: lunacy-bridge inspect-recovery --run-root RUN --run-id ID --launch-token TOKEN [--command-digest HEX] [--policy POLICY.json]\n'); return 0; }
+  if ((!flags.runRoot && !flags.kernelRoot) || (!flags.runId && !flags.expectedRunId) || (!flags.launchToken && !flags.token)) throw new Error('--run-root, --run-id, and --launch-token are required');
+  let policy: unknown;
+  if (flags.policy) policy = await readCanonical(flags.policy);
+  const { inspectRecovery } = await import('./recovery-forensics.js');
+  const capsule = await inspectRecovery({ ...(flags.runRoot === undefined ? {} : { runRoot: flags.runRoot }), ...(flags.kernelRoot === undefined ? {} : { kernelRoot: flags.kernelRoot }), ...(flags.runId === undefined ? {} : { runId: flags.runId }), ...(flags.expectedRunId === undefined ? {} : { expectedRunId: flags.expectedRunId }), ...(flags.launchToken === undefined ? {} : { launchToken: flags.launchToken }), ...(flags.token === undefined ? {} : { token: flags.token }), ...(flags.commandDigest === undefined ? {} : { commandDigest: flags.commandDigest }), ...(policy === undefined ? {} : { policy: policy as any }), ...(flags.effectsRoot === undefined ? {} : { effectsRoot: flags.effectsRoot }), ...(flags.authorityDigest === undefined ? {} : { authorityDigest: flags.authorityDigest }), ...(flags.policyDigest === undefined ? {} : { policyDigest: flags.policyDigest }) });
+  await writeOutput(`${canonicalString(capsule)}\n`); return 0;
+}
+
 export async function runBridgeCli(argv = process.argv.slice(2), injectedDriver?: TerminalEffectDriver, externalSignal?: AbortSignal): Promise<number> {
   if (argv[0] === 'drive') return runDriveCli(argv.slice(1), injectedDriver, externalSignal);
+  if (argv[0] === 'lifecycle') return runLifecycleCli(argv.slice(1), injectedDriver, externalSignal);
+  if (argv[0] === 'init' || argv[0] === 'run' || argv[0] === 'resume') return runLifecycleCli(argv.slice(1), injectedDriver, externalSignal, argv[0]);
+  if (argv[0] === 'inspect-recovery' || argv[0] === 'recovery') {
+    try { return await runRecoveryCli(argv.slice(1)); }
+    catch (error) { throw safeRecoveryError(error); }
+  }
   if (argv[0] === 'workfront') {
     try { return await runWorkfrontCli(argv.slice(1)); }
     catch (error) { throw safeWorkfrontError(error); }

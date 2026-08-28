@@ -3,10 +3,11 @@ import { canonicalClaims, proveAdmission } from './admission.js';
 import { appendJournal, applyAuthorityAdoption, applyDispatchReceipt, applyParentDecision, commandForToken, nextWriterFence, previewReduce, reduce, refreshAdmission, type PreparedAdmission } from './reducer.js';
 import { claim, unknown, type DriverReceipt } from './outbox.js';
 import { ProseDriver, type EffectDriver } from './driver.js';
-import { isStoreGenerationConflict, normalizeDriverResult, storeForRoot, storeLinearizedDispatch, type ArtifactStore, type StoreLinearizedDispatchRequest } from './store.js';
+import { isStoreGenerationConflict, storeForRoot, type ArtifactStore, type StoreLinearizedDispatchRequest } from './store.js';
 import type { FilesystemIdentity } from './filesystem.js';
 import { validatePlan } from './validator.js';
 import { ContextCompiler, publishPreparedContext, type CompilerMode, type PreparedContext } from './compiler.js';
+import { DispatchCoordinator, type DispatchDriverSnapshot, type ActiveDispatchTask } from './dispatch-coordinator.js';
 import { GraphAcceleration, type GraphMode } from './graph.js';
 import { AccelerationMetrics, defaultMetrics } from './metrics.js';
 import { JOURNAL_BYTE_CEILING, JOURNAL_EVENT_CEILING } from './limits.js';
@@ -82,7 +83,9 @@ function validateKernelOptions(options: KernelOptions): number {
   return configuredMaxInFlight;
 }
 
-function clone<T>(value: T): T { return JSON.parse(JSON.stringify(value)) as T; }
+function clone<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
 function ref(id: string, value: unknown, scope = 'kernel'): Ref { const bytes = canonicalString(value); return { id, scope, digest: digest(value), bytes }; }
 function snapshot(state: MachineState): CompactSnapshot {
   const steps = Object.values(state.steps); const outbox = Object.values(state.outbox);
@@ -115,6 +118,7 @@ export { JOURNAL_EVENT_CEILING, JOURNAL_BYTE_CEILING } from './limits.js';
 function journalHasRecordBudget(state: MachineState, additionalRecords: number): boolean {
   return state.journal.length + additionalRecords <= JOURNAL_EVENT_CEILING;
 }
+function segmentedJournalEnabled(store: ArtifactStore): boolean { return store.journalFormat === 'segmented'; }
 function exactKeys(value: object, keys: readonly string[], label: string): void {
   const actual = Object.keys(value).sort(); const expected = [...keys].sort();
   if (actual.length !== expected.length || actual.some((key, index) => key !== expected[index])) throw new InvalidEvent(`${label} fields are invalid`);
@@ -293,23 +297,6 @@ function mapCommitFailure(error: unknown): KernelError {
   return message.includes('ManifestMismatch') ? new KernelError('ManifestMismatch', message) : new Conflict(message);
 }
 
-type DriverSnapshot = {
-  receiver: EffectDriver;
-  dispatch: EffectDriver['dispatch'];
-  observe?: NonNullable<EffectDriver['observe']>;
-};
-
-type ActiveDispatchTask = {
-  generation: number;
-  commandDigest: string;
-  leaseId?: string;
-  timedOut: boolean;
-  settled: boolean;
-  outcomeCommitted: boolean;
-  noReceiptOutcome?: Promise<Yield | undefined>;
-  immediateNoReceiptOutcome?: Promise<Yield | undefined>;
-};
-
 class KernelImpl implements RunKernel {
   private readonly configuredMaxInFlight: number;
   private readonly metrics: AccelerationMetrics;
@@ -317,13 +304,13 @@ class KernelImpl implements RunKernel {
   readonly #compiler: ContextCompiler;
   readonly #graphMode: GraphMode;
   readonly #graph: GraphAcceleration;
-  /** In-process dispatch ownership is deliberately not persisted.  A live
-   * task therefore prevents a same-process RESUME from converting CLAIMED to
-   * UNKNOWN; after restart the absent entry is conservatively recovered. */
-  private readonly activeDispatches = new Map<string, ActiveDispatchTask>();
-  private readonly dispatchOptions: Required<Pick<DispatcherOptions, 'timeoutMs'>> & Omit<DispatcherOptions, 'timeoutMs'>;
+  /** In-process dispatch state is owned by the private coordinator.  These
+   * compatibility views are intentionally non-authoritative diagnostics. */
+  private readonly coordinator: DispatchCoordinator;
+  get activeDispatches(): Map<string, ActiveDispatchTask> { return this.coordinator.activeDispatches; }
+  get dispatchOptions(): DispatchCoordinator['options'] { return this.coordinator.dispatchOptions; }
 
-  constructor(private readonly options: KernelOptions, configuredMaxInFlight: number, private readonly store: ArtifactStore, private readonly driver?: DriverSnapshot, dispatcher: DispatcherOptions = {}) {
+  constructor(private readonly options: KernelOptions, configuredMaxInFlight: number, private readonly store: ArtifactStore, driver?: DispatchDriverSnapshot, dispatcher: DispatcherOptions = {}) {
     this.configuredMaxInFlight = configuredMaxInFlight;
     this.metrics = options.acceleration?.metrics ?? defaultMetrics;
     this.#contextMode = options.acceleration?.context ?? 'OFF';
@@ -334,7 +321,25 @@ class KernelImpl implements RunKernel {
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 0) throw new InvalidPlan('dispatcher timeoutMs must be a non-negative safe integer');
     if (dispatcher.signal !== undefined && (typeof dispatcher.signal !== 'object' || typeof dispatcher.signal.addEventListener !== 'function' || typeof dispatcher.signal.removeEventListener !== 'function' || typeof dispatcher.signal.aborted !== 'boolean')) throw new InvalidPlan('dispatcher signal is invalid');
     if (dispatcher.onYield !== undefined && typeof dispatcher.onYield !== 'function') throw new InvalidPlan('dispatcher onYield must be a function');
-    this.dispatchOptions = { timeoutMs, signal: dispatcher.signal, onYield: dispatcher.onYield };
+    const coordinatorOptions = { timeoutMs, signal: dispatcher.signal, onYield: dispatcher.onYield };
+    this.coordinator = new DispatchCoordinator({
+      store: this.store, driver, segmentedJournalEnabled: () => segmentedJournalEnabled(this.store),
+      commitEventOnly: (...args) => this.commitEventOnly(...args),
+      commitYield: (...args) => this.commitYield(...args),
+      commitDispatcherOutcome: (...args) => this.commitDispatcherOutcome(...args),
+      finalizeImmediateYield: (...args) => this.finalizeImmediateYield(...args),
+      commitClaim: (...args) => this.commitClaim(...args),
+      asYield, snapshot, ref, internalIdentity, validateRef,
+    }, coordinatorOptions);
+    // Preserve the historical in-process diagnostic shape (an own Map found
+    // by host probes) while the coordinator remains the sole owner of that
+    // map and all lifecycle mutations.
+    Object.defineProperty(this, 'activeDispatches', {
+      value: this.coordinator.activeDispatches,
+      writable: true,
+      enumerable: true,
+      configurable: true,
+    });
   }
 
   async #prepareContext(plan: Plan, current: MachineState | undefined, input: AdvanceInput, generation: number): Promise<PreparedContext | undefined> {
@@ -460,10 +465,12 @@ class KernelImpl implements RunKernel {
       if (!acceptedPlanDigests.has(input.event.intentRef.digest)) throw new InvalidEvent('START intentRef does not name the supplied plan');
     }
     if (current) {
-      const journalBytes = current.journal.map((entry) => canonicalString(entry)).join('\n') + (current.journal.length ? '\n' : '');
-      const nextRecordBytes = canonicalString({ identity: input.identity, event: input.event, digest: digest(input.event), revision: current.revision + 1 });
-      if (!Number.isSafeInteger(current.revision + 1) || !journalHasRecordBudget(current, 1) || Buffer.byteLength(journalBytes) + Buffer.byteLength(nextRecordBytes) + 1 > JOURNAL_BYTE_CEILING) {
-        return asYield(current, { outcome: 'BLOCKED', reason: 'JournalCeiling' });
+      if (!segmentedJournalEnabled(this.store)) {
+        const journalBytes = current.journal.map((entry) => canonicalString(entry)).join('\n') + (current.journal.length ? '\n' : '');
+        const nextRecordBytes = canonicalString({ identity: input.identity, event: input.event, digest: digest(input.event), revision: current.revision + 1 });
+        if (!Number.isSafeInteger(current.revision + 1) || !journalHasRecordBudget(current, 1) || Buffer.byteLength(journalBytes) + Buffer.byteLength(nextRecordBytes) + 1 > JOURNAL_BYTE_CEILING) {
+          return asYield(current, { outcome: 'BLOCKED', reason: 'JournalCeiling' });
+        }
       }
     }
     const authorityDrift = Boolean(current && !recoveryAgainstCommittedPlan && normalizedPlanDigest !== current.planDigest);
@@ -490,7 +497,7 @@ class KernelImpl implements RunKernel {
           const blocked = asYield(current, { outcome: 'DECISION_REQUIRED', brief: ref(`authority:${current.revision}`, { expected: current.planDigest, actual: normalizedPlanDigest, token: input.event.token }, 'authority'), token: input.event.token });
           return blocked;
         }
-        const adopted = applyAuthorityAdoption(current, input.identity, input.event.token, input.event.value, plan, normalizedPlanDigest as import('./model.js').Sha256);
+        const adopted = applyAuthorityAdoption(current, input.identity, input.event.token, input.event.value, plan, normalizedPlanDigest as import('./model.js').Sha256, segmentedJournalEnabled(this.store));
         if (adopted.outcome === 'BLOCKED' || adopted.state === current) throw new Conflict(adopted.reason ?? 'authority adoption rejected');
         return this.commitYield(loaded.generation, adopted.state, key, input.identity, asYield(adopted.state, adopted));
       }
@@ -546,7 +553,7 @@ class KernelImpl implements RunKernel {
     const preparedContext = recoveryAgainstCommittedPlan || input.event.kind === 'PARENT_DECISION' ? undefined : await this.#prepareContext(plan, current, input, loaded.generation);
 
     if (current && input.event.kind === 'PARENT_DECISION') {
-      const reduced = applyParentDecision(current, input.identity, input.event.token, input.event.value);
+      const reduced = applyParentDecision(current, input.identity, input.event.token, input.event.value, segmentedJournalEnabled(this.store));
       if (reduced.outcome === 'BLOCKED' && reduced.state === current) throw new Conflict(reduced.reason ?? 'invalid decision');
       // A FINDINGS decision opens a fresh attempt.  Keep admission under the
       // same mandatory direct validator; effects still launch only on a later
@@ -559,14 +566,14 @@ class KernelImpl implements RunKernel {
       const command = Object.values(current.outbox).find((candidate) => candidate.state === 'PENDING' || candidate.state === 'CLAIMED' || candidate.state === 'UNKNOWN');
       const active = command ? this.activeDispatches.get(command.launchToken) : undefined;
       const liveInProcess = Boolean(command && active && active.commandDigest === command.commandDigest && active.leaseId === command.leaseId);
-      const maximumInternalRecords = command?.state === 'CLAIMED' ? (liveInProcess ? 1 : 2) : command?.state === 'UNKNOWN' ? (liveInProcess ? 1 : this.driver?.observe ? 2 : 1) : (admissionOk && this.driver ? 3 : 1);
+      const maximumInternalRecords = command?.state === 'CLAIMED' ? (liveInProcess ? 1 : 2) : command?.state === 'UNKNOWN' ? (liveInProcess ? 1 : this.coordinator.driver?.observe ? 2 : 1) : (admissionOk && this.coordinator.driver ? 3 : 1);
       // RESUME may append dispatcher claim/recovery/receipt records in
       // addition to the caller event.  Reserve the whole transition before
       // invoking a driver so a near-ceiling run cannot perform an effect and
       // only then discover that its journal cannot represent the outcome.
-      if (!journalHasRecordBudget(current, maximumInternalRecords)) return asYield(current, { outcome: 'BLOCKED', reason: 'JournalCeiling' });
+      if (!segmentedJournalEnabled(this.store) && !journalHasRecordBudget(current, maximumInternalRecords)) return asYield(current, { outcome: 'BLOCKED', reason: 'JournalCeiling' });
       try {
-        return await this.resumeDispatch(loaded.generation, current, input, key, plan, admissionOk, recoveryCapacity, preparedContext);
+        return await this.coordinator.resume({ generation: loaded.generation, current, input, key, plan, admissionOk, maxInFlight: recoveryCapacity, preparedContext });
       } catch (error) {
         if ((error as Error).message === 'JournalCeiling') return asYield(current, { outcome: 'BLOCKED', reason: 'JournalCeiling' });
         throw error;
@@ -577,13 +584,13 @@ class KernelImpl implements RunKernel {
     let preparedAdmission: PreparedAdmission | undefined;
     try {
       if (recoveryAgainstCommittedPlan || this.#graphMode === 'OFF') {
-        reduced = reduce(current, plan, input.identity, input.event, recoveryCapacity, admissionOk);
+        reduced = reduce(current, plan, input.identity, input.event, recoveryCapacity, admissionOk, undefined, segmentedJournalEnabled(this.store));
       } else {
-        const preview = previewReduce(current, plan, input.identity, input.event, admissionOk);
+        const preview = previewReduce(current, plan, input.identity, input.event, admissionOk, segmentedJournalEnabled(this.store));
         if (preview.outcome === 'BLOCKED' || preview.outcome === 'DECISION_REQUIRED') reduced = preview;
         else {
           preparedAdmission = this.#prepareGraph(plan, current, preview.state, input, loaded.generation);
-          reduced = reduce(current, plan, input.identity, input.event, recoveryCapacity, admissionOk, preparedAdmission);
+          reduced = reduce(current, plan, input.identity, input.event, recoveryCapacity, admissionOk, preparedAdmission, segmentedJournalEnabled(this.store));
         }
       }
     }
@@ -596,115 +603,11 @@ class KernelImpl implements RunKernel {
     return this.commitYield(loaded.generation, reduced.state, key, input.identity, asYield(reduced.state, reduced), preparedContext, preparedAdmission);
   }
 
-  private async resumeDispatch(generation: number, current: MachineState, input: AdvanceInput, key: string, plan: Plan, admissionOk: boolean, maxInFlight: number, preparedContext?: PreparedContext): Promise<Yield> {
-    const command = Object.values(current.outbox).find((candidate) => candidate.state === 'PENDING' || candidate.state === 'CLAIMED' || candidate.state === 'UNKNOWN');
-    if (!command) return this.commitYield(generation, current, key, input.identity, asYield(current, { outcome: 'WAITING' }), preparedContext);
-    // The dispatcher deadline begins when this RESUME claims ownership, not
-    // after a potentially slow durable claim commit.  The post-CAS launch
-    // fence below rechecks it so a timeout during the commit cannot authorize
-    // an effect after its bounded window has elapsed.
-    const dispatchDeadline = Date.now() + this.dispatchOptions.timeoutMs;
-
-    const candidateActive = this.activeDispatches.get(command.launchToken);
-    const active = candidateActive && candidateActive.commandDigest === command.commandDigest && candidateActive.leaseId === command.leaseId ? candidateActive : undefined;
-    if (command.state === 'CLAIMED' && active) {
-      // A live in-process call is still the owner of this token.  Do not turn
-      // it into UNKNOWN merely because another RESUME arrived before its
-      // bounded deadline.
-      return asYield(current, { outcome: 'WAITING' });
-    }
-    if (command.state === 'UNKNOWN' && active) {
-      const blocked: Yield = { kind: 'BLOCKED', code: 'UnknownDispatch', reason: 'UnknownDispatch', retryable: false, launchToken: command.launchToken, snapshot: snapshot(current) };
-      return blocked;
-    }
-
-    if (command.state === 'UNKNOWN') {
-      if (!admissionOk) {
-        const reduced = reduce(current, plan, input.identity, input.event, maxInFlight, admissionOk);
-        return this.commitYield(generation, reduced.state, key, input.identity, asYield(reduced.state, reduced), preparedContext);
-      }
-      if (!this.driver?.observe || this.dispatchOptions.signal?.aborted) {
-        const y: Yield = { kind: 'BLOCKED', code: 'UnknownDispatch', reason: 'UnknownDispatch', retryable: false, launchToken: command.launchToken, snapshot: snapshot(current) };
-        return this.commitEventOnly(generation, current, input, key, plan, maxInFlight, y, preparedContext);
-      }
-      const waiting = await this.commitEventOnly(generation, current, input, key, plan, maxInFlight, { kind: 'BLOCKED', code: 'UnknownDispatch', reason: 'UnknownDispatch', retryable: false, launchToken: command.launchToken, snapshot: snapshot(current) }, preparedContext);
-      const committed = await this.store.load();
-      // The observation capability is bound to one verified snapshot.  Do not
-      // carry the pre-commit command across this reload: a recovery/claim
-      // successor may have changed the lease or command bytes while the
-      // observer was waiting to start.  In that case the old observer is a
-      // stale task and must not occupy the successor's local lease slot.
-      const committedCommand = committed.state ? commandForToken(committed.state, command.launchToken) : undefined;
-      const sameUnknownCommand = Boolean(committedCommand
-        && committedCommand.state === 'UNKNOWN'
-        && committedCommand.launchToken === command.launchToken
-        && committedCommand.commandDigest === command.commandDigest
-        && committedCommand.leaseId === command.leaseId
-        && canonicalString(committedCommand) === canonicalString(command));
-      if (!sameUnknownCommand || !committedCommand) return waiting;
-      const observed = this.launchObserve(committed.generation, committedCommand, plan, maxInFlight, key, input.identity);
-      if (observed) return (await observed) ?? waiting;
-      return waiting;
-    }
-
-    if (command.state === 'CLAIMED') {
-      // No in-process owner exists (for example after restart).  Recovery is
-      // conservative: mark the old lease UNKNOWN and never relaunch it.
-      const uncertain = clone(current);
-      const uncertainCommand = commandForToken(uncertain, command.launchToken)!;
-      unknown(uncertainCommand);
-      const evidence: Ref = ref(`unknown:${command.launchToken}`, { launchToken: command.launchToken, commandDigest: command.commandDigest, status: 'UNKNOWN' }, 'outbox/recovery');
-      const recovery: Event = { kind: 'OBSERVATION', category: 'RECOVERY', ref: evidence };
-      appendJournal(uncertain, internalIdentity(uncertain, uncertainCommand, `dispatcher-recover:${command.launchToken}:${uncertain.revision + 1}`, recovery), recovery);
-      appendJournal(uncertain, input.identity, input.event);
-      refreshAdmission(uncertain, plan, maxInFlight);
-      const y: Yield = { kind: 'BLOCKED', code: 'UnknownDispatch', reason: 'UnknownDispatch', retryable: false, launchToken: command.launchToken, snapshot: snapshot(uncertain) };
-      return this.commitYield(generation, uncertain, key, input.identity, y, preparedContext);
-    }
-
-    // PENDING: cancellation before claim records no effect and leaves the
-    // command available for a later non-cancelled RESUME.
-    if (this.dispatchOptions.signal?.aborted || !admissionOk) {
-      if (!admissionOk) {
-        const reduced = reduce(current, plan, input.identity, input.event, maxInFlight, admissionOk);
-        return this.commitYield(generation, reduced.state, key, input.identity, asYield(reduced.state, reduced), preparedContext);
-      }
-      return this.commitEventOnly(generation, current, input, key, plan, maxInFlight, asYield(current, { outcome: 'WAITING' }), preparedContext);
-    }
-    if (!this.driver) {
-      const request = new ProseDriver().request(command);
-      const requestRef: Ref = { id: `human-receipt:${command.launchToken}`, scope: 'outbox', digest: digest(request), bytes: canonicalString(request) };
-      const y: Yield = { kind: 'BLOCKED', code: 'HumanReceiptRequired', reason: 'ProseDriver cannot prove launch-token dispatch; submit a receipt', receipt: requestRef, launchToken: command.launchToken, retryable: false, snapshot: snapshot(current) };
-      return this.commitEventOnly(generation, current, input, key, plan, maxInFlight, y, preparedContext);
-    }
-
-    const claimed = clone(current);
-    const claimedCommand = commandForToken(claimed, command.launchToken)!;
-    claim(claimedCommand, `lease-${process.pid}-${claimed.revision + 1}`, claimed.modeEpoch, claimed.writerFence);
-    const claimEvent: Event = { kind: 'OBSERVATION', category: 'HOST', ref: ref(`claim:${command.launchToken}`, { launchToken: command.launchToken, commandDigest: command.commandDigest }, 'outbox') };
-    const claimIdentity = internalIdentity(claimed, claimedCommand, `dispatcher-claim:${command.launchToken}:${claimed.revision + 1}`, claimEvent);
-    // Reserve the complete claim -> UNKNOWN recovery shape before invoking an
-    // external effect.  A large receipt is handled as UNKNOWN after claim;
-    // the durable fallback itself must always fit the journal ceiling.
-    try {
-      const probe = clone(claimed);
-      appendJournal(probe, claimIdentity, claimEvent);
-      const probeCommand = commandForToken(probe, command.launchToken)!;
-      unknown(probeCommand);
-      const probeEvidence: Ref = ref(`unknown:${command.launchToken}`, { launchToken: command.launchToken, commandDigest: command.commandDigest, status: 'UNKNOWN' }, 'outbox/recovery');
-      const probeRecovery: Event = { kind: 'OBSERVATION', category: 'RECOVERY', ref: probeEvidence };
-      appendJournal(probe, internalIdentity(probe, probeCommand, `dispatcher-unknown:${command.launchToken}:${probe.revision + 1}`, probeRecovery), probeRecovery);
-      appendJournal(probe, input.identity, input.event);
-    } catch (error) {
-      if ((error as Error).message === 'JournalCeiling') return asYield(current, { outcome: 'BLOCKED', reason: 'JournalCeiling' });
-      throw error;
-    }
-    appendJournal(claimed, claimIdentity, claimEvent);
-    appendJournal(claimed, input.identity, input.event);
-    refreshAdmission(claimed, plan, maxInFlight);
-    const waiting = asYield(claimed, { outcome: 'WAITING' });
-    // Commit CLAIMED plus the caller RESUME before invoking the driver.  The
-    // private dispatcher starts only after this durable CAS succeeds.
+  /** Persist a durable CLAIMED transition before the coordinator invokes a
+   * driver.  The coordinator never writes this state directly: KernelImpl is
+   * the sole commit facade and returns the immutable authority snapshot used
+   * by the store-linearized launch fence. */
+  private async commitClaim(generation: number, claimed: MachineState, claimedCommand: import('./model.js').OutboxCommand, key: string, input: AdvanceInput, waiting: Yield): Promise<{ generation: number; authority: StoreLinearizedDispatchRequest['authority'] } | { replay: Yield }> {
     claimed.writerFence = nextWriterFence(claimed.writerFence, generation + 1, input.identity);
     claimed.processed[key] = { digest: input.identity.payloadDigest, yieldBytes: canonicalString(waiting), revision: claimed.revision, identity: clone(input.identity) };
     let claimedGeneration: number;
@@ -712,29 +615,29 @@ class KernelImpl implements RunKernel {
     catch (error) {
       const mapped = mapCommitFailure(error);
       const replay = await this.recoverExactCommittedReplay(key, input.identity);
-      if (replay !== undefined) return replay;
+      if (replay !== undefined) return { replay };
       throw mapped;
     }
-    const authority: StoreLinearizedDispatchRequest['authority'] = {
+    return {
       generation: claimedGeneration,
-      writerFence: claimed.writerFence,
-      runId: claimed.runId,
-      phaseId: claimed.phaseId,
-      authorityEpoch: claimed.authorityEpoch,
-      attemptEpoch: claimed.attemptEpoch,
-      barrierEpoch: claimed.barrierEpoch,
-      modeEpoch: claimed.modeEpoch,
-      command: clone(claimedCommand),
+      authority: {
+        generation: claimedGeneration,
+        writerFence: claimed.writerFence,
+        runId: claimed.runId,
+        phaseId: claimed.phaseId,
+        authorityEpoch: claimed.authorityEpoch,
+        attemptEpoch: claimed.attemptEpoch,
+        barrierEpoch: claimed.barrierEpoch,
+        modeEpoch: claimed.modeEpoch,
+        command: clone(claimedCommand),
+      },
     };
-    const immediate = this.launchDispatch(authority, plan, maxInFlight, key, input.identity, dispatchDeadline);
-    if (immediate) return (await immediate) ?? waiting;
-    return waiting;
   }
 
   /** Commit the caller event without changing outbox ownership. */
   private async commitEventOnly(generation: number, current: MachineState, input: AdvanceInput, key: string, plan: Plan, capacity: number, y: Yield, preparedContext?: PreparedContext): Promise<Yield> {
     const next = clone(current);
-    appendJournal(next, input.identity, input.event);
+    appendJournal(next, input.identity, input.event, segmentedJournalEnabled(this.store));
     refreshAdmission(next, plan, capacity);
     const rebased: Yield = y.kind === 'WAITING'
       ? asYield(next, { outcome: 'WAITING' })
@@ -744,18 +647,6 @@ class KernelImpl implements RunKernel {
           ? { ...y, cursor: { revision: next.revision, authorityEpoch: next.authorityEpoch, attemptEpoch: next.attemptEpoch, barrierEpoch: next.barrierEpoch }, snapshot: snapshot(next) }
           : { ...y, snapshot: snapshot(next) };
     return this.commitYield(generation, next, key, input.identity, rebased, preparedContext);
-  }
-
-  private notifyYield(value: Yield): void {
-    const onYield = this.dispatchOptions.onYield;
-    if (!onYield) return;
-    // Notification is observational only. Invoke it in a detached native
-    // Promise continuation so a synchronous throw cannot escape into outcome
-    // persistence or immediate replay publication.
-    try {
-      const detached = Promise.resolve().then(() => Reflect.apply(onYield, this.dispatchOptions, [value]));
-      void detached.catch(() => undefined);
-    } catch { /* even a poisoned host Promise surface cannot gate the kernel */ }
   }
 
   /**
@@ -781,12 +672,17 @@ class KernelImpl implements RunKernel {
         // an observer that was delayed across a successor claim must not
         // acknowledge that newer lease or suppress its dispatch.
         if (receiptLeaseId !== undefined && command.leaseId !== receiptLeaseId) return undefined;
+        // A late dispatch receipt is bound to the lease captured at launch.
+        // Reject it when the same token/digest has since been reclaimed by a
+        // successor, regardless of whether that successor is still PENDING or
+        // already CLAIMED.
+        if (expectedLeaseId !== undefined && (command.leaseId !== expectedLeaseId || command.state === 'PENDING')) return undefined;
         if (receipt.launchToken !== token || receipt.commandDigest !== expectedDigest) return undefined;
         validateRef(receipt.ref);
         const next = clone(state); const nextCommand = commandForToken(next, token)!;
         const event: Event = { kind: 'DISPATCH_RECEIPT', ref: receiptEnvelope(nextCommand, receipt) };
         const identity = internalIdentity(next, nextCommand, `dispatcher-receipt:${token}:${next.revision + 1}`, event);
-        try { applyDispatchReceipt(next, identity, event); appendJournal(next, identity, event); refreshAdmission(next, plan, capacity); }
+        try { applyDispatchReceipt(next, identity, event); appendJournal(next, identity, event, segmentedJournalEnabled(this.store)); refreshAdmission(next, plan, capacity); }
         catch (error) {
           // A receipt that cannot fit is external-effect uncertainty, not a
           // reason to acknowledge an unrepresentable result.  Continue in
@@ -813,7 +709,7 @@ class KernelImpl implements RunKernel {
       const evidence: Ref = ref(`unknown:${token}`, { launchToken: token, commandDigest: expectedDigest, status: 'UNKNOWN' }, 'outbox/recovery');
       const event: Event = { kind: 'OBSERVATION', category: 'RECOVERY', ref: evidence };
       const identity = internalIdentity(next, nextCommand, `dispatcher-unknown:${token}:${next.revision + 1}`, event);
-      appendJournal(next, identity, event); refreshAdmission(next, plan, capacity);
+      appendJournal(next, identity, event, segmentedJournalEnabled(this.store)); refreshAdmission(next, plan, capacity);
       next.writerFence = nextWriterFence(next.writerFence, loaded.generation + 1, identity);
       try { await this.store.commit(loaded.generation, next); }
       catch (error) {
@@ -858,173 +754,6 @@ class KernelImpl implements RunKernel {
     } catch { return undefined; }
   }
 
-  private launchDispatch(authority: StoreLinearizedDispatchRequest['authority'], plan: Plan, capacity: number, processedKey?: string, processedIdentity?: EventIdentity, deadline = Date.now() + this.dispatchOptions.timeoutMs): Promise<Yield | undefined> | undefined {
-    const command = authority.command;
-    const token = command.launchToken;
-    const leaseId = command.leaseId;
-    if (!this.driver || typeof leaseId !== 'string') return undefined;
-    const existing = this.activeDispatches.get(token);
-    if (existing && existing.commandDigest === command.commandDigest && existing.leaseId === leaseId) return undefined;
-    // A delayed continuation from an older claim must not replace the local
-    // task for a later durable lease.  Newer generations may supersede older
-    // tasks, but never the reverse.
-    if (existing && existing.generation >= authority.generation) return undefined;
-    const task: ActiveDispatchTask = { generation: authority.generation, commandDigest: command.commandDigest, leaseId, timedOut: false, settled: false, outcomeCommitted: false };
-    this.activeDispatches.set(token, task);
-    const controller = new AbortController();
-    const externalSignal = this.dispatchOptions.signal;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let abort!: () => void;
-    let asynchronousPromise = false;
-    let noReceiptNotification: Promise<void> | undefined;
-    const deleteTask = (): void => { if (this.activeDispatches.get(token) === task) this.activeDispatches.delete(token); };
-    const stopCancellationWatch = (): void => {
-      if (timer) clearTimeout(timer);
-      if (externalSignal) externalSignal.removeEventListener('abort', abort);
-    };
-    const cleanup = (): void => {
-      stopCancellationWatch();
-      deleteTask();
-    };
-    const notifyNoReceiptOutcome = (): void => {
-      if (!task.noReceiptOutcome || noReceiptNotification) return;
-      noReceiptNotification = task.noReceiptOutcome.then((value) => { if (value) this.notifyYield(value); }).catch(() => undefined);
-    };
-    const finishUnknown = (immediate = false): Promise<Yield | undefined> => {
-      if (!task.noReceiptOutcome) {
-        if (task.outcomeCommitted) return Promise.resolve(undefined);
-        stopCancellationWatch();
-        task.outcomeCommitted = true;
-        task.noReceiptOutcome = this.commitDispatcherOutcome(token, task.commandDigest, plan, capacity, undefined, leaseId)
-          .catch(() => undefined);
-      }
-      if (immediate && processedKey && processedIdentity) {
-        task.immediateNoReceiptOutcome ??= task.noReceiptOutcome.then(async (value) => {
-          if (!value) return undefined;
-          const finalized = await this.finalizeImmediateYield(processedKey, processedIdentity, value);
-          this.notifyYield(finalized ?? value);
-          return finalized;
-        });
-        return task.immediateNoReceiptOutcome;
-      }
-      if (asynchronousPromise) notifyNoReceiptOutcome();
-      return task.noReceiptOutcome;
-    };
-    const finishReceipt = (value: DriverReceipt, immediate = false): Promise<Yield | undefined> => {
-      if (!value || value.launchToken !== token || value.commandDigest !== task.commandDigest) return finishUnknown(immediate);
-      try { validateRef(value.ref); } catch { return finishUnknown(immediate); }
-      stopCancellationWatch();
-      if (!task.outcomeCommitted) task.outcomeCommitted = true;
-      return this.commitDispatcherOutcome(token, task.commandDigest, plan, capacity, value, leaseId).then(async (result) => {
-        if (!result) return undefined;
-        if (immediate && processedKey && processedIdentity) {
-          const finalized = await this.finalizeImmediateYield(processedKey, processedIdentity, result);
-          this.notifyYield(finalized ?? result);
-          return finalized;
-        }
-        this.notifyYield(result);
-        return result;
-      }).catch(() => undefined);
-    };
-    const finishCancelledBeforeLaunch = (): Promise<Yield | undefined> => {
-      task.timedOut = true;
-      controller.abort();
-      return finishUnknown(true).finally(() => { task.settled = true; cleanup(); });
-    };
-    abort = () => {
-      if (task.timedOut || task.outcomeCommitted) return;
-      task.timedOut = true;
-      controller.abort();
-      // The exact lease remains in the single-flight closure even after the
-      // task is removed to let a reconciled successor install its own task.
-      void finishUnknown().finally(() => { if (!task.settled) deleteTask(); });
-    };
-    if (externalSignal) externalSignal.addEventListener('abort', abort, { once: true });
-    timer = setTimeout(abort, Math.max(0, deadline - Date.now()));
-    if (externalSignal?.aborted) abort();
-
-    const request: StoreLinearizedDispatchRequest = {
-      authority,
-      receiver: this.driver.receiver,
-      dispatch: this.driver.dispatch,
-      signal: controller.signal,
-      deadline,
-    };
-    return storeLinearizedDispatch(this.store, request).then(async (result) => {
-      if (result.kind === 'STALE') {
-        if (task.noReceiptOutcome) return finishUnknown(true).finally(() => { task.settled = true; cleanup(); });
-        task.settled = true; cleanup(); return undefined;
-      }
-      if (result.kind === 'CANCELLED') return finishCancelledBeforeLaunch();
-      if (result.kind === 'FENCE_FAILURE') {
-        if (result.entered || task.noReceiptOutcome) return finishUnknown(true).finally(() => { task.settled = true; cleanup(); });
-        task.settled = true; cleanup(); return undefined;
-      }
-      if (result.kind === 'UNCERTAIN') return finishUnknown(true).finally(() => { task.settled = true; cleanup(); });
-      if (result.kind === 'RECEIPT') {
-        task.settled = true;
-        return finishReceipt(result.receipt, true).finally(cleanup);
-      }
-      // A Promise returned after cancellation/deadline still has a useful late
-      // receipt channel.  Start the lease-scoped UNKNOWN attempt, but retain the
-      // safe observer so matching proof can subsequently ACK by token+digest.
-      asynchronousPromise = true;
-      if (task.timedOut || controller.signal.aborted || Date.now() >= deadline) abort();
-      if (task.noReceiptOutcome) notifyNoReceiptOutcome();
-      result.receipt.then((value) => {
-        task.settled = true;
-        // A late matching receipt remains token+digest scoped and may ACK a
-        // reconciled UNKNOWN/PENDING command; cleanup cannot erase a new lease.
-        void finishReceipt(value).finally(cleanup);
-      }, () => {
-        task.settled = true;
-        void finishUnknown().finally(cleanup);
-      });
-      return undefined;
-    });
-  }
-
-  private launchObserve(generation: number, command: import('./model.js').OutboxCommand, plan: Plan, capacity: number, processedKey?: string, processedIdentity?: EventIdentity): Promise<Yield | undefined> | undefined {
-    if (!this.driver?.observe) return undefined;
-    const token = command.launchToken;
-    const existing = this.activeDispatches.get(token);
-    if (existing && existing.commandDigest === command.commandDigest && existing.leaseId === command.leaseId) return undefined;
-    if (existing && existing.generation >= generation) return undefined;
-    const task: ActiveDispatchTask = { generation, commandDigest: command.commandDigest, leaseId: command.leaseId, timedOut: false, settled: false, outcomeCommitted: false };
-    this.activeDispatches.set(token, task);
-    const deleteTask = (): void => { if (this.activeDispatches.get(token) === task) this.activeDispatches.delete(token); };
-    const controller = new AbortController();
-    let normalized: ReturnType<typeof normalizeDriverResult>;
-    try { normalized = normalizeDriverResult(Reflect.apply(this.driver.observe, this.driver.receiver, [token, controller.signal]), true); }
-    catch { deleteTask(); return Promise.resolve(undefined); }
-    const finish = (value: DriverReceipt | undefined, immediate = false): Promise<Yield | undefined> => {
-      if (!value) return Promise.resolve(undefined);
-      if (value.launchToken !== token || value.commandDigest !== command.commandDigest) return Promise.resolve(undefined);
-      try { validateRef(value.ref); } catch { return Promise.resolve(undefined); }
-      return this.commitDispatcherOutcome(token, command.commandDigest, plan, capacity, value, undefined, command.leaseId).then(async (result) => {
-        if (!result) return undefined;
-        if (immediate && processedKey && processedIdentity) {
-          const finalized = await this.finalizeImmediateYield(processedKey, processedIdentity, result);
-          this.notifyYield(finalized ?? result);
-          return finalized;
-        }
-        this.notifyYield(result);
-        return result;
-      }).catch(() => undefined);
-    };
-    if (normalized.kind === 'ABSENT' || normalized.kind === 'INVALID') {
-      task.settled = true;
-      deleteTask();
-      return Promise.resolve(undefined);
-    }
-    if (normalized.kind === 'RECEIPT') {
-      return finish(normalized.receipt, true).finally(() => { task.settled = true; deleteTask(); });
-    }
-    const timer = setTimeout(() => { task.timedOut = true; controller.abort(); deleteTask(); }, this.dispatchOptions.timeoutMs);
-    normalized.receipt.then((value) => { clearTimeout(timer); task.settled = true; void finish(value).finally(deleteTask); }, () => { clearTimeout(timer); task.settled = true; deleteTask(); });
-    return undefined;
-  }
-
   private async commitYield(generation: number, state: MachineState, key: string, identity: EventIdentity, y: Yield, preparedContext?: PreparedContext, preparedAdmission?: PreparedAdmission): Promise<Yield> {
     const next = state === undefined ? state : clone(state);
     if (!next) return y;
@@ -1067,7 +796,7 @@ export function makeRunKernelForBridge(options: KernelOptions, expectedRootIdent
 /** Private composition entry; intentionally not re-exported from the package index. */
 export function makeComposedKernel(options: KernelOptions, driver?: EffectDriver, dispatcher?: DispatcherOptions): RunKernel {
   const configuredMaxInFlight = validateKernelOptions(options);
-  let snapshot: DriverSnapshot | undefined;
+  let snapshot: DispatchDriverSnapshot | undefined;
   if (driver !== undefined) {
     if (!driver || typeof driver !== 'object') throw new InvalidPlan('driver is invalid');
     const dispatch = driver.dispatch;
@@ -1085,7 +814,7 @@ export function makeComposedKernel(options: KernelOptions, driver?: EffectDriver
  * subpath: hosts receive only the existing RunKernel seam. */
 export function makeComposedKernelForBridge(options: KernelOptions, expectedRootIdentity: FilesystemIdentity, driver?: EffectDriver, dispatcher?: DispatcherOptions): RunKernel {
   const configuredMaxInFlight = validateKernelOptions(options);
-  let snapshot: DriverSnapshot | undefined;
+  let snapshot: DispatchDriverSnapshot | undefined;
   if (driver !== undefined) {
     if (!driver || typeof driver !== 'object') throw new InvalidPlan('driver is invalid');
     const dispatch = driver.dispatch;
