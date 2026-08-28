@@ -19,13 +19,11 @@ Prefer modifying, reusing, deleting, or extending sound existing mechanisms over
 
 ## Worker route and effort selection
 
-Plan work with the closed route table in `SKILL.md`. Route omission preserves the Luna default (`gpt-5.6-luna` + `xhigh`); Luna `max` needs the existing concrete justification; `sol-high` is an explicit choice of exactly `gpt-5.6-sol` + `high`. Do not plan an open model/effort cross-product or a fallback route.
+Plan work with the closed route table in `SKILL.md`. Route omission preserves the Luna default (`gpt-5.6-luna` + `xhigh`); `sol-high` is an explicit choice of exactly `gpt-5.6-sol` + `high`. Do not plan another Luna effort, an open model/effort cross-product, or a fallback route.
 
-Reserve Luna **`max`** for steps where extra exploration/verification has a concrete expected payoff: unresolved high-blast-radius architecture, subtle integrity/security/concurrency/replay/finality invariants, genuinely difficult cross-cutting interaction reasoning, recovery from an `xhigh` attempt that failed on the same hard reasoning boundary, a critical named adversarial risk, or explicit user/project authority.
+Keep Luna on `xhigh` for read-only surveys/scouts, bounded implementation, migrations after the design decision, focused repairs, tests, documentation, and other repository execution. Do not create a Luna `max` intermediate tier. A named consequential judgment boundary, including one left unresolved by a materially failed Luna/xhigh attempt, requires a fresh authorized `sol-high` attempt rather than an effort switch inside the Luna route.
 
-Do not select Luna `max` merely because a step is large, touches many files, is an adversary/scout, or because higher effort sounds safer. Read-only surveys/scouts, bounded implementation, migrations after the design decision, focused repairs, tests, and documentation normally use their route's normal effort (`xhigh` for Luna, `high` for Sol). Sol does not escalate to `max`.
-
-The orchestrator resolves the route before spawn and passes the exact model and effort explicitly. Before each `sol-high` launch it records the canonical phase/step/attempt binding required by `SKILL.md`; resume must preserve it or block. No permanent route/effort column is required unless the project benefits from one. If Luna `max` is selected for an otherwise ordinary-looking step, a one-line rationale in the handoff is enough—do not create a routing bureaucracy.
+The orchestrator resolves the route before spawn and passes the exact model and effort explicitly. Before each `sol-high` launch it records the canonical phase/step/attempt binding required by `SKILL.md`; resume must preserve it or block. No permanent route/effort column is required unless the project benefits from one.
 
 ## Default role policy
 
@@ -106,7 +104,7 @@ Before approving the plan, ask:
 7. Is verification owned once per layer while still satisfying every authoritative acceptance requirement?
 8. Does each planned scout/adversary/decision artifact actually earn its cost?
 9. Is this run safely independent of other ACTIVE run ownership?
-10. Is each explicit route valid and durable, and is every Luna `max` call justified by a concrete reasoning-risk trigger rather than task size/role alone?
+10. Is each explicit route valid and durable, with Luna fixed at `xhigh` and every `sol-high` attempt bound to a named consequential judgment boundary?
 
 If #6 is yes, choose the simpler design.
 

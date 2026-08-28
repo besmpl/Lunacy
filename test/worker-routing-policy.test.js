@@ -17,7 +17,6 @@ function routeRows(markdown) {
 
 const expectedRoutes = [
   { route: 'luna', model: 'gpt-5.6-luna', reasoningEffort: 'xhigh' },
-  { route: 'luna', model: 'gpt-5.6-luna', reasoningEffort: 'max' },
   { route: 'sol-high', model: 'gpt-5.6-sol', reasoningEffort: 'high' },
 ];
 
@@ -63,6 +62,7 @@ test('canonical default role policy keeps routine work on Luna and bounds Sol ju
     assert.doesNotMatch(markdown, /Sol\/high is (?:an? )?(?:automatic|generic)/i);
     assert.doesNotMatch(markdown, /implementation returns to Sol/i);
     assert.doesNotMatch(markdown, /parent (?:is not|does not remain) the acceptance owner/i);
+    assert.doesNotMatch(markdown, /Reserve Luna[^\n]*`max`/i);
   }
 });
 
@@ -72,10 +72,12 @@ test('direct worker route table is closed and omission preserves Luna/xhigh', as
   assert.match(skill, /omitted route means Luna at `xhigh`/);
   assert.match(skill, /No other model\/effort pair is valid[\s\S]{0,500}exact case-sensitive values/);
   assert.match(skill, /no aliases, whitespace normalization, partial declarations, extra route fields, cross-pairs, or ambient inference/);
+  assert.match(skill, /There is no Luna `max` escalation in normal Lunacy routing/);
 
   const accepted = new Set(expectedRoutes.map(({ model, reasoningEffort }) => `${model}\0${reasoningEffort}`));
   for (const [model, effort] of [
     ['gpt-5.6-luna', 'high'],
+    ['gpt-5.6-luna', 'max'],
     ['gpt-5.6-sol', 'xhigh'],
     ['gpt-5.6-sol', 'max'],
     ['GPT-5.6-SOL', 'high'],
@@ -104,7 +106,7 @@ test('selected route cannot silently fallback, downgrade, or drift on resume', a
     source('SKILL.md'), source('WORKSPACE.md'), source('orchestrator/PLANNING.md'), source('README.md'),
   ]);
   assert.match(skill, /make \*\*zero alternate spawn calls\*\*/);
-  assert.match(skill, /Sol never becomes Luna; Luna never becomes Sol; Luna `max` never becomes `xhigh`/);
+  assert.match(skill, /Sol never becomes Luna; Luna never becomes Sol; an unavailable pair never becomes another pair/);
   assert.match(skill, /workerRoute: sol-high; phaseId: <id>; stepId: <id>; attemptEpoch: <n>/);
   assert.match(skill, /Resume that exact route binding or block/);
   assert.match(workspace, /Resume the exact binding or block/);
@@ -127,6 +129,8 @@ test('Luna compatibility is route-scoped and never substitutes Sol', async () =>
   assert.match(compatibility, /does not apply to `sol-high`/);
   assert.match(compatibility, /A failed `sol-high` selection blocks/);
   assert.match(compatibility, /retry only the unchanged selected Luna model\/effort/i);
+  assert.match(compatibility, /reasoning_effort: xhigh/);
+  assert.doesNotMatch(compatibility, /reasoning_effort: xhigh \| max/);
   assert.match(compatibility, /Do not silently fall back to Sol, Terra, or lower reasoning effort/);
 });
 

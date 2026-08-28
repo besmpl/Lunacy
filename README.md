@@ -15,12 +15,13 @@ Lunacy uses one closed route choice:
 | Route | Model | Reasoning effort | Selection |
 |---|---|---|---|
 | `luna` | `gpt-5.6-luna` | `xhigh` | Default when omitted |
-| `luna` | `gpt-5.6-luna` | `max` | Explicit and justified |
 | `sol-high` | `gpt-5.6-sol` | `high` | Explicit only |
 
 Only those exact case-sensitive pairs are valid. The parent resolves one route, passes both `model` and `reasoning_effort` explicitly to `agents.spawn_agent`, and uses `fork_turns:"none"` by default. It never infers from the parent model, catalog, availability, or an earlier attempt. An invalid or unavailable selection blocks with no alternate call, fallback, or downgrade.
 
-Before every explicit Sol launch, the parent records `workerRoute: sol-high; phaseId: <id>; stepId: <id>; attemptEpoch: <n>` in the run's `DECISIONS.md`. Resume preserves that exact binding or blocks; changing routes requires a fresh attempt and new authority. Luna `max` keeps its existing one-line hard-reasoning justification. Step size or role name alone never justifies it.
+Before every explicit Sol launch, the parent records `workerRoute: sol-high; phaseId: <id>; stepId: <id>; attemptEpoch: <n>` in the run's `DECISIONS.md`. Resume preserves that exact binding or blocks; changing routes requires a fresh attempt and new authority.
+
+Normal routing has no Luna `max` tier. Bounded, testable repository execution stays on Luna/xhigh; consequential judgment or a named unresolved reasoning boundary after a failed Luna/xhigh attempt uses a fresh authorized Sol/high attempt. Keeping Luna on one fixed effort avoids deliberately fragmenting that route by reasoning setting; it does not guarantee a cache hit.
 
 ### Default role policy
 

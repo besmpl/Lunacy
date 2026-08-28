@@ -7,7 +7,7 @@ description: Execute a coding plan or task with Codex, GPT-5.6 Sol, or GPT-5.6 T
 
 **Primary goal: minimize orchestrator context while preserving high-leverage judgment.** The parent owns global intent, architecture decisions, worker routing, scheduling, and acceptance. Workers own repository-heavy work.
 
-Worker routing is a closed choice: omitted route means Luna at `xhigh`; Luna may use a justified `max`; explicit `sol-high` means exactly GPT-5.6 Sol at `high`. Never silently fall back, downgrade, or substitute another pair.
+Worker routing is a closed choice: omitted route means Luna at `xhigh`; explicit `sol-high` means exactly GPT-5.6 Sol at `high`. Those are the only valid worker profiles. Never silently fall back, downgrade, substitute another pair, or switch Luna to a different reasoning effort.
 
 ## Default role policy
 
@@ -58,7 +58,6 @@ Resolve each worker route once from this exact closed table:
 | Route | Model | Reasoning effort | Selection |
 |---|---|---|---|
 | `luna` | `gpt-5.6-luna` | `xhigh` | Default when the route is omitted |
-| `luna` | `gpt-5.6-luna` | `max` | Explicit, with the existing one-line justification |
 | `sol-high` | `gpt-5.6-sol` | `high` | Explicit only |
 
 No other model/effort pair is valid. Treat route names, model identifiers, and efforts as exact case-sensitive values: no aliases, whitespace normalization, partial declarations, extra route fields, cross-pairs, or ambient inference from the parent model, catalog, availability, or prior attempts. Reject an invalid selection before calling `agents.spawn_agent`.
@@ -72,7 +71,7 @@ agents.spawn_agent({ model: "gpt-5.6-sol", reasoning_effort: "high", fork_turns:
 
 `fork_turns:"none"` remains the default. The existing reasoned inheritance exception is allowed only if the host accepts the same explicit `model` and `reasoning_effort` with the limited inheritance; otherwise block. Never inherit model or effort from ambient parent state.
 
-If the host rejects or cannot provide the selected pair, surface the failure and make **zero alternate spawn calls**. Sol never becomes Luna; Luna never becomes Sol; Luna `max` never becomes `xhigh`. Only a selected Luna route may use `references/CODEX_LUNA_COMPAT.md`, followed by a fresh-process retry of the unchanged pair.
+If the host rejects or cannot provide the selected pair, surface the failure and make **zero alternate spawn calls**. Sol never becomes Luna; Luna never becomes Sol; an unavailable pair never becomes another pair. Only a selected Luna route may use `references/CODEX_LUNA_COMPAT.md`, followed by a fresh-process retry of the unchanged pair.
 
 Before every explicit `sol-high` launch, append one canonical binding to `<run-root>/DECISIONS.md`:
 
@@ -80,20 +79,11 @@ Before every explicit `sol-high` launch, append one canonical binding to `<run-r
 workerRoute: sol-high; phaseId: <id>; stepId: <id>; attemptEpoch: <n>
 ```
 
-Resume that exact route binding or block. An intentional route change requires a fresh attempt and new authority; malformed or stale text never authorizes Sol. Luna `max` retains its existing durable justification.
+Resume that exact route binding or block. An intentional route change requires a fresh attempt and new authority; malformed or stale text never authorizes Sol.
 
 Use the route's normal effort (`xhigh` for Luna, `high` for Sol) for bounded implementation, repository inventory, migrations after the architecture is decided, focused repairs, test work, read-only scouts, documentation, and most adversarial reviews.
 
-Use Luna **`max` selectively** when additional exploration/verification is plausibly worth the extra tokens, especially for:
-
-- unresolved high-blast-radius architecture or contract decisions inside a worker-owned step;
-- subtle integrity/security/concurrency/replay/finality work where a missed invariant is expensive;
-- cross-cutting migrations with genuinely difficult interaction reasoning, not merely many files;
-- recovery from a materially failed Luna `xhigh` attempt where evidence shows the same hard reasoning boundary remains unresolved;
-- an unusually critical adversarial attack with a named failure mode;
-- explicit user/project authority requiring `max`.
-
-Do **not** choose Luna `max` merely because a step is large, a report could be long, the role is called adversary/scout, or “more reasoning cannot hurt.” Do not escalate just to rerun deterministic verification. `sol-high` never escalates to `max`. The parent may choose routes independently for each worker in a concurrent batch.
+There is no Luna `max` escalation in normal Lunacy routing. Keep bounded, testable repository execution on Luna/xhigh. When a task instead requires consequential judgment, or a materially failed Luna/xhigh attempt leaves a named hard reasoning boundary unresolved, start a fresh authorized `sol-high` attempt. Do not convert the existing attempt, use Luna `max` as an intermediate tier, or escalate merely to rerun deterministic verification. The two fixed profiles deliberately avoid effort switching within the Luna route; this policy does not claim or guarantee any particular cache-hit rate. The parent may choose routes independently for each worker in a concurrent batch.
 
 ## Hard context / communication limits
 
