@@ -1,0 +1,137 @@
+{
+  "schema": "lunacy-b0-aggregate-manifest/v2",
+  "baselineIdentity": "baseline-identity.json",
+  "aggregateBaselineFingerprint": "e7d5e61d2e92854729c3aea37fc46f6d9f2fe9eee4b37d62af627997bec64acd",
+  "aggregateFingerprintMethod": "SHA-256(canonical JSON of the frozen baseline aggregate identity plus sorted ordinary path references, byte lengths, and content digests; only the aggregate is published)",
+  "pathReferences": {
+    "authorityTests": [
+      "test/decision-inbox.test.js",
+      "test/controller.test.js",
+      "test/orchestration.test.js",
+      "test/codex-exec-driver.test.js",
+      "test/codex-exec-supervisor.test.js",
+      "test/r2-segmented.test.js",
+      "test/p3-segmented-v2.test.js",
+      "test/kernel-repair.test.js",
+      "test/p3-committed-replay.test.js",
+      "test/r11e-release-envelope.test.js"
+    ],
+    "fixtures": [
+      "test/fixtures/codex-exec/absent-final-output.json",
+      "test/fixtures/codex-exec/approval-required.json",
+      "test/fixtures/codex-exec/cancellation.json",
+      "test/fixtures/codex-exec/malformed-final-output.json",
+      "test/fixtures/codex-exec/max-supported.json",
+      "test/fixtures/codex-exec/max-unsupported.json",
+      "test/fixtures/codex-exec/normal-completion.json",
+      "test/fixtures/codex-exec/sandbox-denial.json",
+      "test/fixtures/codex-exec/turn-failure.json",
+      "test/fixtures/recovery/absent.json",
+      "test/fixtures/recovery/golden-manifest.json",
+      "test/fixtures/recovery/goldens/absent-token.json",
+      "test/fixtures/recovery/goldens/acked.json",
+      "test/fixtures/recovery/goldens/malformed.json",
+      "test/fixtures/recovery/goldens/unknown-with-launch.json",
+      "test/fixtures/recovery/goldens/unknown-without-evidence.json"
+    ],
+    "reusedLogs": [
+      "Lunacy/runs/implement-next-major-wins-v3/phases/p1/evidence/b0-v2/manual-inbox-tests.log",
+      "Lunacy/runs/implement-next-major-wins-v3/phases/p1/evidence/b0-v2/local-lifecycle-tests.log",
+      "Lunacy/runs/implement-next-major-wins-v3/phases/p1/evidence/b0-v2/legacy-v1-v2-tests.log",
+      "Lunacy/runs/implement-next-major-wins-v3/phases/p1/evidence/b0-v2/release-envelope-tests.log"
+    ],
+    "comparisonArtifacts": [
+      "Lunacy/runs/implement-next-major-wins-v3/phases/p1/evidence/b0-v2/exact-bytes.json",
+      "Lunacy/runs/implement-next-major-wins-v3/phases/p1/evidence/b0-v2/release-path-digest.json",
+      "Lunacy/runs/implement-next-major-wins-v3/phases/p1/evidence/b0-v2/accepted-release-envelope.json"
+    ]
+  },
+  "exactBytes": "exact-bytes.json",
+  "releasePathDigest": "release-path-digest.json",
+  "acceptedReleaseEnvelope": "accepted-release-envelope.json",
+  "commands": [
+    {
+      "command": "node --test test/decision-inbox.test.js",
+      "cwd": "work/lunacy-postrelease-sol-routing",
+      "evidence": "manual-inbox-tests.log",
+      "exit": 0,
+      "result": "PASS 6/6"
+    },
+    {
+      "command": "node --test test/controller.test.js test/orchestration.test.js test/codex-exec-driver.test.js test/codex-exec-supervisor.test.js",
+      "cwd": "work/lunacy-postrelease-sol-routing",
+      "evidence": "local-lifecycle-tests.log",
+      "exit": 0,
+      "result": "PASS 34/34"
+    },
+    {
+      "command": "node --test test/r2-segmented.test.js test/p3-segmented-v2.test.js test/kernel-repair.test.js test/p3-committed-replay.test.js",
+      "cwd": "work/lunacy-postrelease-sol-routing",
+      "evidence": "legacy-v1-v2-tests.log",
+      "exit": 0,
+      "result": "PASS 43/43"
+    },
+    {
+      "command": "node --test test/r11e-release-envelope.test.js",
+      "cwd": "work/lunacy-postrelease-sol-routing",
+      "evidence": "release-envelope-tests.log",
+      "exit": 0,
+      "result": "PASS 7/7"
+    },
+    {
+      "command": "node /tmp/check-b0-v2-evidence.mjs",
+      "cwd": "work/lunacy-postrelease-sol-routing",
+      "evidence": "self-check.log",
+      "exit": 0,
+      "result": "PASS"
+    },
+    {
+      "command": "git diff --no-index --check /dev/null <each owned B0-v2 artifact and S1R report>",
+      "cwd": "work/lunacy-postrelease-sol-routing",
+      "evidence": "diff-check.log",
+      "exit": 0,
+      "result": "PASS"
+    }
+  ],
+  "environment": {
+    "arch": "arm64",
+    "cwd": "/Users/mark/Documents/Codex/2026-08-26/continuously-pursue-major-local-lunacy-architecture/work/lunacy-postrelease-sol-routing",
+    "head": "9e77159577a5fc8d0fb5e3f182c8fdd8584df4b7",
+    "kernel": "25.6.0",
+    "node": "v26.7.0",
+    "npm": "11.19.0",
+    "platform": "darwin",
+    "python": "Python 3.14.5",
+    "shell": "/bin/zsh",
+    "timezone": "Europe/Moscow"
+  },
+  "faultSchedules": {
+    "legacy_v1_v2": [
+      "legacy migration to segmented/v2 and explicit rollback",
+      "segmented/v1 reused-source tamper rejection",
+      "segmented/v2 sealed-prefix tamper rejection",
+      "unknown/mixed segmented versions rejected before use",
+      "CURRENT continuity and orphan-generation checks",
+      "publication fault matrix: old-or-new only",
+      "processed replay exactness and conflicting event identity"
+    ],
+    "local_effects": [
+      "restart with UNKNOWN token: observe exactly once, no relaunch",
+      "terminal-before-receipt and receipt-before-terminal settlement",
+      "competing pumps: one launch/one waiter",
+      "abort with late receipt: cancellation, no relaunch",
+      "malformed/duplicate worker output and authority drift: BLOCKED"
+    ],
+    "manual_inbox": [
+      "single explicit START; one dispatch receipt; one WORKER_ENVELOPE DONE; one GATE PASS; exact duplicate parent event replay; stale plan/evidence binding; concurrent identical submit"
+    ],
+    "release_envelope": [
+      "fresh release-envelope creation and committed status",
+      "envelope/manifest tamper without mutation",
+      "phase CAS retarget/owner swap rejection",
+      "resume absent marker rejection",
+      "foreign inner marker owner rejection"
+    ]
+  },
+  "safety": "Only ordinary test/fixture/evidence path references are published. No per-file test or fixture hash catalog is included; one aggregate baseline fingerprint covers the referenced bytes and reused logs. No credentials, raw argv, process payloads, or arbitrary worker text are recorded."
+}

@@ -303,7 +303,7 @@ async function namespaceDigest(root: string, toleratedPaths: ReadonlySet<string>
 function journalBudget(state: MachineState, current: Record<string, unknown>): RecoveryCapsule['journal'] {
   const usedEvents = state.journal.length;
   const journalBytes = Buffer.byteLength(state.journal.map((entry) => canonicalString(entry)).join('\n') + (usedEvents ? '\n' : ''), 'utf8');
-  const segmented = current.format === 'segmented/v1';
+  const segmented = current.format === 'segmented/v1' || current.format === 'segmented/v2';
   const format = segmented ? 'segmented' : 'legacy';
   const eventCeiling = segmented ? null : JOURNAL_EVENT_CEILING;
   const byteCeiling = segmented ? null : JOURNAL_BYTE_CEILING;

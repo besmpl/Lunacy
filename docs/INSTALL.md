@@ -144,6 +144,29 @@ same live exact owner holds every anchor. Missing, stale, pre-existing, or
 owner-mismatched evidence fails closed. Acquisition order is discovery/target
 release claims, per-run bridge claims, per-run writer claims, and finally the
 target deploy lock; cleanup removes only exact inode-and-byte-matching claims.
+
+### Private resumable release envelope (opt-in)
+
+The existing deploy/check/restore commands remain unchanged unless the
+operator explicitly adds `--release-envelope`.  That flag creates the exact
+`.lunacy-release-operation.v2.json` marker beside the installed `runtime/`
+tree and records only operation/manifest/target/owner/snapshot digests and a
+small phase (`prepared`, `admitted`, `quiesced`, `delegated`, `committed`, or
+`attention`).  The marker is a projection and never replaces the release
+manifest, exclusion claims, target lock, quiescence proof, or inner deployment
+transaction.  A prior interrupted operation may be explicitly retried with
+`--resume-release`; owner liveness, manifest/target identity, snapshot, and the
+inner marker are revalidated before delegation.  A read-only status check is:
+
+```sh
+node tools/deploy-skill.mjs --target /absolute/skill-root \
+  --release-envelope-status [--release-manifest /absolute/manifest.json]
+```
+
+Status acquires no lock, performs no discovery or cleanup, and emits a bounded
+canonical capsule.  It never infers approval or relaunches an uncertain inner
+operation.  Removing the flag disables the route and preserves the legacy
+transaction bytes and CLI output.
 Malformed or live/replaced ownership is never cleaned, and the boundary never
 signals or kills a run merely to obtain green.
 

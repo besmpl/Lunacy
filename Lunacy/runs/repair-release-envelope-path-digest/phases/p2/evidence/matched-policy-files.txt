@@ -1,0 +1,6 @@
+SKILL.md
+README.md
+WORKSPACE.md
+orchestrator/PLANNING.md
+worker/ENGINEERING.md
+references/CODEX_LUNA_COMPAT.md

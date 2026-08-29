@@ -118,7 +118,7 @@ export { JOURNAL_EVENT_CEILING, JOURNAL_BYTE_CEILING } from './limits.js';
 function journalHasRecordBudget(state: MachineState, additionalRecords: number): boolean {
   return state.journal.length + additionalRecords <= JOURNAL_EVENT_CEILING;
 }
-function segmentedJournalEnabled(store: ArtifactStore): boolean { return store.journalFormat === 'segmented'; }
+function segmentedJournalEnabled(store: ArtifactStore): boolean { return store.journalFormat === 'segmented' || store.journalFormat === 'segmented/v2'; }
 function exactKeys(value: object, keys: readonly string[], label: string): void {
   const actual = Object.keys(value).sort(); const expected = [...keys].sort();
   if (actual.length !== expected.length || actual.some((key, index) => key !== expected[index])) throw new InvalidEvent(`${label} fields are invalid`);

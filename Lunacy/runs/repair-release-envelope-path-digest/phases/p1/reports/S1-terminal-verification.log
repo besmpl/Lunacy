@@ -1,0 +1,32 @@
+$ npm run typecheck
+
+> lunacy-runtime@0.3.0 typecheck
+> tsc --noEmit
+
+$ npm run build
+
+> lunacy-runtime@0.3.0 build
+> tsc -p tsconfig.build.json
+
+$ node --test test/r11e-release-envelope.test.js test/r2-deployment.test.js
+✔ v2 envelope is closed, exact-name, resumable, and status is mutation-free (74.020333ms)
+✔ tampered envelope and manifest bindings fail closed without mutation (25.953959ms)
+✔ phase CAS cannot retarget the operation or swap owners outside a stale prepared rebind (18.131166ms)
+✔ committed envelopes require an attested inner aggregate (4.646334ms)
+✔ resume never creates a fresh envelope when the prior marker is absent (72.395583ms)
+✔ resume rejects a well-formed inner marker owned by another release (233.600834ms)
+✔ fresh release-envelope CLI creates and commits an outer envelope (7951.947958ms)
+✔ R2 complete-tree publication removes owned stale files but preserves unrelated runtime files (8500.175125ms)
+✔ R2 crash windows recover a complete tree before the next publication (16665.990542ms)
+✔ R2 first-install crash after exchange removes only the uncommitted tree (3969.984042ms)
+✔ R2 rejects a malformed transaction identity before constructing a sibling path (2923.4585ms)
+✔ R4 managed wrapper carries and resolves the private recovery route (1673.071125ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 12
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 33789.490875
+$ git diff --check

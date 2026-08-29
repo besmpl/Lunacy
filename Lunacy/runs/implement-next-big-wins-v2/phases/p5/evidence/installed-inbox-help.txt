@@ -1,0 +1,1 @@
+Usage: lunacy-bridge inbox --entries ENTRIES.json [--limit 16]

@@ -1,0 +1,12 @@
+{
+  "aggregateIdentity": "f43e01678ee60a8ef5b503fbc101245e50a9d909a1b1086709c9a1447e61120e",
+  "capturedBeforeEvidence": true,
+  "head": "9e77159577a5fc8d0fb5e3f182c8fdd8584df4b7",
+  "method": "SHA-256(canonical JSON of HEAD, status digest, tracked diff digest, untracked path/size/content-digest manifest digest, and counts); B0 evidence paths excluded",
+  "schema": "lunacy-b0-baseline/v1",
+  "statusSha256": "63efb611d878879738b01bf0c552e965567d9aa457ddef8470edf376ab79c875",
+  "trackedDiffSha256": "abe9ebf004ba69076410baff6947339ed88a0c2ed1f9b87de0a9b8435c5c9958",
+  "trackedModifiedCount": 15,
+  "untrackedFileCount": 297,
+  "untrackedManifestSha256": "36b26fbd3baa71412ecb5b54de39eba7fdebe7b323f81bc93d617305094c5c29"
+}

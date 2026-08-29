@@ -1,0 +1,14 @@
+✔ v1 stays closed and v2 requires full exact identities with an empty root set (3422.264667ms)
+✔ exact predecessor deploy is repeatable from the same preserved candidate bytes across exact restore (14096.010459ms)
+✔ payload drift, arbitrary installed bytes, and live target processes are red without publication (8206.737958ms)
+✔ preexisting managed discovery root is rejected before snapshot or deployment (4241.518167ms)
+✔ exact predecessor route reuses crash recovery and converges from exact old or candidate bytes (20590.512583ms)
+✔ foreign well-formed stale transaction is untouched and blocks before recovery (6434.987334ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 57128.946375

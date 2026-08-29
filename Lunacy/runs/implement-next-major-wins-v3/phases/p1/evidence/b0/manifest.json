@@ -1,0 +1,238 @@
+{
+  "acceptedReleaseEnvelope": "accepted-release-envelope.json",
+  "authorityTests": [
+    {
+      "bytes": 10973,
+      "path": "test/decision-inbox.test.js",
+      "sha256": "5ef1f813f19ee8b96404d9b19bd2cf1cd4e3ff2ede30df7a297c44b89011517f"
+    },
+    {
+      "bytes": 8142,
+      "path": "test/controller.test.js",
+      "sha256": "49b673d825004d690a9f8aea4467070426adb9d38e2725f67c53d9ed3fe21c13"
+    },
+    {
+      "bytes": 10619,
+      "path": "test/orchestration.test.js",
+      "sha256": "14f566ec18729974309558eaac9ada5512d6ba03eae6bab080714b33e45a0fac"
+    },
+    {
+      "bytes": 7417,
+      "path": "test/codex-exec-driver.test.js",
+      "sha256": "d1375096421fd27850cc9e804d646af20391bb7de095b6070a59820f3cd622e4"
+    },
+    {
+      "bytes": 25778,
+      "path": "test/codex-exec-supervisor.test.js",
+      "sha256": "917644700f8ea2a4ab40c0ce2b3c6eb974d052a20c0451695b590fbdc0a03837"
+    },
+    {
+      "bytes": 17082,
+      "path": "test/r2-segmented.test.js",
+      "sha256": "06d146cdc54af204cf407e8fbddc187a12b8835f399a1713fc8317f96c7695bc"
+    },
+    {
+      "bytes": 12617,
+      "path": "test/p3-segmented-v2.test.js",
+      "sha256": "9596807d00feaa0ca5ff209289e978742ef4b292534b7b167958c34d06192508"
+    },
+    {
+      "bytes": 22249,
+      "path": "test/kernel-repair.test.js",
+      "sha256": "5ce3dce7957678fb6e90920d45083581ef6dd1aab002f345928bbd3517f12488"
+    },
+    {
+      "bytes": 10313,
+      "path": "test/p3-committed-replay.test.js",
+      "sha256": "58af64d85e527bd359f085df710955cc5e28270ea19a6dae555067a3ccb743c3"
+    },
+    {
+      "bytes": 10928,
+      "path": "test/r11e-release-envelope.test.js",
+      "sha256": "881cabd7572e5058df73605f04a3aadff25e3a4eddc26d7d93e4b8a9df304f67"
+    }
+  ],
+  "baselineIdentity": "baseline-identity.json",
+  "commands": [
+    {
+      "command": "node --test test/decision-inbox.test.js",
+      "cwd": "work/lunacy-postrelease-sol-routing",
+      "evidence": "manual-inbox-tests.log",
+      "exit": 0,
+      "logBytes": 708,
+      "logSha256": "c70e83f1c98f53151b7758eb4f0d68239dbf9a2da75917fccc589896b49c5255",
+      "result": "PASS 6/6"
+    },
+    {
+      "command": "node --test test/controller.test.js test/orchestration.test.js test/codex-exec-driver.test.js test/codex-exec-supervisor.test.js",
+      "cwd": "work/lunacy-postrelease-sol-routing",
+      "evidence": "local-lifecycle-tests.log",
+      "exit": 0,
+      "logBytes": 3335,
+      "logSha256": "e76dde9d32a2b0bf09c593c33cb3dfef4bef0e204cff8938166a713ad1567035",
+      "result": "PASS 34/34"
+    },
+    {
+      "command": "node --test test/r2-segmented.test.js test/p3-segmented-v2.test.js test/kernel-repair.test.js test/p3-committed-replay.test.js",
+      "cwd": "work/lunacy-postrelease-sol-routing",
+      "evidence": "legacy-v1-v2-tests.log",
+      "exit": 0,
+      "logBytes": 4348,
+      "logSha256": "5803c289d1258b63d143bf33a5111a2935aad7f0061d532c056c620a1596882c",
+      "result": "PASS 43/43"
+    },
+    {
+      "command": "node --test test/r11e-release-envelope.test.js",
+      "cwd": "work/lunacy-postrelease-sol-routing",
+      "evidence": "release-envelope-tests.log",
+      "exit": 0,
+      "logBytes": 796,
+      "logSha256": "1a596728cc39fe7f753b6834cae085eefed542924ae615e236700dde6df17208",
+      "result": "PASS 7/7"
+    },
+    {
+      "command": "node /tmp/check-b0-evidence.mjs",
+      "cwd": "work/lunacy-postrelease-sol-routing",
+      "evidence": "self-check.log",
+      "exit": 0,
+      "logBytes": 235,
+      "logSha256": "103dface12217bdeadfc074489509d5b416e6d58b9896b580680283ce02bd6cf",
+      "result": "PASS"
+    },
+    {
+      "command": "git diff --no-index --check /dev/null <each owned B0 artifact>",
+      "cwd": "work/lunacy-postrelease-sol-routing",
+      "evidence": "diff-check.log",
+      "exit": 0,
+      "logBytes": 90,
+      "logSha256": "aa121bb87223b25262c6ff7b35082ef4004e04e2983a7bd55de949a15f54c0ce",
+      "result": "PASS"
+    }
+  ],
+  "environment": {
+    "arch": "arm64",
+    "cwd": "/Users/mark/Documents/Codex/2026-08-26/continuously-pursue-major-local-lunacy-architecture/work/lunacy-postrelease-sol-routing",
+    "head": "9e77159577a5fc8d0fb5e3f182c8fdd8584df4b7",
+    "kernel": "25.6.0",
+    "node": "v26.7.0",
+    "npm": "11.19.0",
+    "platform": "darwin",
+    "python": "Python 3.14.5",
+    "shell": "/bin/zsh",
+    "timezone": "Europe/Moscow"
+  },
+  "exactBytes": "exact-bytes.json",
+  "faultSchedules": {
+    "legacy_v1_v2": [
+      "legacy migration to segmented/v2 and explicit rollback",
+      "segmented/v1 reused-source tamper rejection",
+      "segmented/v2 sealed-prefix tamper rejection",
+      "unknown/mixed segmented versions rejected before use",
+      "CURRENT continuity and orphan-generation checks",
+      "publication fault matrix: old-or-new only",
+      "processed replay exactness and conflicting event identity"
+    ],
+    "local_effects": [
+      "restart with UNKNOWN token: observe exactly once, no relaunch",
+      "terminal-before-receipt and receipt-before-terminal settlement",
+      "competing pumps: one launch/one waiter",
+      "abort with late receipt: cancellation, no relaunch",
+      "malformed/duplicate worker output and authority drift: BLOCKED"
+    ],
+    "manual_inbox": [
+      "single explicit START; one dispatch receipt; one WORKER_ENVELOPE DONE; one GATE PASS; exact duplicate parent event replay; stale plan/evidence binding; concurrent identical submit"
+    ],
+    "release_envelope": [
+      "fresh release-envelope creation and committed status",
+      "envelope/manifest tamper without mutation",
+      "phase CAS retarget/owner swap rejection",
+      "resume absent marker rejection",
+      "foreign inner marker owner rejection"
+    ]
+  },
+  "fixtures": [
+    {
+      "bytes": 183,
+      "path": "test/fixtures/codex-exec/absent-final-output.json",
+      "sha256": "cfa04142b8022244a118ed515371f953de69e46b0c3d5cb7f2591d43467cb0a3"
+    },
+    {
+      "bytes": 295,
+      "path": "test/fixtures/codex-exec/approval-required.json",
+      "sha256": "3c469b2f3fb3ab9b568db5bc4fcecbff64e82da68dcd464b86b2a08c7e0e7d56"
+    },
+    {
+      "bytes": 175,
+      "path": "test/fixtures/codex-exec/cancellation.json",
+      "sha256": "f1fd767d46d9ccab6262c7b086d2a7bfbc1425c1473224982307be58ed47dfd7"
+    },
+    {
+      "bytes": 230,
+      "path": "test/fixtures/codex-exec/malformed-final-output.json",
+      "sha256": "1d0c6af3b7c862c05ac04f08c6566a30f5e6551ef006577244064fcae4136657"
+    },
+    {
+      "bytes": 189,
+      "path": "test/fixtures/codex-exec/max-supported.json",
+      "sha256": "de3ba930da0e4c06af535c68f61c1aca6207528d55f40da30bb1c39b450fface"
+    },
+    {
+      "bytes": 202,
+      "path": "test/fixtures/codex-exec/max-unsupported.json",
+      "sha256": "60c170646acc81570446d64c27939f7b4827725c4e05f7676e7c3001227ff4cc"
+    },
+    {
+      "bytes": 335,
+      "path": "test/fixtures/codex-exec/normal-completion.json",
+      "sha256": "99f82ae1a72653b720581e185cb543b9027da5cea8c4028256b11a0b0c1b7a39"
+    },
+    {
+      "bytes": 275,
+      "path": "test/fixtures/codex-exec/sandbox-denial.json",
+      "sha256": "259e30afc03d0881e989ffddd974cf6396f9d8bc9408d15cc40112daa134a1ea"
+    },
+    {
+      "bytes": 209,
+      "path": "test/fixtures/codex-exec/turn-failure.json",
+      "sha256": "dd32603417be45fd38f0ef1fd4d068c81dfe4b4af1f797b2bba9c280198b831b"
+    },
+    {
+      "bytes": 1302,
+      "path": "test/fixtures/recovery/absent.json",
+      "sha256": "1ad2b78170a70044ca125748b512b0da2e04bab047c42a7a32a0806adc1af8a1"
+    },
+    {
+      "bytes": 570,
+      "path": "test/fixtures/recovery/golden-manifest.json",
+      "sha256": "12bd873497d02b45ab2bfb0bc19eac6e291a0bbb81a885f934d4fa8d8e188f6f"
+    },
+    {
+      "bytes": 1302,
+      "path": "test/fixtures/recovery/goldens/absent-token.json",
+      "sha256": "1ad2b78170a70044ca125748b512b0da2e04bab047c42a7a32a0806adc1af8a1"
+    },
+    {
+      "bytes": 1603,
+      "path": "test/fixtures/recovery/goldens/acked.json",
+      "sha256": "58ea73deea13e4a8a9081e3a756d848319816e810ab458a91182c1b685d00cf8"
+    },
+    {
+      "bytes": 1615,
+      "path": "test/fixtures/recovery/goldens/malformed.json",
+      "sha256": "d3d8886ef8817e5dfd9b5ce905fb327e3398de6c685544495f260033c376b60a"
+    },
+    {
+      "bytes": 1610,
+      "path": "test/fixtures/recovery/goldens/unknown-with-launch.json",
+      "sha256": "7aa9a8301b9ad858bc4441267f44339cadb0859f3cd005f4f1ddf9a1b2980ef7"
+    },
+    {
+      "bytes": 1494,
+      "path": "test/fixtures/recovery/goldens/unknown-without-evidence.json",
+      "sha256": "78ce433ff30f294a48bf6e60f406a2c348eea9a558f034403f9e33a708442528"
+    }
+  ],
+  "releasePathDigest": "release-path-digest.json",
+  "safety": "Only bounded canonical records, test names, hashes, and empty/synthetic fixture paths are recorded; no credentials, arbitrary worker text, raw argv, or process payloads.",
+  "schema": "lunacy-b0-manifest/v1"
+}

@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lunacy.dev/schemas/release-operation.schema.json",
+  "title": "Lunacy resumable release-operation envelope",
+  "description": "Private projection/fence for an existing release transaction; it never authorizes managed-tree publication.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "operationId", "operation", "manifestDigest", "manifestIdentityDigest", "installedTarget", "discoveryParentsDigest", "runRootsDigest", "processSnapshotPathDigest", "owner", "snapshot", "targetLock", "phase", "status", "recovery", "inner"],
+  "properties": {
+    "schema": { "const": "lunacy-release-operation/v2" },
+    "operationId": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" },
+    "operation": { "enum": ["deploy", "check", "restore", "deploy-exact-0.2.12"] },
+    "manifestDigest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "manifestIdentityDigest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "installedTarget": { "$ref": "#/$defs/fsIdentity" },
+    "discoveryParentsDigest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "runRootsDigest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "processSnapshotPathDigest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "owner": { "type": "object", "additionalProperties": false, "required": ["id", "pid", "processStartedAt", "acquiredAt", "manifestDigest", "epoch"], "properties": { "id": { "type": "string" }, "pid": { "type": "integer", "minimum": 1 }, "processStartedAt": { "type": "string" }, "acquiredAt": { "type": "string" }, "manifestDigest": { "type": "string", "pattern": "^[0-9a-f]{64}$" }, "epoch": { "type": "integer", "minimum": 0 } } },
+    "snapshot": { "anyOf": [{ "type": "null" }, { "type": "object", "additionalProperties": false, "required": ["pathDigest", "digest", "capturedAt"], "properties": { "pathDigest": { "type": "string", "pattern": "^[0-9a-f]{64}$" }, "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" }, "capturedAt": { "type": "string" } } }] },
+    "targetLock": { "anyOf": [{ "type": "null" }, { "type": "object", "additionalProperties": false, "required": ["pathDigest", "dev", "ino", "ownerId"], "properties": { "pathDigest": { "type": "string", "pattern": "^[0-9a-f]{64}$" }, "dev": { "type": "string" }, "ino": { "type": "string" }, "ownerId": { "type": "string" } } }] },
+    "phase": { "enum": ["prepared", "admitted", "quiesced", "delegated", "committed", "failed", "attention"] },
+    "status": { "enum": ["READY", "WAITING", "COMMITTED", "FAILED", "ATTENTION"] },
+    "recovery": { "type": "object", "additionalProperties": false, "required": ["code", "attempts"], "properties": { "code": { "type": ["string", "null"] }, "attempts": { "type": "integer", "minimum": 0 } } },
+    "inner": { "type": "object", "additionalProperties": false, "required": ["markerDigest", "aggregate", "previousAggregate"], "properties": { "markerDigest": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" }, "aggregate": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" }, "previousAggregate": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" } } }
+  },
+  "$defs": { "fsIdentity": { "type": "object", "additionalProperties": false, "required": ["pathDigest", "dev", "ino"], "properties": { "pathDigest": { "type": "string", "pattern": "^[0-9a-f]{64}$" }, "dev": { "type": "string" }, "ino": { "type": "string" } } } }
+}

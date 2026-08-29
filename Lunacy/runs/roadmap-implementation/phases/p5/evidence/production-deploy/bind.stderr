@@ -1,0 +1,4 @@
+TypeError: non-canonical JSON
+    at parseCanonical (file:///Users/mark/Documents/Codex/2026-08-26/continuously-pursue-major-local-lunacy-architecture/work/lunacy-postrelease-sol-routing/dist/canonical.js:62:15)
+    at boundedCanonical (file:///Users/mark/Documents/Codex/2026-08-26/continuously-pursue-major-local-lunacy-architecture/work/lunacy-postrelease-sol-routing/tools/bind-release-process-snapshot.mjs:39:19)
+    at async main (file:///Users/mark/Documents/Codex/2026-08-26/continuously-pursue-major-local-lunacy-architecture/work/lunacy-postrelease-sol-routing/tools/bind-release-process-snapshot.mjs:75:18)

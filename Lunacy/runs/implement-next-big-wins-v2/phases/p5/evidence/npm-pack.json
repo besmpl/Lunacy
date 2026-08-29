@@ -1,0 +1,676 @@
+[
+  {
+    "id": "lunacy-runtime@0.3.0",
+    "name": "lunacy-runtime",
+    "version": "0.3.0",
+    "size": 353301,
+    "unpackedSize": 1758530,
+    "shasum": "8c4729534c3e3b2a6136047ec43dce4807d3578d",
+    "integrity": "sha512-BGZaaJ7Y9xIBFSI76CeX2c4RN+SN0yTJzodprlDkq4pSmyPoWzIYgApBUZxXHpoandNWBiVZhU2p0EC2/spZZg==",
+    "filename": "lunacy-runtime-0.3.0.tgz",
+    "files": [
+      {
+        "path": "LICENSE",
+        "size": 10847,
+        "mode": 420
+      },
+      {
+        "path": "README.md",
+        "size": 14358,
+        "mode": 420
+      },
+      {
+        "path": "bench/manifest.json",
+        "size": 583,
+        "mode": 420
+      },
+      {
+        "path": "bench/r2-corpus.json",
+        "size": 390,
+        "mode": 420
+      },
+      {
+        "path": "bench/README.md",
+        "size": 1835,
+        "mode": 420
+      },
+      {
+        "path": "bench/run.mjs",
+        "size": 3805,
+        "mode": 420
+      },
+      {
+        "path": "bench/segmented-v2-paired.mjs",
+        "size": 3671,
+        "mode": 420
+      },
+      {
+        "path": "dist/admission.d.ts",
+        "size": 544,
+        "mode": 420
+      },
+      {
+        "path": "dist/admission.js",
+        "size": 523,
+        "mode": 420
+      },
+      {
+        "path": "dist/admission.js.map",
+        "size": 869,
+        "mode": 420
+      },
+      {
+        "path": "dist/authority.d.ts",
+        "size": 476,
+        "mode": 420
+      },
+      {
+        "path": "dist/authority.js",
+        "size": 327,
+        "mode": 420
+      },
+      {
+        "path": "dist/authority.js.map",
+        "size": 443,
+        "mode": 420
+      },
+      {
+        "path": "dist/canonical.d.ts",
+        "size": 1065,
+        "mode": 420
+      },
+      {
+        "path": "dist/canonical.js",
+        "size": 3930,
+        "mode": 420
+      },
+      {
+        "path": "dist/canonical.js.map",
+        "size": 3031,
+        "mode": 420
+      },
+      {
+        "path": "dist/cli.d.ts",
+        "size": 119,
+        "mode": 420
+      },
+      {
+        "path": "dist/cli.js",
+        "size": 7245,
+        "mode": 420
+      },
+      {
+        "path": "dist/cli.js.map",
+        "size": 6333,
+        "mode": 420
+      },
+      {
+        "path": "dist/codex-effect-records.d.ts",
+        "size": 5851,
+        "mode": 420
+      },
+      {
+        "path": "dist/codex-effect-records.js",
+        "size": 27334,
+        "mode": 420
+      },
+      {
+        "path": "dist/codex-effect-records.js.map",
+        "size": 24719,
+        "mode": 420
+      },
+      {
+        "path": "dist/codex-exec-driver.d.ts",
+        "size": 1839,
+        "mode": 420
+      },
+      {
+        "path": "dist/codex-exec-driver.js",
+        "size": 8359,
+        "mode": 420
+      },
+      {
+        "path": "dist/codex-exec-driver.js.map",
+        "size": 6302,
+        "mode": 420
+      },
+      {
+        "path": "dist/codex-exec-supervisor.d.ts",
+        "size": 5115,
+        "mode": 420
+      },
+      {
+        "path": "dist/codex-exec-supervisor.js",
+        "size": 84958,
+        "mode": 420
+      },
+      {
+        "path": "dist/codex-exec-supervisor.js.map",
+        "size": 69491,
+        "mode": 420
+      },
+      {
+        "path": "dist/codex-host-policy.d.ts",
+        "size": 8846,
+        "mode": 420
+      },
+      {
+        "path": "dist/codex-host-policy.js",
+        "size": 29491,
+        "mode": 420
+      },
+      {
+        "path": "dist/codex-host-policy.js.map",
+        "size": 25410,
+        "mode": 420
+      },
+      {
+        "path": "dist/compiler.d.ts",
+        "size": 2888,
+        "mode": 420
+      },
+      {
+        "path": "dist/compiler.js",
+        "size": 8587,
+        "mode": 420
+      },
+      {
+        "path": "dist/compiler.js.map",
+        "size": 7967,
+        "mode": 420
+      },
+      {
+        "path": "dist/composition.d.ts",
+        "size": 698,
+        "mode": 420
+      },
+      {
+        "path": "dist/composition.js",
+        "size": 3592,
+        "mode": 420
+      },
+      {
+        "path": "dist/composition.js.map",
+        "size": 2701,
+        "mode": 420
+      },
+      {
+        "path": "dist/decision-inbox.d.ts",
+        "size": 6162,
+        "mode": 420
+      },
+      {
+        "path": "dist/decision-inbox.js",
+        "size": 33344,
+        "mode": 420
+      },
+      {
+        "path": "dist/decision-inbox.js.map",
+        "size": 32470,
+        "mode": 420
+      },
+      {
+        "path": "dist/dependency.d.ts",
+        "size": 1064,
+        "mode": 420
+      },
+      {
+        "path": "dist/dependency.js",
+        "size": 3333,
+        "mode": 420
+      },
+      {
+        "path": "dist/dependency.js.map",
+        "size": 2848,
+        "mode": 420
+      },
+      {
+        "path": "dist/dispatch-coordinator.d.ts",
+        "size": 4304,
+        "mode": 420
+      },
+      {
+        "path": "dist/dispatch-coordinator.js",
+        "size": 19760,
+        "mode": 420
+      },
+      {
+        "path": "dist/dispatch-coordinator.js.map",
+        "size": 18750,
+        "mode": 420
+      },
+      {
+        "path": "dist/driver.d.ts",
+        "size": 1360,
+        "mode": 420
+      },
+      {
+        "path": "dist/driver.js",
+        "size": 509,
+        "mode": 420
+      },
+      {
+        "path": "dist/driver.js.map",
+        "size": 512,
+        "mode": 420
+      },
+      {
+        "path": "dist/filesystem.d.ts",
+        "size": 3229,
+        "mode": 420
+      },
+      {
+        "path": "dist/filesystem.js",
+        "size": 14590,
+        "mode": 420
+      },
+      {
+        "path": "dist/filesystem.js.map",
+        "size": 12419,
+        "mode": 420
+      },
+      {
+        "path": "dist/fleet-coordinator.d.ts",
+        "size": 4503,
+        "mode": 420
+      },
+      {
+        "path": "dist/fleet-coordinator.js",
+        "size": 32793,
+        "mode": 420
+      },
+      {
+        "path": "dist/fleet-coordinator.js.map",
+        "size": 33956,
+        "mode": 420
+      },
+      {
+        "path": "dist/graph.d.ts",
+        "size": 3165,
+        "mode": 420
+      },
+      {
+        "path": "dist/graph.js",
+        "size": 9580,
+        "mode": 420
+      },
+      {
+        "path": "dist/graph.js.map",
+        "size": 11379,
+        "mode": 420
+      },
+      {
+        "path": "dist/index.d.ts",
+        "size": 368,
+        "mode": 420
+      },
+      {
+        "path": "dist/index.js",
+        "size": 128,
+        "mode": 420
+      },
+      {
+        "path": "dist/index.js.map",
+        "size": 181,
+        "mode": 420
+      },
+      {
+        "path": "dist/kernel.d.ts",
+        "size": 142,
+        "mode": 420
+      },
+      {
+        "path": "dist/kernel.js",
+        "size": 79,
+        "mode": 420
+      },
+      {
+        "path": "dist/kernel.js.map",
+        "size": 143,
+        "mode": 420
+      },
+      {
+        "path": "dist/limits.d.ts",
+        "size": 760,
+        "mode": 420
+      },
+      {
+        "path": "dist/limits.js",
+        "size": 726,
+        "mode": 420
+      },
+      {
+        "path": "dist/limits.js.map",
+        "size": 344,
+        "mode": 420
+      },
+      {
+        "path": "dist/metrics.d.ts",
+        "size": 876,
+        "mode": 420
+      },
+      {
+        "path": "dist/metrics.js",
+        "size": 888,
+        "mode": 420
+      },
+      {
+        "path": "dist/metrics.js.map",
+        "size": 909,
+        "mode": 420
+      },
+      {
+        "path": "dist/model.d.ts",
+        "size": 4950,
+        "mode": 420
+      },
+      {
+        "path": "dist/model.js",
+        "size": 44,
+        "mode": 420
+      },
+      {
+        "path": "dist/model.js.map",
+        "size": 102,
+        "mode": 420
+      },
+      {
+        "path": "dist/orchestration.d.ts",
+        "size": 7562,
+        "mode": 420
+      },
+      {
+        "path": "dist/orchestration.js",
+        "size": 37613,
+        "mode": 420
+      },
+      {
+        "path": "dist/orchestration.js.map",
+        "size": 32327,
+        "mode": 420
+      },
+      {
+        "path": "dist/outbox.d.ts",
+        "size": 837,
+        "mode": 420
+      },
+      {
+        "path": "dist/outbox.js",
+        "size": 1480,
+        "mode": 420
+      },
+      {
+        "path": "dist/outbox.js.map",
+        "size": 1492,
+        "mode": 420
+      },
+      {
+        "path": "dist/public.d.ts",
+        "size": 4001,
+        "mode": 420
+      },
+      {
+        "path": "dist/public.js",
+        "size": 61537,
+        "mode": 420
+      },
+      {
+        "path": "dist/public.js.map",
+        "size": 50903,
+        "mode": 420
+      },
+      {
+        "path": "dist/recovery-forensics.d.ts",
+        "size": 3680,
+        "mode": 420
+      },
+      {
+        "path": "dist/recovery-forensics.js",
+        "size": 35468,
+        "mode": 420
+      },
+      {
+        "path": "dist/recovery-forensics.js.map",
+        "size": 32874,
+        "mode": 420
+      },
+      {
+        "path": "dist/recovery.d.ts",
+        "size": 149,
+        "mode": 420
+      },
+      {
+        "path": "dist/recovery.js",
+        "size": 147,
+        "mode": 420
+      },
+      {
+        "path": "dist/recovery.js.map",
+        "size": 142,
+        "mode": 420
+      },
+      {
+        "path": "dist/reducer.d.ts",
+        "size": 4338,
+        "mode": 420
+      },
+      {
+        "path": "dist/reducer.js",
+        "size": 22902,
+        "mode": 420
+      },
+      {
+        "path": "dist/reducer.js.map",
+        "size": 22214,
+        "mode": 420
+      },
+      {
+        "path": "dist/release-admission.d.ts",
+        "size": 5399,
+        "mode": 420
+      },
+      {
+        "path": "dist/release-admission.js",
+        "size": 29528,
+        "mode": 420
+      },
+      {
+        "path": "dist/release-admission.js.map",
+        "size": 27715,
+        "mode": 420
+      },
+      {
+        "path": "dist/release-operation.d.ts",
+        "size": 6843,
+        "mode": 420
+      },
+      {
+        "path": "dist/release-operation.js",
+        "size": 27240,
+        "mode": 420
+      },
+      {
+        "path": "dist/release-operation.js.map",
+        "size": 24700,
+        "mode": 420
+      },
+      {
+        "path": "dist/release-quiescence.d.ts",
+        "size": 1762,
+        "mode": 420
+      },
+      {
+        "path": "dist/release-quiescence.js",
+        "size": 31768,
+        "mode": 420
+      },
+      {
+        "path": "dist/release-quiescence.js.map",
+        "size": 32053,
+        "mode": 420
+      },
+      {
+        "path": "dist/renderer.d.ts",
+        "size": 303,
+        "mode": 420
+      },
+      {
+        "path": "dist/renderer.js",
+        "size": 870,
+        "mode": 420
+      },
+      {
+        "path": "dist/renderer.js.map",
+        "size": 971,
+        "mode": 420
+      },
+      {
+        "path": "dist/reuse.d.ts",
+        "size": 4077,
+        "mode": 420
+      },
+      {
+        "path": "dist/reuse.js",
+        "size": 14433,
+        "mode": 420
+      },
+      {
+        "path": "dist/reuse.js.map",
+        "size": 13477,
+        "mode": 420
+      },
+      {
+        "path": "dist/store.d.ts",
+        "size": 15579,
+        "mode": 420
+      },
+      {
+        "path": "dist/store.js",
+        "size": 207043,
+        "mode": 420
+      },
+      {
+        "path": "dist/store.js.map",
+        "size": 175751,
+        "mode": 420
+      },
+      {
+        "path": "dist/validator.d.ts",
+        "size": 483,
+        "mode": 420
+      },
+      {
+        "path": "dist/validator.js",
+        "size": 5384,
+        "mode": 420
+      },
+      {
+        "path": "dist/validator.js.map",
+        "size": 6285,
+        "mode": 420
+      },
+      {
+        "path": "docs/ACCELERATION.md",
+        "size": 3480,
+        "mode": 420
+      },
+      {
+        "path": "docs/API.md",
+        "size": 6704,
+        "mode": 420
+      },
+      {
+        "path": "docs/BEADS.md",
+        "size": 5937,
+        "mode": 420
+      },
+      {
+        "path": "docs/BENCHMARK.md",
+        "size": 1012,
+        "mode": 420
+      },
+      {
+        "path": "docs/BRIDGE.md",
+        "size": 12012,
+        "mode": 420
+      },
+      {
+        "path": "docs/CODEX_EXEC.md",
+        "size": 7659,
+        "mode": 420
+      },
+      {
+        "path": "docs/DECISION_INBOX.md",
+        "size": 1869,
+        "mode": 420
+      },
+      {
+        "path": "docs/DURABILITY.md",
+        "size": 10330,
+        "mode": 420
+      },
+      {
+        "path": "docs/FLEET.md",
+        "size": 1569,
+        "mode": 420
+      },
+      {
+        "path": "docs/INSTALL.md",
+        "size": 11273,
+        "mode": 420
+      },
+      {
+        "path": "docs/MIGRATION.md",
+        "size": 3185,
+        "mode": 420
+      },
+      {
+        "path": "docs/NEXT_BIG_WINS_ROADMAP.md",
+        "size": 48385,
+        "mode": 420
+      },
+      {
+        "path": "docs/RECOVERY.md",
+        "size": 2893,
+        "mode": 420
+      },
+      {
+        "path": "docs/ROADMAP.md",
+        "size": 38719,
+        "mode": 420
+      },
+      {
+        "path": "docs/WORKFRONT.md",
+        "size": 3584,
+        "mode": 420
+      },
+      {
+        "path": "examples/canonical-event.json",
+        "size": 118,
+        "mode": 420
+      },
+      {
+        "path": "examples/canonical-plan.json",
+        "size": 50,
+        "mode": 420
+      },
+      {
+        "path": "examples/README.md",
+        "size": 1145,
+        "mode": 420
+      },
+      {
+        "path": "examples/run.mjs",
+        "size": 460,
+        "mode": 420
+      },
+      {
+        "path": "package.json",
+        "size": 1604,
+        "mode": 420
+      }
+    ],
+    "entryCount": 132,
+    "bundled": []
+  }
+]

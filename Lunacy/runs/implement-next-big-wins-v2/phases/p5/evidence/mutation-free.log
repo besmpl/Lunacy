@@ -1,0 +1,12 @@
+✔ decision inbox listing is deterministic, redacted, and mutation-free (527.092458ms)
+✔ v2 envelope is closed, exact-name, resumable, and status is mutation-free (67.236792ms)
+✔ R4 absent-token capsule is canonical, redacted, bounded, and deterministic (518.126417ms)
+✔ R4 malformed effect evidence fails closed without cleanup (286.988875ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 914.001583

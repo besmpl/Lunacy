@@ -1,0 +1,11 @@
+schema lunacy-segmented-v2-paired-v1 repetitions 30 observations 60 values 60
+short pairs 30 arithmetic mismatches 0
+  bytesDelta min 94516 max 94902 mean 94773.33333333333 positive 30 negative 0
+  segmentFsyncDelta min 1 max 1 mean 1 positive 30 negative 0
+  wallDeltaMilliseconds min -110.1253760000036 max 572.8655840000029 mean 17.357101466666084 positive 17 negative 13
+long pairs 30 arithmetic mismatches 0
+  bytesDelta min 2031456 max 2039650 mean 2036918.6666666667 positive 30 negative 0
+  segmentFsyncDelta min 32 max 32 mean 32 positive 30 negative 0
+  wallDeltaMilliseconds min -788.1964169999992 max 692.335082999999 mean 93.89545699999955 positive 29 negative 1
+claimBoundary Measurements are local observations only; no provider/token/native/speed claim and no default writer enablement.
+meaning: bytes is final recursive .kernel stat-size sum after two commits (not bytes written/read; hard-links counted per directory entry); fsync deltas are injected point counts; wall samples are mixed/environmental.

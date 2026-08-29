@@ -1,0 +1,645 @@
+
+> lunacy-runtime@0.3.0 check
+> npm run typecheck && npm test && npm run build && npm pack --dry-run
+
+
+> lunacy-runtime@0.3.0 typecheck
+> tsc --noEmit
+
+
+> lunacy-runtime@0.3.0 test
+> npm run build && node --test
+
+
+> lunacy-runtime@0.3.0 build
+> tsc -p tsconfig.build.json
+
+✔ Beads source captures one bounded canonical plan and omits closed prerequisites (406.539583ms)
+✔ Beads parser rejects duplicate/unknown fields and unsupported statuses (1172.045292ms)
+✔ shadow mode never mutates a runtime root; active mode requires exact acknowledgement (1566.340458ms)
+✔ active fresh START rejects missing or wrong acknowledgement before any durable mutation (935.370916ms)
+✔ active Beads adoption requires acknowledgement and leaves CURRENT/projection unchanged on missing or wrong ack (3208.9425ms)
+✔ Beads mode snapshot closes the shadow and active acknowledgement race (846.260583ms)
+✔ ordinary active recovery uses acknowledged input without bd and explicit observation recaptures (1709.912083ms)
+✔ pinned build and locale-independent identity are enforced (696.949167ms)
+✔ Beads snapshot and Plan identity remain stable across process locales (893.54375ms)
+✔ verified private bd copy survives swap-and-restore of the original executable (426.310792ms)
+✔ workspace and Beads directory inode replacement during capture fails identity fencing (392.380833ms)
+✔ HOME/XDG overlap with the Beads workspace is rejected before capture (26.10375ms)
+✔ custom HOME/XDG overlap with a protected runtime root is rejected (19.746083ms)
+✔ Beads executable and workspace parent symlinks fail closed (49.324125ms)
+✔ strict declaration canonicalization rejects prose and unsafe values (1.786084ms)
+✔ runtime bridge performs one transition and preserves declaration content (809.455208ms)
+✔ claimed dispatch leaves phase STEPS bytes stable until async settlement (959.766167ms)
+✔ duplicate transition skips both exact projection publications after confirmation (745.099709ms)
+✔ projection identity replacement during confirmation falls back to ordinary publication (790.291792ms)
+✔ projection pathname replacement during confirmation read falls back to ordinary publication (765.884958ms)
+✔ projection no-op is independent per file and only confirms exact-byte hits (1298.574708ms)
+✔ projection confirmation miss from same-inode byte change or read failure publishes normally (1587.910125ms)
+✔ projection publication barrier cleans temporary bytes and retries with existing partial semantics (1008.809291ms)
+✔ projection trust rejects a canonical STATE.md symlink without mutating its target (674.699875ms)
+✔ projection partial publication keeps completed STATE visible when STEPS fails (834.087291ms)
+✔ markdown mode is inert and cannot mix with an existing runtime root (541.772125ms)
+✔ missing/corrupt/version/path manifests fail closed (747.817083ms)
+✔ projection symlink and active disable/delete are rejected (858.00925ms)
+✔ restart reloads the same runtime authority and stale revision is fenced (1196.6835ms)
+✔ driver echoes exact token/digest and observe fails closed for malformed evidence (1138.395166ms)
+✔ driver rejects dispatch for wrong token or command digest before spawning (60.441042ms)
+✔ restart terminal reconciliation rejects authority and executable drift (1161.175084ms)
+✔ restart terminal reconciliation binds exact result and report bytes (1241.876334ms)
+✔ Codex JSONL fixture: normal-completion (11.745166ms)
+✔ Codex JSONL fixture: turn-failure (2.81575ms)
+✔ Codex JSONL fixture: sandbox-denial (1.351917ms)
+✔ Codex JSONL fixture: approval-required (2.313833ms)
+✔ Codex JSONL fixture: cancellation (1.72775ms)
+✔ Codex JSONL fixture: malformed-final-output (1.054625ms)
+✔ Codex JSONL fixture: absent-final-output (1.047125ms)
+✔ worker result schema is closed and exact (0.185167ms)
+✔ invocation pins Sol, effort, schema, output, sandbox, and no fallback (0.887083ms)
+✔ help probe recognizes the installed required flags and explicit safe sandboxes (0.66825ms)
+✔ direct docs route Luna or Sol/high while managed execution remains pinned to Sol (6.830625ms)
+✔ supervisor publishes launch evidence before returning and terminal binds report/result (1232.064584ms)
+✔ one supervisor cannot launch a successor token (1116.102208ms)
+✔ malformed structured final output is blocked and distinct from absence (1174.027458ms)
+✔ duplicate structured final output keys are blocked rather than last-write-wins (1201.971292ms)
+✔ authority bytes changed after initial attestation block spawn (71.43225ms)
+✔ the command-selected phase STEPS file is mandatory for launch authority (62.019458ms)
+✔ immutable launch image rejects executable replacement after final attestation while authority is blocked (1111.004958ms)
+✔ immutable launch directories reject workspace and run-root replacement after final inspection (1188.22025ms)
+✔ authority snapshot rejects same-byte inode replacement and transient mutate/restore after STEPS read (851.129ms)
+✔ all parent authority and identity mutations after reservation fence spawn (3950.517666ms)
+✔ raw-byte reads reject invalid UTF-8 and distinguish byte aliases (61.81275ms)
+✔ invalid UTF-8 report bytes cannot produce a passing terminal (1253.2855ms)
+✔ launch intent is durable before spawn and blocks a retry after launch publication fails (3278.403042ms)
+✔ executable is re-attested immediately before reserving and spawning (162.944916ms)
+✔ executable is re-attested after launch reservation before spawn (156.813625ms)
+✔ cancellation during final executable attestation fences spawn (122.477041ms)
+✔ closed policy defaults to exact Sol high and rejects stale routing identities (7.648708ms)
+✔ max is exact override only and unsupported max never downgrades (3.718167ms)
+✔ handoff and argv are deterministic path-only closed values (3.473625ms)
+✔ policy rejects unsafe paths, environment names, and max reason references (3.839709ms)
+✔ R1 init is idempotent and duplicate START replays exact bytes (822.991708ms)
+✔ R1 run drives dependent steps and returns bounded terminal result (3591.744875ms)
+✔ R1 resume of UNKNOWN observes once and never relaunches (2997.273541ms)
+✔ R1 invalid driver fails before touching root and max transition is bounded (583.316959ms)
+✔ R1 duplicate RESUME invocations share one launch and exact final state (2771.414708ms)
+✔ R1 cancellation returns attention without relaunching (45.496875ms)
+✔ R1 projection failure keeps committed START replayable without a second transition (1046.596917ms)
+✔ decision inbox listing is deterministic, redacted, and mutation-free (721.658833ms)
+✔ valid decision submission commits once and exact retry replays (2264.445167ms)
+✔ stale bindings do not consume a token and identical concurrent submits journal once (2454.875792ms)
+✔ phase binding is exact and a tampered inbox phase cannot consume a token (2395.391292ms)
+✔ submit snapshots caller plan before the verified read can yield (2277.547416ms)
+✔ exact phase promotion requires predecessor PASS and is retry-safe (3228.82675ms)
+✔ managed launcher rejects a tampered tree even when its mutable manifest is recomputed (5485.604625ms)
+✔ managed launcher rejects tampering with its own executable provenance (5623.273625ms)
+✔ managed launcher uses its attested absolute Node image instead of ambient PATH (5816.632458ms)
+✔ managed launcher rejects a symlinked runtime module outside the deployed physical tree (5404.682125ms)
+✔ managed release carries the private Codex schemas and capability tooling (6179.953209ms)
+✔ fleet manifest is explicit, canonical, and digest-bound (1.292959ms)
+✔ fleet delegates one lifecycle turn and persists round-robin observation (789.997958ms)
+✔ missing explicit root returns stale-root attention without creating a run (58.475875ms)
+✔ expired lease is fail-closed before lifecycle delegation (254.34425ms)
+✔ competing coordinators converge on one kernel launch (2338.426792ms)
+✔ fleet state parsing rejects oversized or symlinked metadata (44.761541ms)
+✔ manifest rejects a driver and policy on one entry (0.402916ms)
+✔ attention details redact arbitrary lifecycle error text (1774.904375ms)
+✔ filesystem CURRENT reload preserves exact duplicate yield and current generation (316.520084ms)
+✔ conflicting identity and cyclic/invalid plans fail closed (1.2015ms)
+✔ CURRENT corruption is rejected before effects (298.194083ms)
+✔ private composition driver receipt-to-completion reaches gate and finality (10.498875ms)
+✔ UNKNOWN dispatch is never retried blindly and can recover by observation (3.9075ms)
+✔ truthful prose receipt exposes launch token and accepts one manual receipt (1.741791ms)
+✔ delimiter-safe identity rejects conflicting reuse without splitting fields (1.011625ms)
+✔ deterministic bounded claims admit a stable batch (0.572083ms)
+✔ claims serialize conflicting resources while preserving deterministic batch order (1.080041ms)
+✔ authority drift yields a decision without overwriting the committed plan digest (1.0325ms)
+✔ CURRENT metadata and journal bytes are verified before state trust (597.07875ms)
+✔ crash debris is quarantined instead of becoming a trusted generation (471.08575ms)
+✔ concurrent filesystem writers are fenced by generation CAS (394.760208ms)
+✔ exact duplicate START CAS losers replay the one durable row without a second generation (408.820667ms)
+✔ exact duplicate dispatching RESUME replays WAITING and only the claim winner launches (975.106958ms)
+✔ same eventId with a conflicting identity remains Conflict and never replays winner bytes (661.8065ms)
+✔ durable publication followed by release failure replays without retrying the commit (335.85225ms)
+✔ replay misses preserve the original mapped commit error for no-row and recovery failures (545.1095ms)
+✔ duplicate START returns exact bytes and receipt path reaches finality (5.630375ms)
+✔ payload digest and stale revision are rejected (0.990875ms)
+✔ massive-win launch fence closes the exact P1/P2/P3 race with graph OFF and ON (3637.6055ms)
+✔ massive-win Memory fence orders writer-first, launcher-first, and same-store Promise reentrancy (521.366791ms)
+✔ massive-win File fence orders a byte-identical writer before launch and a reentrant writer after launch (1668.306041ms)
+✔ massive-win File launch keeps the verified-read fence through dispatch entry (844.740292ms)
+✔ massive-win shared Memory authority rejects an old lease after UNKNOWN to PENDING to a new claim (299.91725ms)
+✔ massive-win true child-process File race makes only the successor call (1919.16625ms)
+✔ massive-win sync throw, malformed result, malicious thenable, sync receipt, and real Promise are classified exactly (5867.750542ms)
+✔ massive-win synchronous onYield throw cannot gate immediate UNKNOWN replay (1071.51875ms)
+✔ massive-win synchronous onYield throw cannot gate immediate ACK replay (1209.011208ms)
+✔ massive-win observe intrinsically watches a real Promise with poisoned own then (1759.98175ms)
+✔ massive-win malicious observe thenable, Proxy, and accessor fail closed and release the exact task (4791.725083ms)
+✔ massive-win abort during synchronous dispatch and deadline while waiting for File fence become one UNKNOWN (2924.107917ms)
+✔ massive-win synchronous receipt survives cancellation during successful unlock (1278.917166ms)
+✔ massive-win Promise returned during synchronous cancellation keeps its late receipt channel (1154.905667ms)
+✔ massive-win old rejection cannot mark or erase a successor lease task (1801.941875ms)
+✔ massive-win delayed old launch cannot displace a successor lease task (1719.557959ms)
+✔ massive-win synchronous observe receipt finalizes the exact RESUME replay row (1614.399167ms)
+✔ massive-win delayed old observer cannot suppress a successor lease (2276.429917ms)
+✔ massive-win stale synchronous observer receipt cannot acknowledge a successor lease (2375.3315ms)
+✔ massive-win post-entry cancellation permits one late matching receipt without relaunch (1575.942583ms)
+✔ massive-win stale cancelled launch preserves WAITING after a matching receipt wins (911.846584ms)
+✔ massive-win an old lease timeout cannot mark a successor lease UNKNOWN (1927.905ms)
+✔ massive-win forced immediate-replay CAS loss returns the exact durable winner row (1210.995041ms)
+✔ massive-win construction snapshot ignores later dispatch mutation (982.558667ms)
+✔ massive-win trust drift for root, root symlink, and writer-lock symlink fails before call (1405.589083ms)
+✔ massive-win held writer-lock identity drift after verified read fails before call (491.683917ms)
+✔ massive-win release failure after entry is uncertain and never retried (1040.071166ms)
+✔ massive-win direct and bridge no-driver behavior stays HumanReceiptRequired; lifecycle deletes only after quiescence (2793.878917ms)
+✔ drive lets the kernel select each successor and stops at phase-ready (3508.795208ms)
+✔ non-pass terminal status is enveloped once and prevents successor launch (1981.914416ms)
+✔ restart reconciles a claimed token through observe without relaunching (2958.016167ms)
+✔ restart performs one asynchronous exact-token observation (2960.929125ms)
+✔ receipt settlement tolerates early and late callbacks (3910.861125ms)
+✔ competing pumps settle one launch and do not strand a waiter (2919.851583ms)
+✔ abort closes the notification channel while a late receipt is still pending (1028.33525ms)
+✔ static graph has verified reverse indexes and deterministic maximal candidates (2.591917ms)
+✔ context stable prefix is proof-bound and dynamic tail is never reused (1.077333ms)
+✔ SECRET and corrupt fixed-cell entries fail closed without a probe (0.157833ms)
+✔ fixed-cell reuse is run-bound and deletion is a cold-equivalent miss (0.285041ms)
+✔ detaches admission claims for Memory and File START, including async mutation before resolution (1023.143959ms)
+✔ successor admission and graph OFF/SHADOW/ON remain equivalent under claim laundering (3095.123958ms)
+✔ false, true, and thrown admission preserve existing semantics and never launch blocked work (1.255875ms)
+✔ receipt, worker, parent, and exact replay paths use detached claims without extra replay admission (1103.415083ms)
+✔ construction-owned capacity rejects sync/async alias mutation for Memory and File stores (1018.680417ms)
+✔ validation snapshots getter-backed capacity once for public, composition, and bridge construction (1.666708ms)
+✔ composition snapshots own non-enumerable and inherited capacity getters once (0.9445ms)
+✔ capacity-one admission is equivalent for package-root graph OFF, SHADOW, and ON (773.466625ms)
+✔ FINDINGS refresh uses the construction snapshot after callback raises the aliased option (1547.445667ms)
+✔ malformed live plan recovery retains explicit capacity zero (428.076667ms)
+✔ malformed live plan FINDINGS recovery admits no successors (1673.002167ms)
+✔ duplicate START replays exactly, while a new capacity-two kernel admits its second step (705.781875ms)
+✔ composition self-aliased dispatcher does not reread enumerable capacity (0.782584ms)
+✔ composition outer projection avoids the supported Node 22 capacity reread (272.172ms)
+✔ composition outer projection preserves remaining key order and descriptor transitions (0.301625ms)
+✔ composition outer projection reads excluded controls once and includes post-binding keys (0.1645ms)
+✔ composition outer projection preserves direct, nested, and legacy dispatcher precedence (0.100125ms)
+✔ composition outer projection retains the live plan and driver receiver (3.327625ms)
+✔ composition nested dispatcher projection ignores unrelated getters (0.411417ms)
+✔ composition dispatcher projection uses a null-prototype target for inherited-setter parity (0.262291ms)
+✔ composition dispatcher projection preserves spread descriptor-change semantics (0.330458ms)
+✔ composition dispatcher projection includes initially non-enumerable supported keys made enumerable (0.345125ms)
+✔ composition dispatcher projection preserves native order for noncanonical transitions (0.2365ms)
+✔ private classifier preserves exact replay and rejects processed-only eventId reuse in Memory and File stores (1216.156833ms)
+✔ processed-only collision remains visible after FileArtifactStore restart (549.105125ms)
+✔ existing generation CAS permits one same-eventId START winner and classifies loser retry (404.136125ms)
+✔ malformed generation rejection remains ahead of committed replay classification (466.017083ms)
+✔ active-Beads non-capturing DISPATCH_RECEIPT route shares classifier and does not mutate (2296.955833ms)
+✔ quiescent cross-phase adoption is an unchanged Conflict in Memory and File stores (618.184375ms)
+✔ cross-phase adoption remains fenced after old work reconciliation (17.363875ms)
+✔ same-phase adoption keeps the existing path and supersedes a stale cross-phase token (901.282833ms)
+✔ P3-LATE-DISPATCH-LEASE rejects an old receipt while successor is PENDING (2095.337625ms)
+✔ P3-LATE-DISPATCH-LEASE rejects an old receipt while successor is CLAIMED (1991.283458ms)
+✔ ON graph uses post-event frontier and preserves cold bytes (15.042666ms)
+✔ fixed-cell BASE hits across kernel calls and restart (1161.715125ms)
+✔ corrupt BASE is fenced/quarantined and SECRET never probes (1514.367041ms)
+✔ reducer rejects a stale graph frame and uses the direct frontier (0.580375ms)
+✔ orphan in-flight reuse pins are quarantined on restart and do not block GC (347.377291ms)
+✔ failed CURRENT CAS leaves a staged reuse pin recoverable on the next load (498.999834ms)
+✔ reuse publication requires exact CURRENT generation/writer fence and conflicts leave no winner (1066.852292ms)
+✔ reuse-epoch rollback cannot reuse a BASE from a newer epoch (1251.764625ms)
+✔ same-run frozen trace is byte-identical OFF vs ON, including stale and failed-dispatch rollback (4606.203417ms)
+✔ exact processed replay wins over a same-eventId journal projection (5.45ms)
+✔ processed-only eventId conflicts preflight every finality, decision, and effect event kind (3.044167ms)
+✔ corrupt stored yield fails verified load before replay classification (558.765625ms)
+✔ segmented/v2 reconstructs a journal-free state and reuses its sealed prefix (558.498834ms)
+✔ segmented/v2 read-only inspection and reuse fences accept the journal-free projection (661.623416ms)
+✔ segmented/v2 refuses a tampered sealed source before publishing CURRENT (335.612458ms)
+✔ segmented/v2 compaction rejects an extra journal field in historical projections (436.620417ms)
+✔ segmented/v2 rejects prefix tamper before exposing state and preserves Memory parity (320.530709ms)
+✔ legacy migration to segmented/v2 and explicit rollback retain exact logical history (735.880291ms)
+✔ segmented/v2 publication faults converge to one complete old-or-new generation (6087.245333ms)
+✔ warm load→commit consumes one private memo and cold/new-store commit retains the full verifier (688.854833ms)
+✔ generation-one and generation-two memo hits retain one-shot full-verifier counts (680.729167ms)
+✔ unsafe retained predecessor preserves the cold diagnostic and tree before publication (541.93125ms)
+✔ missing, wrong-type, and symlink retained predecessors cold-miss before publication (1684.4945ms)
+✔ unsafe quarantine is a memo miss and preserves the unchanged cold rejection (388.438791ms)
+✔ missing, wrong-type, and symlink quarantine variants cold-miss before publication (1238.879875ms)
+✔ same-store queued commit/load serializes memo invalidation after commit consumption (579.031833ms)
+✔ capture failure falls back to the verified snapshot and the following commit is cold (567.171916ms)
+✔ memo identity/stat mutations miss and reproduce the unchanged cold verifier (4718.196875ms)
+✔ trusted staged CURRENT forces a cold verifier and is quarantined before publication (464.720291ms)
+✔ untrusted staged CURRENT remains visible and rejected on the cold fallback (346.174875ms)
+✔ deletion, malformed memo, and stale replay paths fail closed without retaining authority (881.813084ms)
+✔ two stores conflict exactly, while restart and a second load stay cold/one-shot (794.007875ms)
+✔ OFF, SHADOW, and ON composition paths preserve the public transition contract (1360.177875ms)
+✔ OFF bypasses preview while SHADOW and ON retain graph preparation and identical yields (11.891542ms)
+✔ graph mode is a construction snapshot shared by bypass and preparation gates (1.504333ms)
+✔ malformed live plan recovery suppresses graph preparation (888.240125ms)
+✔ default and explicit context OFF skip all private context/reuse work (6.4815ms)
+✔ OFF ignores malformed handles and hostile getters without changing construction validation (1.020541ms)
+✔ context mode is captured once and active SHADOW/ON behavior remains observable (3.592583ms)
+✔ hard-private context capture survives string-key mutation across all factory surfaces (3.285083ms)
+✔ acceleration island ignores S65B compiler/prepareContext shadowing across all factories (0.760833ms)
+✔ all acceleration private-island string/symbol/prototype shadows preserve mode routing (4.569125ms)
+✔ direct ContextCompiler OFF callers still receive a prepared context (0.243125ms)
+✔ context/reuse/graph mode matrix preserves exact yields and only active paths prepare (7.935ms)
+✔ CLI reads canonical plan/event and prints a Yield through advance (90.08125ms)
+✔ CLI help is available and malformed canonical input is rejected (130.708875ms)
+✔ public entry point does not expose a graph/cache lifecycle (1.176708ms)
+✔ bridge lifecycle stays private while composition remains the only package subpath (1.492666ms)
+✔ published package excludes private bridge/Beads/Workfront executable surfaces (873.212417ms)
+✔ every runtime-emittable terminal outcome validates under source and actually deployed managed schema (6254.777084ms)
+✔ fails closed on empty object state (2358.480209ms)
+✔ fails closed on malformed state (2162.806834ms)
+✔ fails closed on noncanonical state bytes (2190.947792ms)
+✔ fails closed on CURRENT generation mismatch (2103.50525ms)
+✔ fails closed on CURRENT/state revision mismatch (2133.213667ms)
+✔ fails closed on journal/outbox/state disagreement (2185.337458ms)
+✔ rejects every active or unresolved outbox state (1783.045333ms)
+✔ rejects nested, duplicate, aliased, and out-of-set roots (2120.333ms)
+✔ rejects PID reuse and process-group ownership ambiguity (2299.269083ms)
+✔ rejects a copied-image child even when no bridge process exists (2471.099583ms)
+▶ rejects live bridge, pump, and supervisor ownership
+  ✔ bridge/pump (27.25275ms)
+  ✔ supervisor (19.348459ms)
+✔ rejects live bridge, pump, and supervisor ownership (2343.641208ms)
+✔ does not substring-match the verifier itself (2112.7475ms)
+✔ rejects target lock and transaction residue without removing it (2236.629875ms)
+✔ rejects unresolved or unbound effect chains (4482.408208ms)
+✔ accepts a truly quiescent exact closed set and the deployed CLI reports only (4731.282583ms)
+✔ writer held before acquisition settles before release ownership (226.475375ms)
+✔ release writer claim waits behind the shared reclaim marker without residue (350.753542ms)
+✔ writer, drive, and newly created root cannot enter after release green (175.187458ms)
+✔ explicit empty root set is sound and still excludes a new root under discovery (88.138125ms)
+✔ claim admitted before the fence remains red and verifier does not mutate bytes (6514.783791ms)
+✔ copied-child supervisor admission cannot cross an ancestor release claim (306.897542ms)
+✔ deploy-vs-drive order is bounded in both directions and target ownership is last (179.084625ms)
+✔ live owner is retained, exact stale owner is reclaimed, and replacement is never unlinked (191.343458ms)
+✔ red, throw, cancellation, and hard-crash recovery release only exact claims (628.496125ms)
+✔ production deploy/check path requires a fresh owner-bound post-acquisition snapshot (5919.048542ms)
+✔ pre-seal flag observation failure neither adopts nor clears an unproved caller flag (1209.561875ms)
+✔ post-clear observation failure terminates the unpublished child and exactly cleans a partial release (1129.466333ms)
+✔ flag-observer test seam cannot be paired with production spawn (52.778209ms)
+✔ entry-only root flags are cleared synchronously before publication and projection while the child is live (1245.933791ms)
+✔ post-entry clear-throws kills the owned child, publishes no receipt, and retains one-shot intent (1021.99825ms)
+✔ post-entry clear-does-not-stick kills the owned child, publishes no receipt, and retains one-shot intent (992.212042ms)
+✔ post-entry identity drift is fenced before publication and replacement flags are not cleared (972.404292ms)
+✔ spawn, invalid-pid, publication, normal-close, error, and cancel paths leave no stale entry flags (6344.456208ms)
+✔ native Darwin chflags releases entry roots before a live child terminal (1321.638375ms)
+✔ v1 stays closed and v2 requires full exact identities with an empty root set (8255.550583ms)
+✔ exact predecessor deploy is repeatable from the same preserved candidate bytes across exact restore (42825.995875ms)
+✔ payload drift, arbitrary installed bytes, and live target processes are red without publication (27931.225333ms)
+✔ preexisting managed discovery root is rejected before snapshot or deployment (14717.171209ms)
+✔ exact predecessor route reuses crash recovery and converges from exact old or candidate bytes (32619.258ms)
+✔ foreign well-formed stale transaction is untouched and blocks before recovery (6916.089959ms)
+✔ bridge snapshots only supported own-enumerable dispatcher controls once (583.847209ms)
+✔ dispatcher projection failure occurs before bridge filesystem mutation (10.315541ms)
+✔ omitted and null dispatcher ignore poisoned inherited controls (1098.7715ms)
+✔ managed launch claim may disappear between writer-lock trust probes (780.638834ms)
+✔ live managed owner outlives the legacy poll cap and fake deadline (3141.93775ms)
+✔ managed owner with mismatched current-process start is reclaimed as stale (774.452083ms)
+✔ crashed stale reclaim markers recover with no lock and preserve a live replacement lock (958.213416ms)
+✔ unknown reclaim-marker evidence is bounded and cannot authorize lock mutation (1907.04ms)
+✔ stale-marker cleanup never removes a live replacement marker (720.266208ms)
+✔ invalid numeric owners never probe a pid and retain the bounded legacy wait (5084.933708ms)
+✔ managed owner with unavailable process-start evidence is bounded and retained (1629.0215ms)
+✔ unrelated live legacy owner retains the bounded wait and exact lock (1429.282208ms)
+✔ stale reclaimer cannot unlink a managed replacement admitted behind its marker (907.036458ms)
+✔ cancellable load aborts before a live owner releases without touching its claim (945.104125ms)
+✔ abort racing successful fence acquisition releases only the acquired fence (663.487417ms)
+✔ cancelled process waiter cannot let a later load bypass its active predecessor (783.375834ms)
+✔ drive cancellation returns before a gated managed dispatch releases its exact owner (1337.822542ms)
+✔ R2 complete-tree publication removes owned stale files but preserves unrelated runtime files (14982.659792ms)
+✔ R2 crash windows recover a complete tree before the next publication (58787.907041ms)
+✔ R2 first-install crash after exchange removes only the uncommitted tree (14322.013833ms)
+✔ R2 rejects a malformed transaction identity before constructing a sibling path (9949.356625ms)
+✔ R4 managed wrapper carries and resolves the private recovery route (4830.877334ms)
+✔ segmented file reader preserves a long logical prefix and active suffix (2021.89825ms)
+✔ segmented transitions over 10,000 records match the deterministic semantic oracle (2027.116125ms)
+✔ memory and file segmented stores expose identical logical history (962.980042ms)
+✔ migration, rollback, and explicit compaction retain crash-safe generations (888.492917ms)
+✔ unknown segmented version is rejected before state use (249.946083ms)
+✔ segmented reader rejects mixed legacy files before state use (259.356583ms)
+✔ P2-ORPHAN-GENERATION quarantines a renamed successor and permits retry (596.523292ms)
+✔ P2-READONLY-SEGMENTED verifies head identity without a legacy journal path (344.036792ms)
+✔ P2-CURRENT-CONTINUITY rejects independently tampered segmented fields without mutation or reuse (1430.833625ms)
+✔ P2-MARKER-LEGACY never lets an object-local marker lift legacy ceilings (492.681625ms)
+✔ P2-ROLLBACK-GC preserves marker-referenced history and is idempotent (798.630584ms)
+✔ P2-FAULT-MATRIX leaves only old-or-new authority across publication boundaries (7667.869167ms)
+✔ R5-B publication and cleanup crash windows are restart-idempotent (24752.343ms)
+✔ R7-B no-marker recovery preserves foreign matching siblings (1518.859125ms)
+✔ R5-B recovery crash boundaries are idempotent and leave no residue (55090.6205ms)
+✔ R5-B closed 0.2.12 restore preserves unowned files and rolls back on first red (7655.263667ms)
+✔ R5-B restore rejects incomplete or extra mutable inputs before publication (2123.131625ms)
+✔ R7-B target ownership rejects overlapping deploy and check operations (1492.997ms)
+✔ R7-B target ownership serializes deploy/deploy, check/deploy, and restore/deploy (5496.799542ms)
+✔ R7-B interrupted owner is reclaimed only when dead and live owner fails closed (1120.14975ms)
+✔ R7-B final fence rejects an unowned mutation and leaves it intact (2067.607541ms)
+✔ R7-B damaged candidate recovers exact backup without candidate equality (1389.972417ms)
+✔ R7-B nested stage directory creation crash recovers without residue (898.028792ms)
+✔ private directory publication flushes each newly-created parent chain (68.581792ms)
+✔ directory-fsync fault fails closed instead of claiming a published name (3.762083ms)
+✔ effect records fsync containing names and remain restart-visible (338.185ms)
+✔ Darwin final fence rejects a copied-image replacement immediately after sealing (1105.869ms)
+✔ Darwin final fence rejects a snapshot-entry replacement immediately after sealing (1072.421625ms)
+✔ Darwin final fence rejects an authority snapshot-root replacement after sealing (898.667667ms)
+✔ Darwin final fence rejects workspace and run-root replacements after sealing (2120.127166ms)
+✔ managed drive rejects run-root, run-id, input-plan, committed-plan, and restart-policy mismatches before effects (1390.685708ms)
+✔ cancellation is serialized SIGINT -> SIGTERM -> SIGKILL for the owned child tree and zero grace advances (1283.005667ms)
+✔ timeout creates a bounded unresolved fence, admits no relaunch, and releases driver/process resources (2987.5575ms)
+✔ launch-record publication failure performs bounded tree termination and deterministic cleanup (1189.815125ms)
+✔ closed host classifier ignores prose/commands/success output and recognizes only structural lifecycle evidence (6000.1845ms)
+✔ malformed/truncated JSONL fails closed and reports require exactly one Status line with raw binding intact (4603.448042ms)
+{"counters":{"declarationBytes":106,"declarationReads":1,"projectionBytesRead":0,"projectionBytesWritten":1209,"projectionReads":0,"projectionWrites":2,"routineWakeups":1,"runtimeBytes":2491,"runtimeReads":2,"transitions":1},"mode":"runtime","projected":true,"projection":{"digest":"ab464331a1fb415bf5a4e5c978d132d436b8fb3cd2112e2d3e382837d0ba69e4","revision":1,"statePath":"/var/folders/v1/zhfpvfk176l2jg35pl9tx4cm0000gn/T/lunacy-r9a-cli-ta4sj6/STATE.md","stepsPath":"/var/folders/v1/zhfpvfk176l2jg35pl9tx4cm0000gn/T/lunacy-r9a-cli-ta4sj6/phases/cli-phase/STEPS.md"},"stopped":"cancelled","transitions":2,"yield":{"cursor":{"attemptEpoch":0,"authorityEpoch":0,"barrierEpoch":0,"revision":1},"kind":"WAITING","snapshot":{"activeCount":1,"attemptEpoch":0,"authorityEpoch":0,"barrier":"OPEN","barrierEpoch":0,"gate":"NOT-DUE","nextAction":"await-dispatch-receipt","pendingDispatchCount":1,"phase":"cli-phase","readyCount":0,"revision":1,"runStatus":"ACTIVE","unknownDispatchCount":0}}}
+{"counters":{"declarationBytes":106,"declarationReads":1,"projectionBytesRead":0,"projectionBytesWritten":1209,"projectionReads":0,"projectionWrites":2,"routineWakeups":1,"runtimeBytes":2491,"runtimeReads":2,"transitions":1},"mode":"runtime","projected":true,"projection":{"digest":"ab464331a1fb415bf5a4e5c978d132d436b8fb3cd2112e2d3e382837d0ba69e4","revision":1,"statePath":"/var/folders/v1/zhfpvfk176l2jg35pl9tx4cm0000gn/T/lunacy-r9a-cli-DlTcUC/STATE.md","stepsPath":"/var/folders/v1/zhfpvfk176l2jg35pl9tx4cm0000gn/T/lunacy-r9a-cli-DlTcUC/phases/cli-phase/STEPS.md"},"stopped":"cancelled","transitions":2,"yield":{"cursor":{"attemptEpoch":0,"authorityEpoch":0,"barrierEpoch":0,"revision":1},"kind":"WAITING","snapshot":{"activeCount":1,"attemptEpoch":0,"authorityEpoch":0,"barrier":"OPEN","barrierEpoch":0,"gate":"NOT-DUE","nextAction":"await-dispatch-receipt","pendingDispatchCount":1,"phase":"cli-phase","readyCount":0,"revision":1,"runStatus":"ACTIVE","unknownDispatchCount":0}}}
+{"counters":{"declarationBytes":106,"declarationReads":1,"projectionBytesRead":0,"projectionBytesWritten":1221,"projectionReads":0,"projectionWrites":2,"routineWakeups":1,"runtimeBytes":2521,"runtimeReads":2,"transitions":1},"mode":"runtime","projected":true,"projection":{"digest":"037cb9fd1f92909d178ead9ea6b3c9b2c31efac107564454027d550dcbcb0bf8","revision":1,"statePath":"/var/folders/v1/zhfpvfk176l2jg35pl9tx4cm0000gn/T/lunacy-r9a-cli-abort-tZ4obR/STATE.md","stepsPath":"/var/folders/v1/zhfpvfk176l2jg35pl9tx4cm0000gn/T/lunacy-r9a-cli-abort-tZ4obR/phases/cli-abort/STEPS.md"},"stopped":"cancelled","transitions":2,"yield":{"cursor":{"attemptEpoch":0,"authorityEpoch":0,"barrierEpoch":0,"revision":1},"kind":"WAITING","snapshot":{"activeCount":1,"attemptEpoch":0,"authorityEpoch":0,"barrier":"OPEN","barrierEpoch":0,"gate":"NOT-DUE","nextAction":"await-dispatch-receipt","pendingDispatchCount":1,"phase":"cli-abort","readyCount":0,"revision":1,"runStatus":"ACTIVE","unknownDispatchCount":0}}}
+✔ managed CLI owns and removes SIGINT/SIGTERM/external AbortSignal listeners while cancelling the exact drive (3217.493792ms)
+✔ R4 absent-token capsule is canonical, redacted, bounded, and deterministic (677.779875ms)
+✔ R4 wrong command digest is a closed mismatch and CLI stays private (662.175333ms)
+✔ R4 malformed effect evidence fails closed without cleanup (716.988417ms)
+✔ R4 frozen golden corpus is canonical and digest-manifest bound (3.560959ms)
+✔ R4 targeted oversized and symlink records stay bounded and fail closed (665.597125ms)
+✔ R4 selector aliases reject conflicting API values (596.322084ms)
+✔ P4-SCHEMA-BOUNDS rejects overlong request and committed identities (1072.948167ms)
+✔ P4-SCHEMA-BOUNDS redacts path/control-bearing step IDs and validates output schema (572.914208ms)
+✔ private disable/delete reject an implicit or markdown mode (0.795916ms)
+✔ verified executable survives pre-open replacement and in-place mutation attempts (1080.809708ms)
+✔ workspace swap-and-restore during a bd probe cannot change captured identity (582.576375ms)
+✔ epoch-changing active replay reuses the durable yield and ignores a retry plan (1889.176208ms)
+✔ first active capture rejects a nonmatching native plan before mutation (749.474917ms)
+✔ forged prior deployment manifest cannot delete a runtime sentinel (13583.522959ms)
+✔ managed loader keeps entry and transitive modules in the verified byte graph (5723.075ms)
+✔ verified loader bytes survive deterministic entry and transitive mutation after verification (6418.543167ms)
+✔ macOS pathname executable cannot be rewritten through leaked fd 3 (452.52875ms)
+✔ native START digest replays through the bound Beads candidate after epoch drift (2907.280583ms)
+✔ active START aliases are exactly shared with RunKernel and reject before mutation (1020.46675ms)
+✔ event is snapshotted before asynchronous filesystem preflight (501.908666ms)
+﹣ Linux capture uses fixed child descriptor slots for workspace and BEADS_DIR (0.180416ms) # SKIP
+✔ append-only replay bindings survive a precommit candidate and exact replay after epochs (1773.453ms)
+✔ drift candidates are persisted for lost-response replay without bd (2267.120042ms)
+✔ delete resumes idempotent cleanup after a durable tombstone (656.114333ms)
+✔ sparse Beads files are rejected from stat size before allocation (38.293208ms)
+✔ S16 rejects an active raw START alias before creating any run-store bytes (825.847375ms)
+✔ S16 replay binding preserves an exact drift yield after bd disappears (2593.850667ms)
+﹣ S16 Linux child descriptor slots remain fixed when runnable (0.142416ms) # SKIP
+✔ S16 rejects unsafe missing ancestors before deployment or bridge creation (63.950666ms)
+✔ S16 event mutation after entry cannot alter the committed identity (555.557333ms)
+✔ S16 lifecycle repair uses the exact adoption predecessor and tombstone retry is idempotent (4060.732ms)
+✔ S16 sparse Beads files fail before allocation on pathname-snapshot hosts (43.651042ms)
+✔ S16 oversized managed payloads fail before module use (6008.79125ms)
+✔ S18 eagerly repairs an accepted manifest predecessor before a later transition (5934.054916ms)
+✔ S18 physicalizes missing protected roots before Darwin overlap checks (29.413333ms)
+✔ S18 aborts pathname snapshots before tree construction (19.4255ms)
+✔ S18 bounds empty private snapshot cardinality (40071.950709ms)
+✔ S18 bounds private snapshot depth without recursive descent (692.967334ms)
+✔ S18 executable digest is tied to complete target and execution-image verification (304.392125ms)
+✔ S18 deployment --check bounds mutable manifest and payload reads (12432.710208ms)
+✔ pathname Beads snapshots are removed after a successful capture (475.934833ms)
+✔ S21 public makeRunKernel rejects an unsafe existing root before forged authority is read (316.898ms)
+✔ S21 rejects a missing root below a non-sticky writable ancestor without creating it (6.820125ms)
+✔ S21 preserves root device/inode identity across pathname replacement (305.584708ms)
+✔ S21 rejects an unsafe staged CURRENT before quarantining it (317.874125ms)
+✔ S21 bridge/deployment/Beads paths reject an existing unsafe ancestor (73.944042ms)
+✔ S22 writer-lock mode drift is rejected before stale-lock reclamation (332.379417ms)
+✔ S22 reuse-index mode drift is rejected before cache quarantine (352.276542ms)
+✔ S22 reuse-pin mode drift is rejected before cache quarantine (360.432875ms)
+✔ S22 reuse-GC pin mode drift is rejected before cache quarantine (514.330583ms)
+✔ S22 bridge-lock mode drift is rejected before stale-lock reclamation (579.932ms)
+✔ S24 generation-state trust failure is fail-closed before reuse cache mutation (494.415542ms)
+✔ canonical identity does not collide on prototype keys or sparse/non-JSON values (1.244292ms)
+✔ API rejects unknown/malformed events, mismatched START refs, and unsafe plan keys before mutation (2.232333ms)
+✔ receipt proof is mandatory and forged recovery cannot reset UNKNOWN (9.113584ms)
+✔ invalid parent decisions do not consume the gate token and COMPLETE is sticky (6.07125ms)
+✔ plan mutation with live work fences before any driver effect and resumes only after restoration (3.473625ms)
+✔ malformed live plan cannot strand a committed outbox recovery (1.992458ms)
+✔ malformed live recovery reconciles the old command without admitting a successor (3.066125ms)
+✔ malformed declarations cannot block a previously due parent gate (3.301333ms)
+✔ filesystem rejects root/current/generation/lock symlink escapes and reclaims a dead lock (2258.979417ms)
+✔ appendJournal refuses a byte-ceiling crossing without mutating the candidate (7.758459ms)
+✔ file store refuses a malformed candidate journal before publication (106.444917ms)
+✔ forged fixed-cell handles fail closed without a cache hit (1.762791ms)
+✔ self-consistent but forged BASE bytes are a cold miss, not a cache hit (0.534708ms)
+✔ BASE and VIEW stable prefixes never alias in the fixed-cell key (0.469458ms)
+✔ async dispatch claims before launch, times out to UNKNOWN, and fences a late receipt (81.77725ms)
+✔ a timed-out dispatch can be observed while its non-cooperative Promise remains live (5.584209ms)
+✔ a live in-process CLAIMED dispatch is not prematurely recovered by RESUME (23.526459ms)
+✔ FINDINGS opens a fresh repair attempt and barrier with new mutable steps (1718.488209ms)
+✔ authority adoption is digest-bound, recovery-only while old work is live, and rebuilds dependencies (4.638666ms)
+✔ bridge rejects injected projection markers before CURRENT/manifest mutation (180.768583ms)
+✔ bridge source-digest tampering and ancestor symlink paths fail closed (799.747666ms)
+✔ existing run root beneath a symlink ancestor is rejected without outside writes (10.250541ms)
+✔ markdown mode refuses a symlinked kernel namespace (12.946375ms)
+✔ bridge rejects a STEPS projection outside the committed phase (164.423167ms)
+✔ bridge measurement counters reject caller-injected negative values (4.652042ms)
+✔ invalid START identity cannot leave a precommit bridge manifest (18.9515ms)
+✔ bridge disable remains blocked for durable UNKNOWN outbox work (845.01075ms)
+✔ concurrent bridge START cannot leave manifest and CURRENT from different declarations (715.83725ms)
+✔ cross-process bridge lock serializes competing START declarations (859.799708ms)
+✔ lifecycle lock serializes disable against a gate decision without stranded work (2179.049125ms)
+✔ manifest disable and tombstone survive a fresh lifecycle read (2501.317ms)
+✔ active recovery cannot replace a missing acknowledged input with a caller Plan (1503.265958ms)
+✔ Beads workspace and database cannot overlap a protected runtime root (38.466333ms)
+✔ deployment rejects a target beneath a symlinked ancestor before outside writes (75.124291ms)
+✔ a durable delete tombstone prevents disable rollback when the old manifest remains (608.686708ms)
+✔ managed graph rejects mixed-case absolute URLs and chain-produced graph URLs before canary evaluation (8645.772166ms)
+✔ deployment check requires exact manifest bytes and redeploy is deterministic (25582.893625ms)
+✔ abort during slow CLAIMED commit records UNKNOWN without calling a synchronous driver (1282.897792ms)
+✔ a synchronous driver is fenced by the internal deadline before launch and emits cancellation outcome (2.978333ms)
+✔ abort-before-launch behavior is exact across direct and graph ON admission (2034.606708ms)
+✔ runtime bridge rejects a group/world-writable run root before any durable mutation (11.162291ms)
+✔ runtime bridge rejects an unsafe .kernel or projection parent (223.480917ms)
+✔ managed deployment and launcher reject writable runtime surfaces (6051.821917ms)
+✔ operator-provisioned bd executable must be owned and non-writable by group/world (27.003083ms)
+✔ raw active acknowledgements reject extra fields before durable mutation (387.429083ms)
+✔ private CLI requires an explicit mode and remains inert when omitted (124.298917ms)
+✔ shadow and markdown reject an unsafe existing run root before capture (38.7045ms)
+✔ active transition binds the capture method before an await and freezes source options (1301.698916ms)
+✔ version/export probes stay on the same verified private executable image (503.544542ms)
+✔ empty or partial bridge and store locks are reclaimed safely (3962.300916ms)
+✔ digest-addressed candidate input preserves CURRENT authority while adoption is blocked (3447.88975ms)
+✔ RECOVERY and exact active replay use persisted input without invoking bd (2197.258375ms)
+✔ a later explicit drift supersedes an unconsumed B adoption token with C (708.454709ms)
+✔ manifest recovery accepts only the exact adoption predecessor digest (2619.107958ms)
+✔ managed launcher rejects a deployment with only runtimeVersion changed (5727.897042ms)
+✔ routine history retains only CURRENT and its exact predecessor (1315.59675ms)
+✔ malformed or missing CURRENT fails without moving canonical generations (1023.733625ms)
+✔ unsafe exact predecessor fails before deletion or successor publication (518.307709ms)
+✔ partial predecessor deletion is idempotent across restart (679.972375ms)
+✔ load does not create absent reuse namespace but preserves existing reconciliation (669.108333ms)
+✔ filesystem and memory stores preserve the same deterministic yields under retention (478.950166ms)
+✔ same-generation filesystem writers remain fenced (415.412125ms)
+✔ canonical default role policy keeps routine work on Luna and bounds Sol judgment (4.345042ms)
+✔ direct worker route table is closed and omission preserves Luna/xhigh (1.64ms)
+✔ canonical host payloads always carry exact model, effort, and fresh context (0.779625ms)
+✔ selected route cannot silently fallback, downgrade, or drift on resume (0.571ms)
+✔ fresh-context exception preserves the explicit selected pair or blocks (0.444958ms)
+✔ Luna compatibility is route-scoped and never substitutes Sol (0.687917ms)
+✔ direct routing remains separate from managed runtime Sol policy (0.500792ms)
+✔ pure Workfront derivation is bounded, deterministic, and private (1.937709ms)
+✔ dependency terminal semantics and every outbox observation are explicit (0.530667ms)
+✔ reverse-declared deep topology is validated without recursive stack failure (35.218958ms)
+✔ managed Workfront route reads one generation and performs no writes (652.556375ms)
+✔ managed CLI routes Workfront before transition/Beads imports (682.935125ms)
+✔ disabled/deleted/corrupt Workfront reads fail closed without mutation (630.059375ms)
+✔ rolled-back CURRENT is rejected without quarantine or repair writes (958.486708ms)
+✔ unexpected generation debris is rejected without mutation (564.360292ms)
+✔ non-canonical generation aliases fail closed without mutation (579.699916ms)
+✔ final namespace recheck catches publication that starts after the first scan (554.273208ms)
+✔ common committed-state validation rejects drift and CLI errors do not echo private values (617.841083ms)
+✔ common committed-state validation owns topology and outbox epoch invariants (727.584709ms)
+✔ read-only inspection rejects oversized sparse state before allocation and without mutation (675.785833ms)
+ℹ tests 467
+ℹ suites 0
+ℹ pass 465
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 2
+ℹ todo 0
+ℹ duration_ms 162712.709833
+
+> lunacy-runtime@0.3.0 build
+> tsc -p tsconfig.build.json
+
+npm notice
+npm notice 📦  lunacy-runtime@0.3.0
+npm notice Tarball Contents
+npm notice 10.8kB LICENSE
+npm notice 14.4kB README.md
+npm notice 583B bench/manifest.json
+npm notice 390B bench/r2-corpus.json
+npm notice 1.8kB bench/README.md
+npm notice 3.8kB bench/run.mjs
+npm notice 3.7kB bench/segmented-v2-paired.mjs
+npm notice 544B dist/admission.d.ts
+npm notice 523B dist/admission.js
+npm notice 869B dist/admission.js.map
+npm notice 476B dist/authority.d.ts
+npm notice 327B dist/authority.js
+npm notice 443B dist/authority.js.map
+npm notice 1.1kB dist/canonical.d.ts
+npm notice 3.9kB dist/canonical.js
+npm notice 3.0kB dist/canonical.js.map
+npm notice 119B dist/cli.d.ts
+npm notice 7.2kB dist/cli.js
+npm notice 6.3kB dist/cli.js.map
+npm notice 5.9kB dist/codex-effect-records.d.ts
+npm notice 27.3kB dist/codex-effect-records.js
+npm notice 24.7kB dist/codex-effect-records.js.map
+npm notice 1.8kB dist/codex-exec-driver.d.ts
+npm notice 8.4kB dist/codex-exec-driver.js
+npm notice 6.3kB dist/codex-exec-driver.js.map
+npm notice 5.1kB dist/codex-exec-supervisor.d.ts
+npm notice 85.0kB dist/codex-exec-supervisor.js
+npm notice 69.5kB dist/codex-exec-supervisor.js.map
+npm notice 8.8kB dist/codex-host-policy.d.ts
+npm notice 29.5kB dist/codex-host-policy.js
+npm notice 25.4kB dist/codex-host-policy.js.map
+npm notice 2.9kB dist/compiler.d.ts
+npm notice 8.6kB dist/compiler.js
+npm notice 8.0kB dist/compiler.js.map
+npm notice 698B dist/composition.d.ts
+npm notice 3.6kB dist/composition.js
+npm notice 2.7kB dist/composition.js.map
+npm notice 6.2kB dist/decision-inbox.d.ts
+npm notice 33.3kB dist/decision-inbox.js
+npm notice 32.5kB dist/decision-inbox.js.map
+npm notice 1.1kB dist/dependency.d.ts
+npm notice 3.3kB dist/dependency.js
+npm notice 2.8kB dist/dependency.js.map
+npm notice 4.3kB dist/dispatch-coordinator.d.ts
+npm notice 19.8kB dist/dispatch-coordinator.js
+npm notice 18.8kB dist/dispatch-coordinator.js.map
+npm notice 1.4kB dist/driver.d.ts
+npm notice 509B dist/driver.js
+npm notice 512B dist/driver.js.map
+npm notice 3.2kB dist/filesystem.d.ts
+npm notice 14.6kB dist/filesystem.js
+npm notice 12.4kB dist/filesystem.js.map
+npm notice 4.5kB dist/fleet-coordinator.d.ts
+npm notice 32.8kB dist/fleet-coordinator.js
+npm notice 34.0kB dist/fleet-coordinator.js.map
+npm notice 3.2kB dist/graph.d.ts
+npm notice 9.6kB dist/graph.js
+npm notice 11.4kB dist/graph.js.map
+npm notice 368B dist/index.d.ts
+npm notice 128B dist/index.js
+npm notice 181B dist/index.js.map
+npm notice 142B dist/kernel.d.ts
+npm notice 79B dist/kernel.js
+npm notice 143B dist/kernel.js.map
+npm notice 760B dist/limits.d.ts
+npm notice 726B dist/limits.js
+npm notice 344B dist/limits.js.map
+npm notice 876B dist/metrics.d.ts
+npm notice 888B dist/metrics.js
+npm notice 909B dist/metrics.js.map
+npm notice 5.0kB dist/model.d.ts
+npm notice 44B dist/model.js
+npm notice 102B dist/model.js.map
+npm notice 7.6kB dist/orchestration.d.ts
+npm notice 37.6kB dist/orchestration.js
+npm notice 32.3kB dist/orchestration.js.map
+npm notice 837B dist/outbox.d.ts
+npm notice 1.5kB dist/outbox.js
+npm notice 1.5kB dist/outbox.js.map
+npm notice 4.0kB dist/public.d.ts
+npm notice 61.5kB dist/public.js
+npm notice 50.9kB dist/public.js.map
+npm notice 3.7kB dist/recovery-forensics.d.ts
+npm notice 35.4kB dist/recovery-forensics.js
+npm notice 32.8kB dist/recovery-forensics.js.map
+npm notice 149B dist/recovery.d.ts
+npm notice 147B dist/recovery.js
+npm notice 142B dist/recovery.js.map
+npm notice 4.3kB dist/reducer.d.ts
+npm notice 22.9kB dist/reducer.js
+npm notice 22.2kB dist/reducer.js.map
+npm notice 5.4kB dist/release-admission.d.ts
+npm notice 29.5kB dist/release-admission.js
+npm notice 27.7kB dist/release-admission.js.map
+npm notice 1.4kB dist/release-operation.d.ts
+npm notice 4.7kB dist/release-operation.js
+npm notice 4.0kB dist/release-operation.js.map
+npm notice 1.8kB dist/release-quiescence.d.ts
+npm notice 31.8kB dist/release-quiescence.js
+npm notice 32.1kB dist/release-quiescence.js.map
+npm notice 303B dist/renderer.d.ts
+npm notice 870B dist/renderer.js
+npm notice 971B dist/renderer.js.map
+npm notice 4.1kB dist/reuse.d.ts
+npm notice 14.4kB dist/reuse.js
+npm notice 13.5kB dist/reuse.js.map
+npm notice 15.6kB dist/store.d.ts
+npm notice 202.5kB dist/store.js
+npm notice 173.0kB dist/store.js.map
+npm notice 483B dist/validator.d.ts
+npm notice 5.4kB dist/validator.js
+npm notice 6.3kB dist/validator.js.map
+npm notice 3.5kB docs/ACCELERATION.md
+npm notice 6.7kB docs/API.md
+npm notice 5.9kB docs/BEADS.md
+npm notice 1.0kB docs/BENCHMARK.md
+npm notice 12.0kB docs/BRIDGE.md
+npm notice 7.7kB docs/CODEX_EXEC.md
+npm notice 1.9kB docs/DECISION_INBOX.md
+npm notice 10.3kB docs/DURABILITY.md
+npm notice 1.6kB docs/FLEET.md
+npm notice 10.1kB docs/INSTALL.md
+npm notice 3.2kB docs/MIGRATION.md
+npm notice 48.4kB docs/NEXT_BIG_WINS_ROADMAP.md
+npm notice 2.9kB docs/RECOVERY.md
+npm notice 38.7kB docs/ROADMAP.md
+npm notice 3.6kB docs/WORKFRONT.md
+npm notice 118B examples/canonical-event.json
+npm notice 50B examples/canonical-plan.json
+npm notice 1.1kB examples/README.md
+npm notice 460B examples/run.mjs
+npm notice 1.6kB package.json
+npm notice Tarball Details
+npm notice name: lunacy-runtime
+npm notice version: 0.3.0
+npm notice filename: lunacy-runtime-0.3.0.tgz
+npm notice package size: 344.4 kB
+npm notice unpacked size: 1.7 MB
+npm notice shasum: 699c33d091343d999b1aaf8ff8844e2b4561fe5d
+npm notice integrity: sha512-6kRdRdi/BpnNO[...]QRtmkNZa7DEZg==
+npm notice total files: 132
+npm notice
+lunacy-runtime-0.3.0.tgz

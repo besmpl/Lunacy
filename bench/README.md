@@ -30,3 +30,14 @@ algorithm or I/O regressions; it is not a provider-performance claim and does
 not change the runtime default. Provider, token, and native host counters
 remain unavailable, so the overall result stays `NOT_CLAIMED` until the
 required paired evidence is supplied.
+
+The Direction-3 storage pair is run with:
+
+```sh
+npm run build && node bench/segmented-v2-paired.mjs > segmented-v2-paired.json
+```
+
+It executes 30 short/long repetitions for segmented/v1 and opt-in
+segmented/v2, recording committed bytes, fsync-point counts, and wall samples.
+The observations are diagnostic only; the v2 writer remains
+release-disabled/value-unclaimed until semantic and recovery gates are accepted.

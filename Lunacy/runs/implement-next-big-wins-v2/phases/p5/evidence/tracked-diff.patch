@@ -1,0 +1,1422 @@
+diff --git a/src/bridge-cli.ts b/src/bridge-cli.ts
+index 39720f0..e211be2 100644
+--- a/src/bridge-cli.ts
++++ b/src/bridge-cli.ts
+@@ -24,7 +24,10 @@ function usage(): string {
+        lunacy-bridge lifecycle --command init|run|resume --run-dir RUN --run-id ID --mode runtime --plan PLAN.json [options]
+ 
+ Read-only dependency explanation:
+-  lunacy-bridge workfront --run-root RUN --run-id ID [--limit 16] [--focus STEP]
++       lunacy-bridge workfront --run-root RUN --run-id ID [--limit 16] [--focus STEP]
++       lunacy-bridge inbox --entries ENTRIES.json [--limit 16]
++       lunacy-bridge submit-decision --inbox INBOX.json --plan PLAN.json --run-root RUN --run-id ID --token TOKEN --value PASS|FINDINGS|ADOPT_JSON
++       lunacy-bridge promote-phase --handoff HANDOFF.json
+        lunacy-bridge inspect-recovery --run-root RUN --run-id ID --launch-token TOKEN [--command-digest HEX] [--policy POLICY.json]
+ 
+ Invoke one private runtime-to-skill transition. The bridge calls only
+@@ -260,6 +263,18 @@ export async function runBridgeCli(argv = process.argv.slice(2), injectedDriver?
+     try { return await runWorkfrontCli(argv.slice(1)); }
+     catch (error) { throw safeWorkfrontError(error); }
+   }
++  if (argv[0] === 'inbox' || argv[0] === 'decision-inbox') {
++    try { return await runInboxCli(argv.slice(1)); }
++    catch (error) { throw safeInboxError(error); }
++  }
++  if (argv[0] === 'submit-decision' || argv[0] === 'submit-parent-decision') {
++    try { return await runSubmitDecisionCli(argv.slice(1)); }
++    catch (error) { throw safeInboxError(error); }
++  }
++  if (argv[0] === 'promote-phase' || argv[0] === 'promote') {
++    try { return await runPromotePhaseCli(argv.slice(1)); }
++    catch (error) { throw safeInboxError(error); }
++  }
+   const flags = parseArgs(argv);
+   if (flags.help) { await writeOutput(`${usage()}\n`); return 0; }
+   if (!flags.modeProvided || flags.mode === undefined) throw new Error('--mode is required; choose runtime or markdown explicitly');
+@@ -369,6 +384,94 @@ async function runWorkfrontCli(argv: string[]): Promise<number> {
+   return 0;
+ }
+ 
++type InboxFlags = { entries?: string; runRoot?: string; runId?: string; token?: string; planDigest?: string; policyDigest?: string; limit?: number; help: boolean };
++function parseInboxArgs(argv: string[]): InboxFlags {
++  const flags: InboxFlags = { help: false };
++  for (let index = 0; index < argv.length; index += 1) {
++    const arg = argv[index];
++    if (arg === '--help' || arg === '-h') { flags.help = true; continue; }
++    if (!arg.startsWith('--')) throw new Error(`unknown inbox argument ${arg}`);
++    const value = argv[++index]; if (value === undefined || value.startsWith('--')) throw new Error(`${arg} requires a value`);
++    if (arg === '--entries') flags.entries = value;
++    else if (arg === '--run-root') flags.runRoot = value;
++    else if (arg === '--run-id') flags.runId = value;
++    else if (arg === '--token') flags.token = value;
++    else if (arg === '--plan-digest') flags.planDigest = value;
++    else if (arg === '--policy-digest') flags.policyDigest = value;
++    else if (arg === '--limit') flags.limit = numberFlag('limit', value);
++    else throw new Error(`unknown inbox option ${arg}`);
++  }
++  return flags;
++}
++function safeInboxError(error: unknown): Error {
++  const message = error instanceof Error ? error.message : String(error);
++  let code = 'DecisionInboxError';
++  if (message.includes('ManifestMismatch') || message.includes('FilesystemTrust') || message.includes('changed during read')) code = 'ManifestMismatch';
++  else if (message.includes('output exceeds') || message.includes('ceiling')) code = 'CapsuleLimit';
++  else if (message.startsWith('DecisionInbox:') || message.includes('requires a value') || message.includes('unknown inbox') || message.includes('unknown submit') || message.includes('unknown promote')) code = 'InvalidInboxInput';
++  const result = new Error(code); result.name = 'DecisionInboxError'; return result;
++}
++async function runInboxCli(argv: string[]): Promise<number> {
++  const flags = parseInboxArgs(argv);
++  if (flags.help) { await writeOutput('Usage: lunacy-bridge inbox --entries ENTRIES.json [--limit 16]\n'); return 0; }
++  const { listDecisionInbox } = await import('./decision-inbox.js');
++  let input: any;
++  if (flags.entries) input = await readCanonical(flags.entries);
++  else {
++    if (!flags.runRoot || !flags.runId) throw new Error('--entries or --run-root/--run-id are required');
++    input = { entries: [{ runRoot: flags.runRoot, runId: flags.runId, ...(flags.token === undefined ? {} : { token: flags.token }), ...(flags.planDigest === undefined ? {} : { planDigest: flags.planDigest }), ...(flags.policyDigest === undefined ? {} : { policyDigest: flags.policyDigest }) }], ...(flags.limit === undefined ? {} : { limit: flags.limit }) };
++  }
++  if (flags.limit !== undefined && input.limit === undefined) input = { ...input, limit: flags.limit };
++  const capsule = await listDecisionInbox(input);
++  await writeOutput(`${canonicalString(capsule)}\n`); return 0;
++}
++
++type SubmitFlags = { inbox?: string; plan?: string; runRoot?: string; runId?: string; token?: string; value?: string; eventId?: string; policy?: string; help: boolean };
++function parseSubmitArgs(argv: string[]): SubmitFlags {
++  const flags: SubmitFlags = { help: false };
++  for (let index = 0; index < argv.length; index += 1) {
++    const arg = argv[index];
++    if (arg === '--help' || arg === '-h') { flags.help = true; continue; }
++    if (!arg.startsWith('--')) throw new Error(`unknown submit argument ${arg}`);
++    const value = argv[++index]; if (value === undefined || value.startsWith('--')) throw new Error(`${arg} requires a value`);
++    if (arg === '--inbox') flags.inbox = value; else if (arg === '--plan') flags.plan = value; else if (arg === '--run-root') flags.runRoot = value; else if (arg === '--run-id') flags.runId = value; else if (arg === '--token') flags.token = value; else if (arg === '--value') flags.value = value; else if (arg === '--event-id') flags.eventId = value; else if (arg === '--policy') flags.policy = value; else throw new Error(`unknown submit option ${arg}`);
++  }
++  return flags;
++}
++async function runSubmitDecisionCli(argv: string[]): Promise<number> {
++  const flags = parseSubmitArgs(argv);
++  if (flags.help) { await writeOutput('Usage: lunacy-bridge submit-decision --inbox INBOX.json --plan PLAN.json --run-root RUN --run-id ID --token TOKEN --value PASS|FINDINGS|ADOPT_JSON\n'); return 0; }
++  if (!flags.inbox || !flags.plan || !flags.runRoot || !flags.runId || !flags.token || !flags.value) throw new Error('--inbox, --plan, --run-root, --run-id, --token, and --value are required');
++  const { submitParentDecision } = await import('./decision-inbox.js');
++  const inbox = await readCanonical(flags.inbox) as any; const plan = await readCanonical(flags.plan) as Plan; let policy: unknown;
++  if (flags.policy) policy = await readCanonical(flags.policy);
++  let value: unknown = flags.value;
++  if (flags.value.startsWith('{')) value = parseCanonical(flags.value);
++  const result = await submitParentDecision({ selection: { runRoot: flags.runRoot, runId: flags.runId, token: flags.token }, inbox, plan, value, ...(flags.eventId === undefined ? {} : { eventId: flags.eventId }), ...(policy === undefined ? {} : { policy: policy as any }) });
++  await writeOutput(`${canonicalString(result)}\n`); return 0;
++}
++
++type PromoteFlags = { handoff?: string; help: boolean };
++function parsePromoteArgs(argv: string[]): PromoteFlags {
++  const flags: PromoteFlags = { help: false };
++  for (let index = 0; index < argv.length; index += 1) {
++    const arg = argv[index];
++    if (arg === '--help' || arg === '-h') { flags.help = true; continue; }
++    if (arg !== '--handoff') throw new Error(`unknown promote argument ${arg}`);
++    const value = argv[++index]; if (value === undefined || value.startsWith('--')) throw new Error('--handoff requires a value'); flags.handoff = value;
++  }
++  return flags;
++}
++async function runPromotePhaseCli(argv: string[]): Promise<number> {
++  const flags = parsePromoteArgs(argv);
++  if (flags.help) { await writeOutput('Usage: lunacy-bridge promote-phase --handoff HANDOFF.json\n'); return 0; }
++  if (!flags.handoff) throw new Error('--handoff is required');
++  const { promotePhase } = await import('./decision-inbox.js');
++  const handoff = await readCanonical(flags.handoff) as any;
++  const result = await promotePhase({ handoff });
++  await writeOutput(`${canonicalString(result)}\n`); return 0;
++}
++
+ let isMain = false;
+ if (process.argv[1]) { try { isMain = realpathSync(process.argv[1]) === fileURLToPath(import.meta.url); } catch { isMain = false; } }
+ if (isMain) runBridgeCli().then((code) => { process.exitCode = code; }).catch((error: unknown) => { process.stderr.write(`${canonicalString({ error: { name: error instanceof Error ? error.name : 'Error', message: error instanceof Error ? error.message : String(error) } })}\n`); process.exitCode = 1; });
+diff --git a/src/cli.ts b/src/cli.ts
+index 0744c95..e98998d 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -6,9 +6,10 @@ import { fileURLToPath } from 'node:url';
+ import { canonicalString, digest, parseCanonical } from './canonical.js';
+ import { makeRunKernel, type KernelOptions } from './public.js';
+ import type { AdvanceInput, Event, Plan } from './model.js';
++import type { FleetManifest } from './fleet-coordinator.js';
+ 
+ type Flags = {
+-  plan?: string; event?: string; runId: string; eventId: string; phaseId?: string; stepId: string;
++  plan?: string; event?: string; fleetManifest?: string; fleetState?: string; runId: string; eventId: string; phaseId?: string; stepId: string;
+   rootDir?: string; expectedRevision?: number; attemptEpoch: number; authorityEpoch: number;
+   barrierEpoch: number; launchToken?: string; help: boolean;
+ };
+@@ -33,6 +34,8 @@ Options:
+   --authority-epoch N      Identity authority epoch (default: 0)
+   --barrier-epoch N        Identity barrier epoch (default: 0)
+   --launch-token TOKEN     Dispatch/receipt identity token
++  --fleet-manifest PATH    Run one explicit multi-run fleet turn (private additive route)
++  --fleet-state PATH       Explicit fleet metadata path (required only when manifest omits statePath)
+   --help                   Show this help
+ 
+ Use '-' as PATH to read that JSON document from stdin (only once).`;
+@@ -55,6 +58,7 @@ function parseArgs(argv: string[]): Flags {
+     if (value === undefined || value.startsWith('--')) throw new Error(`--${name} requires a value`);
+     switch (name) {
+       case 'plan': flags.plan = value; break; case 'event': flags.event = value; break;
++      case 'fleet-manifest': flags.fleetManifest = value; break; case 'fleet-state': flags.fleetState = value; break;
+       case 'run-id': flags.runId = value; break; case 'event-id': flags.eventId = value; break;
+       case 'phase-id': flags.phaseId = value; break; case 'step-id': flags.stepId = value; break;
+       case 'root-dir': flags.rootDir = value; break;
+@@ -92,6 +96,14 @@ function planFrom(value: unknown): Plan {
+ export async function runCli(argv = process.argv.slice(2)): Promise<number> {
+   const flags = parseArgs(argv);
+   if (flags.help) { process.stdout.write(`${usage()}\n`); return 0; }
++  if (flags.fleetManifest) {
++    const stdin = { used: false };
++    const manifest = await readCanonical(flags.fleetManifest, stdin) as FleetManifest;
++    const { runFleet } = await import('./fleet-coordinator.js');
++    const result = await runFleet({ manifest, ...(flags.fleetState === undefined ? {} : { statePath: flags.fleetState }) });
++    process.stdout.write(`${canonicalString(result)}\n`);
++    return 0;
++  }
+   if (!flags.plan || !flags.event) throw new Error('--plan and --event are required');
+   const stdin = { used: false };
+   const plan = planFrom(await readCanonical(flags.plan, stdin));
+diff --git a/src/public.ts b/src/public.ts
+index 2a71970..3955809 100644
+--- a/src/public.ts
++++ b/src/public.ts
+@@ -118,7 +118,7 @@ export { JOURNAL_EVENT_CEILING, JOURNAL_BYTE_CEILING } from './limits.js';
+ function journalHasRecordBudget(state: MachineState, additionalRecords: number): boolean {
+   return state.journal.length + additionalRecords <= JOURNAL_EVENT_CEILING;
+ }
+-function segmentedJournalEnabled(store: ArtifactStore): boolean { return store.journalFormat === 'segmented'; }
++function segmentedJournalEnabled(store: ArtifactStore): boolean { return store.journalFormat === 'segmented' || store.journalFormat === 'segmented/v2'; }
+ function exactKeys(value: object, keys: readonly string[], label: string): void {
+   const actual = Object.keys(value).sort(); const expected = [...keys].sort();
+   if (actual.length !== expected.length || actual.some((key, index) => key !== expected[index])) throw new InvalidEvent(`${label} fields are invalid`);
+diff --git a/src/recovery-forensics.ts b/src/recovery-forensics.ts
+index 328a481..8de4c29 100644
+--- a/src/recovery-forensics.ts
++++ b/src/recovery-forensics.ts
+@@ -303,7 +303,7 @@ async function namespaceDigest(root: string, toleratedPaths: ReadonlySet<string>
+ function journalBudget(state: MachineState, current: Record<string, unknown>): RecoveryCapsule['journal'] {
+   const usedEvents = state.journal.length;
+   const journalBytes = Buffer.byteLength(state.journal.map((entry) => canonicalString(entry)).join('\n') + (usedEvents ? '\n' : ''), 'utf8');
+-  const segmented = current.format === 'segmented/v1';
++  const segmented = current.format === 'segmented/v1' || current.format === 'segmented/v2';
+   const format = segmented ? 'segmented' : 'legacy';
+   const eventCeiling = segmented ? null : JOURNAL_EVENT_CEILING;
+   const byteCeiling = segmented ? null : JOURNAL_BYTE_CEILING;
+diff --git a/src/release-operation.ts b/src/release-operation.ts
+index bdc95b3..274bbc3 100644
+--- a/src/release-operation.ts
++++ b/src/release-operation.ts
+@@ -1,10 +1,14 @@
+-import { join } from 'node:path';
+-import { inspectTrustedPath } from './filesystem.js';
++import { randomUUID } from 'node:crypto';
++import { constants as fsConstants } from 'node:fs';
++import { promises as fs } from 'node:fs';
++import { dirname, join } from 'node:path';
++import { canonicalString, digest, parseCanonical } from './canonical.js';
++import { inspectTrustedPath, sameFilesystemIdentity, syncDirectory, type FilesystemIdentity } from './filesystem.js';
+ import {
+   BRIDGE_OPERATION_LOCK, RELEASE_EXCLUSION_LOCK, WRITER_LOCK,
+   acquireOwnedFileClaim, assertExactDiscoveredRoots, currentReleaseOwner,
+-  discoverManagedRunRoots, validateReleaseManifest,
+-  type OwnedFileClaim, type ReleaseManifest, type ReleaseOwner,
++  discoverManagedRunRoots, releaseOwnerIsLive, validateReleaseManifest,
++  type OwnedFileClaim, type ReleaseManifest, type ReleaseOwner, type ReleaseOperation,
+ } from './release-admission.js';
+ 
+ export type ReleaseExclusionOwnership = Readonly<{
+@@ -20,13 +24,280 @@ export type ReleaseExclusionOwnership = Readonly<{
+ export type ReleaseExclusionOptions = Readonly<{
+   manifest: ReleaseManifest;
+   manifestDigest: string;
++  /** Private resume seam: reuse the exact owner identity bound by the outer marker. */
++  owner?: ReleaseOwner;
+   waitMs?: number;
+   signal?: AbortSignal;
+ }>;
+ 
++/**
++ * Durable, private wrapper around the existing release transaction.  The
++ * marker is intentionally a projection: it never owns managed-tree bytes and
++ * must be rebound to the release manifest, claims, and inner transaction
++ * before a caller delegates any mutation.
++ */
++export const RELEASE_OPERATION_ENVELOPE_SCHEMA = 'lunacy-release-operation/v2' as const;
++export const RELEASE_OPERATION_ENVELOPE_MARKER = '.lunacy-release-operation.v2.json' as const;
++export const RELEASE_OPERATION_ENVELOPE_TEMP_SUFFIX = '.tmp' as const;
++const SHA256 = /^[0-9a-f]{64}$/;
++const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
++const ENVELOPE_PHASES = ['prepared', 'admitted', 'quiesced', 'delegated', 'committed', 'failed', 'attention'] as const;
++const ENVELOPE_STATUSES = ['READY', 'WAITING', 'COMMITTED', 'FAILED', 'ATTENTION'] as const;
++export type ReleaseOperationEnvelopePhase = typeof ENVELOPE_PHASES[number];
++export type ReleaseOperationEnvelopeStatus = typeof ENVELOPE_STATUSES[number];
++export type ReleaseOperationTargetIdentity = Readonly<{ pathDigest: string; dev: string; ino: string }>;
++export type ReleaseOperationOwnerIdentity = Readonly<{ id: string; pid: number; processStartedAt: string; acquiredAt: string; manifestDigest: string; epoch: number }>;
++export type ReleaseOperationSnapshotIdentity = Readonly<{ pathDigest: string; digest: string; capturedAt: string }>;
++export type ReleaseOperationLockIdentity = Readonly<{ pathDigest: string; dev: string; ino: string; ownerId: string }>;
++export type ReleaseOperationEnvelope = Readonly<{
++  schema: typeof RELEASE_OPERATION_ENVELOPE_SCHEMA;
++  operationId: string;
++  operation: ReleaseOperation;
++  manifestDigest: string;
++  manifestIdentityDigest: string;
++  installedTarget: ReleaseOperationTargetIdentity;
++  discoveryParentsDigest: string;
++  runRootsDigest: string;
++  processSnapshotPathDigest: string;
++  owner: ReleaseOperationOwnerIdentity;
++  snapshot: ReleaseOperationSnapshotIdentity | null;
++  targetLock: ReleaseOperationLockIdentity | null;
++  phase: ReleaseOperationEnvelopePhase;
++  status: ReleaseOperationEnvelopeStatus;
++  recovery: Readonly<{ code: string | null; attempts: number }>;
++  inner: Readonly<{ markerDigest: string | null; aggregate: string | null; previousAggregate: string | null }>;
++}>;
++export type ReleaseOperationEnvelopeInput = Readonly<{
++  operationId?: string;
++  operation: ReleaseOperation;
++  manifest: ReleaseManifest;
++  manifestDigest: string;
++  targetIdentity: ReleaseOperationTargetIdentity;
++  owner: ReleaseOperationOwnerIdentity;
++  snapshot?: ReleaseOperationSnapshotIdentity | null;
++  targetLock?: ReleaseOperationLockIdentity | null;
++  phase?: ReleaseOperationEnvelopePhase;
++  status?: ReleaseOperationEnvelopeStatus;
++  recovery?: { code?: string | null; attempts?: number };
++  inner?: { markerDigest?: string | null; aggregate?: string | null; previousAggregate?: string | null };
++}>;
++export type ReleaseOperationEnvelopeRead = Readonly<{
++  state: 'ABSENT' | 'VALID' | 'MALFORMED' | 'CONFLICTING';
++  path: string;
++  bytes?: string;
++  identity?: FilesystemIdentity;
++  envelope?: ReleaseOperationEnvelope;
++  reason?: string;
++}>;
++export type ReleaseOperationStatus = Readonly<{
++  schema: typeof RELEASE_OPERATION_ENVELOPE_SCHEMA;
++  status: 'ABSENT' | 'VALID' | 'STALE' | 'MALFORMED' | 'CONFLICTING';
++  phase: ReleaseOperationEnvelopePhase | null;
++  operation: ReleaseOperation | null;
++  operationId: string | null;
++  nextAction: 'create' | 'admit' | 'quiesce' | 'delegate' | 'verify' | 'retry' | 'none';
++  recovery: Readonly<{ code: string | null; attempts: number }>;
++}>;
++
+ function fail(message: string): never { throw new Error(`ReleaseExclusion: ${message}`); }
+ function stableCompare(left: string, right: string): number { return Buffer.compare(Buffer.from(left), Buffer.from(right)); }
+ 
++function envelopeFail(message: string): never { throw new Error(`ReleaseOperationEnvelope: ${message}`); }
++function exactKeys(value: object, expected: readonly string[], label: string): void {
++  const actual = Object.keys(value).sort(stableCompare); const wanted = [...expected].sort(stableCompare);
++  if (actual.length !== wanted.length || actual.some((key, index) => key !== wanted[index])) envelopeFail(`${label} fields are not closed`);
++}
++function safeDigest(value: unknown, label: string): string {
++  if (typeof value !== 'string' || !SHA256.test(value)) envelopeFail(`${label} is invalid`);
++  return value;
++}
++function safePathDigest(value: unknown, label: string): string { return safeDigest(value, label); }
++function safeString(value: unknown, label: string): string {
++  if (typeof value !== 'string' || value.length === 0 || value.includes('\0') || value.length > 4096) envelopeFail(`${label} is invalid`);
++  return value;
++}
++function safeDate(value: unknown, label: string): string {
++  const text = safeString(value, label); if (Number.isNaN(Date.parse(text))) envelopeFail(`${label} is invalid`); return text;
++}
++function safeIdentity(value: unknown, label: string): ReleaseOperationTargetIdentity {
++  if (!value || typeof value !== 'object' || Array.isArray(value)) envelopeFail(`${label} is malformed`);
++  const object = value as Record<string, unknown>; exactKeys(object, ['pathDigest', 'dev', 'ino'], label);
++  return Object.freeze({ pathDigest: safePathDigest(object.pathDigest, `${label} pathDigest`), dev: safeString(object.dev, `${label} dev`), ino: safeString(object.ino, `${label} ino`) });
++}
++function safeOwner(value: unknown): ReleaseOperationOwnerIdentity {
++  if (!value || typeof value !== 'object' || Array.isArray(value)) envelopeFail('owner is malformed');
++  const object = value as Record<string, unknown>; exactKeys(object, ['id', 'pid', 'processStartedAt', 'acquiredAt', 'manifestDigest', 'epoch'], 'owner');
++  if (typeof object.id !== 'string' || !UUID.test(object.id)) envelopeFail('owner id is invalid');
++  if (!Number.isSafeInteger(object.pid) || (object.pid as number) <= 0 || (object.pid as number) > 2_147_483_647) envelopeFail('owner pid is invalid');
++  if (!Number.isSafeInteger(object.epoch) || (object.epoch as number) < 0) envelopeFail('owner epoch is invalid');
++  return Object.freeze({ id: object.id, pid: object.pid as number, processStartedAt: safeDate(object.processStartedAt, 'owner processStartedAt'), acquiredAt: safeDate(object.acquiredAt, 'owner acquiredAt'), manifestDigest: safeDigest(object.manifestDigest, 'owner manifestDigest'), epoch: object.epoch as number });
++}
++function safeSnapshot(value: unknown): ReleaseOperationSnapshotIdentity | null {
++  if (value === null) return null;
++  if (!value || typeof value !== 'object' || Array.isArray(value)) envelopeFail('snapshot is malformed');
++  const object = value as Record<string, unknown>; exactKeys(object, ['pathDigest', 'digest', 'capturedAt'], 'snapshot');
++  return Object.freeze({ pathDigest: safePathDigest(object.pathDigest, 'snapshot pathDigest'), digest: safeDigest(object.digest, 'snapshot digest'), capturedAt: safeDate(object.capturedAt, 'snapshot capturedAt') });
++}
++function safeLock(value: unknown): ReleaseOperationLockIdentity | null {
++  if (value === null) return null;
++  if (!value || typeof value !== 'object' || Array.isArray(value)) envelopeFail('target lock is malformed');
++  const object = value as Record<string, unknown>; exactKeys(object, ['pathDigest', 'dev', 'ino', 'ownerId'], 'target lock');
++  if (typeof object.ownerId !== 'string' || !UUID.test(object.ownerId)) envelopeFail('target lock owner id is invalid');
++  return Object.freeze({ pathDigest: safePathDigest(object.pathDigest, 'target lock pathDigest'), dev: safeString(object.dev, 'target lock dev'), ino: safeString(object.ino, 'target lock ino'), ownerId: object.ownerId });
++}
++function safeRecovery(value: unknown): Readonly<{ code: string | null; attempts: number }> {
++  if (!value || typeof value !== 'object' || Array.isArray(value)) envelopeFail('recovery is malformed');
++  const object = value as Record<string, unknown>; exactKeys(object, ['code', 'attempts'], 'recovery');
++  if (object.code !== null && (typeof object.code !== 'string' || object.code.length === 0 || object.code.length > 128 || object.code.includes('\0'))) envelopeFail('recovery code is invalid');
++  if (!Number.isSafeInteger(object.attempts) || (object.attempts as number) < 0 || (object.attempts as number) > 1_000_000) envelopeFail('recovery attempts are invalid');
++  return Object.freeze({ code: object.code as string | null, attempts: object.attempts as number });
++}
++function safeInner(value: unknown): Readonly<{ markerDigest: string | null; aggregate: string | null; previousAggregate: string | null }> {
++  if (!value || typeof value !== 'object' || Array.isArray(value)) envelopeFail('inner proof is malformed');
++  const object = value as Record<string, unknown>; exactKeys(object, ['markerDigest', 'aggregate', 'previousAggregate'], 'inner proof');
++  for (const key of ['markerDigest', 'aggregate', 'previousAggregate'] as const) if (object[key] !== null) safeDigest(object[key], `inner ${key}`);
++  return Object.freeze({ markerDigest: object.markerDigest as string | null, aggregate: object.aggregate as string | null, previousAggregate: object.previousAggregate as string | null });
++}
++
++/** Validate the closed v2 outer envelope.  This parser never inspects or
++ * mutates an inner deployment marker; callers must perform that subordinate
++ * proof separately before promoting `committed`. */
++export function validateReleaseOperationEnvelope(value: unknown): ReleaseOperationEnvelope {
++  if (!value || typeof value !== 'object' || Array.isArray(value)) envelopeFail('envelope is malformed');
++  const object = value as Record<string, unknown>;
++  exactKeys(object, ['schema', 'operationId', 'operation', 'manifestDigest', 'manifestIdentityDigest', 'installedTarget', 'discoveryParentsDigest', 'runRootsDigest', 'processSnapshotPathDigest', 'owner', 'snapshot', 'targetLock', 'phase', 'status', 'recovery', 'inner'], 'envelope');
++  if (object.schema !== RELEASE_OPERATION_ENVELOPE_SCHEMA || typeof object.operationId !== 'string' || !UUID.test(object.operationId)) envelopeFail('schema or operation id is invalid');
++  if (!['deploy', 'check', 'restore', 'deploy-exact-0.2.12'].includes(String(object.operation))) envelopeFail('operation is invalid');
++  if (!ENVELOPE_PHASES.includes(object.phase as ReleaseOperationEnvelopePhase) || !ENVELOPE_STATUSES.includes(object.status as ReleaseOperationEnvelopeStatus)) envelopeFail('phase or status is invalid');
++  const owner = safeOwner(object.owner); const target = safeIdentity(object.installedTarget, 'installed target'); const snapshot = safeSnapshot(object.snapshot); const targetLock = safeLock(object.targetLock); const recovery = safeRecovery(object.recovery); const inner = safeInner(object.inner);
++  const envelope = Object.freeze({ schema: RELEASE_OPERATION_ENVELOPE_SCHEMA, operationId: object.operationId as string, operation: object.operation as ReleaseOperation, manifestDigest: safeDigest(object.manifestDigest, 'manifest digest'), manifestIdentityDigest: safeDigest(object.manifestIdentityDigest, 'manifest identity digest'), installedTarget: target, discoveryParentsDigest: safeDigest(object.discoveryParentsDigest, 'discovery parents digest'), runRootsDigest: safeDigest(object.runRootsDigest, 'run roots digest'), processSnapshotPathDigest: safeDigest(object.processSnapshotPathDigest, 'process snapshot path digest'), owner, snapshot, targetLock, phase: object.phase as ReleaseOperationEnvelopePhase, status: object.status as ReleaseOperationEnvelopeStatus, recovery, inner });
++  if (owner.manifestDigest !== envelope.manifestDigest) envelopeFail('owner and manifest digest disagree');
++  if (targetLock && targetLock.ownerId !== owner.id) envelopeFail('target lock owner disagrees');
++  if (envelope.phase === 'committed' && envelope.status !== 'COMMITTED') envelopeFail('committed phase requires committed status');
++  if (envelope.phase === 'failed' && envelope.status !== 'FAILED') envelopeFail('failed phase requires failed status');
++  if (envelope.phase === 'attention' && envelope.status !== 'ATTENTION') envelopeFail('attention phase requires attention status');
++  if (envelope.status === 'COMMITTED' && envelope.phase !== 'committed') envelopeFail('committed status requires committed phase');
++  // A committed outer projection is meaningful only when it carries the
++  // exact aggregate attested by the inner transaction.  `markerDigest` may
++  // remain null for first-install/check paths, but aggregate absence is never
++  // a valid committed state (including through the low-level write API).
++  if (envelope.phase === 'committed' && envelope.inner.aggregate === null) envelopeFail('committed phase lacks inner aggregate');
++  return envelope;
++}
++
++function envelopeManifestIdentity(manifest: ReleaseManifest): { manifestIdentityDigest: string; discoveryParentsDigest: string; runRootsDigest: string; processSnapshotPathDigest: string } {
++  return { manifestIdentityDigest: digest({ operation: manifest.operation, installedTarget: manifest.installedTarget, discoveryParents: manifest.discoveryParents, runRoots: manifest.runRoots, processSnapshotPath: manifest.processSnapshotPath }), discoveryParentsDigest: digest(manifest.discoveryParents), runRootsDigest: digest(manifest.runRoots), processSnapshotPathDigest: digest(manifest.processSnapshotPath) };
++}
++
++export function createReleaseOperationEnvelope(input: ReleaseOperationEnvelopeInput): ReleaseOperationEnvelope {
++  const manifest = validateReleaseManifest(input.manifest); const manifestDigest = safeDigest(input.manifestDigest, 'manifest digest');
++  if (manifest.operation !== input.operation) envelopeFail('operation does not match release manifest');
++  const identities = envelopeManifestIdentity(manifest); const { schema: _ownerSchema, ...ownerInput } = input.owner as ReleaseOwner & { epoch: number }; const owner = safeOwner({ ...ownerInput, manifestDigest });
++  return validateReleaseOperationEnvelope({ schema: RELEASE_OPERATION_ENVELOPE_SCHEMA, operationId: input.operationId ?? randomUUID(), operation: input.operation, manifestDigest, ...identities, installedTarget: input.targetIdentity, owner, snapshot: input.snapshot ?? null, targetLock: input.targetLock ?? null, phase: input.phase ?? 'prepared', status: input.status ?? 'READY', recovery: { code: input.recovery?.code ?? null, attempts: input.recovery?.attempts ?? 0 }, inner: { markerDigest: input.inner?.markerDigest ?? null, aggregate: input.inner?.aggregate ?? null, previousAggregate: input.inner?.previousAggregate ?? null } });
++}
++
++async function readEnvelopeFile(path: string): Promise<ReleaseOperationEnvelopeRead> {
++  const trusted = await inspectTrustedPath(path, 'release operation envelope', { allowMissing: true, surface: true, kind: 'file' }).catch((error) => envelopeFail(`envelope is unreadable: ${(error as Error).message}`));
++  if (!trusted) return Object.freeze({ state: 'ABSENT', path });
++  if (trusted.stat.size < 1 || trusted.stat.size > 1024 * 1024) return Object.freeze({ state: 'MALFORMED', path, reason: 'envelope exceeds byte limit' });
++  const handle = await fs.open(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW).catch((error) => {
++    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
++    envelopeFail(`envelope cannot be opened: ${(error as Error).message}`);
++  });
++  if (!handle) return Object.freeze({ state: 'CONFLICTING', path, reason: 'envelope disappeared during read' });
++  let bytes: Buffer;
++  try { bytes = await handle.readFile(); } finally { await handle.close(); }
++  const after = await inspectTrustedPath(path, 'release operation envelope', { surface: true, kind: 'file' }).catch(() => undefined);
++  if (!after || !sameFilesystemIdentity(trusted.identity, after.identity)) return Object.freeze({ state: 'CONFLICTING', path, reason: 'envelope identity changed during read' });
++  const text = bytes.toString('utf8'); if (!Buffer.from(text, 'utf8').equals(bytes)) return Object.freeze({ state: 'MALFORMED', path, reason: 'envelope is not UTF-8' });
++  try { const canonicalText = text.endsWith('\n') ? text.slice(0, -1) : text; const parsed = parseCanonical(canonicalText); const envelope = validateReleaseOperationEnvelope(parsed); if (`${canonicalString(envelope)}\n` !== text && canonicalString(envelope) !== text) return Object.freeze({ state: 'MALFORMED', path, reason: 'envelope bytes are not canonical' }); return Object.freeze({ state: 'VALID', path, bytes: text, identity: trusted.identity, envelope }); }
++  catch (error) { return Object.freeze({ state: 'MALFORMED', path, reason: (error as Error).message }); }
++}
++
++export async function readReleaseOperationEnvelope(target: string, markerName = RELEASE_OPERATION_ENVELOPE_MARKER): Promise<ReleaseOperationEnvelopeRead> {
++  const trustedTarget = await inspectTrustedPath(target, 'installed target', { surface: true, kind: 'directory' }).catch((error) => envelopeFail(`installed target is unsafe: ${(error as Error).message}`));
++  if (!trustedTarget) envelopeFail('installed target is absent');
++  if (typeof markerName !== 'string' || markerName !== RELEASE_OPERATION_ENVELOPE_MARKER) envelopeFail('envelope marker name is invalid');
++  return readEnvelopeFile(join(target, markerName));
++}
++
++async function writeEnvelopeFile(path: string, bytes: string, expected?: ReleaseOperationEnvelopeRead): Promise<FilesystemIdentity> {
++  const directory = dirname(path); const temporary = `${path}.${RELEASE_OPERATION_ENVELOPE_TEMP_SUFFIX}-${randomUUID()}`;
++  const prior = await inspectTrustedPath(path, 'release operation envelope', { allowMissing: true, surface: true, kind: 'file' }).catch((error) => envelopeFail(`envelope is unreadable: ${(error as Error).message}`));
++  if (expected) {
++    if (expected.state !== 'VALID' || !expected.identity || !expected.bytes || !prior || !sameFilesystemIdentity(prior.identity, expected.identity) || prior.stat.size !== Buffer.byteLength(expected.bytes)) envelopeFail('envelope CAS identity changed');
++    const current = await readEnvelopeFile(path); if (current.state !== 'VALID' || current.bytes !== expected.bytes) envelopeFail('envelope CAS bytes changed');
++  } else if (prior) envelopeFail('envelope already exists');
++  const handle = await fs.open(temporary, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_NOFOLLOW, 0o600);
++  try { await handle.writeFile(bytes, 'utf8'); await handle.sync(); await syncDirectory(directory, 'release operation envelope parent'); await fs.rename(temporary, path); await syncDirectory(directory, 'release operation envelope parent'); const stat = await fs.stat(path); return Object.freeze({ dev: String(stat.dev), ino: String(stat.ino) }); }
++  finally { await handle.close().catch(() => undefined); await fs.unlink(temporary).then(() => syncDirectory(directory, 'release operation envelope parent')).catch(() => undefined); }
++}
++
++/** Publish a prepared marker or atomically advance one existing marker. */
++export async function writeReleaseOperationEnvelope(target: string, envelope: ReleaseOperationEnvelope, expected?: ReleaseOperationEnvelopeRead): Promise<ReleaseOperationEnvelopeRead> {
++  const validated = validateReleaseOperationEnvelope(envelope); const path = join(target, RELEASE_OPERATION_ENVELOPE_MARKER); const bytes = `${canonicalString(validated)}\n`; await writeEnvelopeFile(path, bytes, expected); return readEnvelopeFile(path);
++}
++
++export async function transitionReleaseOperationEnvelope(target: string, current: ReleaseOperationEnvelopeRead, next: ReleaseOperationEnvelope): Promise<ReleaseOperationEnvelopeRead> {
++  if (current.state !== 'VALID') envelopeFail('transition requires a valid current envelope');
++  const prior = current.envelope!;
++  // Validate before inspecting fields so a malformed caller value fails closed
++  // rather than being able to exploit a partial transition check.
++  const candidate = validateReleaseOperationEnvelope(next);
++  if (prior.operationId !== candidate.operationId || prior.operation !== candidate.operation || prior.manifestDigest !== candidate.manifestDigest
++    || prior.manifestIdentityDigest !== candidate.manifestIdentityDigest
++    || prior.installedTarget.pathDigest !== candidate.installedTarget.pathDigest
++    || prior.installedTarget.dev !== candidate.installedTarget.dev
++    || prior.installedTarget.ino !== candidate.installedTarget.ino
++    || prior.discoveryParentsDigest !== candidate.discoveryParentsDigest
++    || prior.runRootsDigest !== candidate.runRootsDigest
++    || prior.processSnapshotPathDigest !== candidate.processSnapshotPathDigest) envelopeFail('transition identity changed');
++  if (prior.phase === 'committed' || prior.phase === 'failed') envelopeFail('terminal envelope cannot transition');
++  const order = new Map(ENVELOPE_PHASES.map((phase, index) => [phase, index]));
++  const ownerChanged = canonicalString(prior.owner) !== canonicalString(candidate.owner);
++  const ownerRebind = ownerChanged && candidate.phase === 'prepared';
++  if (ownerChanged && !ownerRebind) envelopeFail('owner identity changed outside prepared rebind');
++  if (ownerRebind) {
++    if (candidate.owner.epoch <= prior.owner.epoch) envelopeFail('owner epoch did not advance');
++    // A takeover is valid only after the same definitive liveness proof used
++    // by release admission says the previous owner is not live.  Uncertainty
++    // is treated as live by releaseOwnerIsLive and therefore fails closed.
++    const priorOwner: ReleaseOwner = {
++      schema: 'lunacy-release-owner/v1', id: prior.owner.id, pid: prior.owner.pid,
++      processStartedAt: prior.owner.processStartedAt, acquiredAt: prior.owner.acquiredAt,
++      manifestDigest: prior.owner.manifestDigest,
++    };
++    if (releaseOwnerIsLive(priorOwner)) envelopeFail('cannot rebind a live owner');
++  }
++  if (!ownerRebind && candidate.phase !== 'attention' && candidate.phase !== 'failed'
++    && (order.get(candidate.phase)! < order.get(prior.phase)! || order.get(candidate.phase)! > order.get(prior.phase)! + 1)) envelopeFail('phase transition is not adjacent');
++  if (!ownerRebind && prior.snapshot && canonicalString(prior.snapshot) !== canonicalString(candidate.snapshot)) envelopeFail('snapshot identity changed');
++  if (!ownerRebind && prior.targetLock && canonicalString(prior.targetLock) !== canonicalString(candidate.targetLock)) envelopeFail('target lock identity changed');
++  if (candidate.phase === 'committed' && candidate.inner.aggregate === null) envelopeFail('committed envelope lacks an inner aggregate');
++  if (candidate.phase !== 'committed' && canonicalString(prior.inner) !== canonicalString(candidate.inner)) envelopeFail('inner proof changed before commit');
++  return writeReleaseOperationEnvelope(target, candidate, current);
++}
++
++/** A deterministic, mutation-free status capsule.  It deliberately omits
++ * paths, process arguments, and envelope payloads; callers can use the
++ * operation id and phase to request the next explicit action. */
++export async function releaseOperationStatus(options: Readonly<{ target: string; manifest?: ReleaseManifest; manifestDigest?: string }>): Promise<ReleaseOperationStatus> {
++  const observed = await readReleaseOperationEnvelope(options.target);
++  if (observed.state === 'ABSENT') return Object.freeze({ schema: RELEASE_OPERATION_ENVELOPE_SCHEMA, status: 'ABSENT', phase: null, operation: null, operationId: null, nextAction: 'create', recovery: Object.freeze({ code: null, attempts: 0 }) });
++  if (observed.state !== 'VALID') return Object.freeze({ schema: RELEASE_OPERATION_ENVELOPE_SCHEMA, status: observed.state, phase: null, operation: null, operationId: null, nextAction: 'retry', recovery: Object.freeze({ code: 'malformed-envelope', attempts: 0 }) });
++  const envelope = observed.envelope!; let status: ReleaseOperationStatus['status'] = 'VALID'; let code = envelope.recovery.code; let phase = envelope.phase;
++  const target = await inspectTrustedPath(options.target, 'installed target', { surface: true, kind: 'directory' }).catch(() => undefined);
++  if (!target || !sameFilesystemIdentity(target.identity, envelope.installedTarget)) { status = 'STALE'; code = 'target-binding-drift'; }
++  if (status === 'VALID' && envelope.phase !== 'committed' && !releaseOwnerIsLive({ schema: 'lunacy-release-owner/v1', id: envelope.owner.id, pid: envelope.owner.pid, processStartedAt: envelope.owner.processStartedAt, acquiredAt: envelope.owner.acquiredAt, manifestDigest: envelope.owner.manifestDigest })) { status = 'STALE'; code = 'owner-stale'; }
++  if ((options.manifest && !options.manifestDigest) || (!options.manifest && options.manifestDigest)) { status = 'STALE'; code = 'manifest-binding-incomplete'; }
++  if (options.manifest && options.manifestDigest) {
++    try { const manifest = validateReleaseManifest(options.manifest); const ids = envelopeManifestIdentity(manifest); if (options.manifestDigest !== envelope.manifestDigest || ids.manifestIdentityDigest !== envelope.manifestIdentityDigest || manifest.installedTarget !== options.target) { status = 'STALE'; code = 'manifest-binding-drift'; } }
++    catch { status = 'MALFORMED'; code = 'manifest-invalid'; }
++  }
++  const nextAction = status !== 'VALID' ? 'retry' : phase === 'prepared' ? 'admit' : phase === 'admitted' ? 'quiesce' : phase === 'quiesced' ? 'delegate' : phase === 'delegated' ? 'verify' : 'none';
++  return Object.freeze({ schema: RELEASE_OPERATION_ENVELOPE_SCHEMA, status, phase, operation: envelope.operation, operationId: envelope.operationId, nextAction, recovery: Object.freeze({ code: code ?? null, attempts: envelope.recovery.attempts }) });
++}
++
+ async function releaseReverse(claims: readonly OwnedFileClaim[]): Promise<void> {
+   let failure: unknown;
+   for (const claim of [...claims].reverse()) {
+@@ -57,7 +328,11 @@ export async function withReleaseExclusion<T>(options: ReleaseExclusionOptions,
+   if (typeof operation !== 'function') fail('operation callback is required');
+   const waitMs = options.waitMs ?? 30_000;
+   if (!Number.isSafeInteger(waitMs) || waitMs < 0 || waitMs > 120_000) fail('wait is invalid');
+-  const owner = currentReleaseOwner(options.manifestDigest);
++  const suppliedOwner = options.owner;
++  const owner = suppliedOwner
++    ? Object.freeze({ schema: 'lunacy-release-owner/v1' as const, id: suppliedOwner.id, pid: suppliedOwner.pid, processStartedAt: suppliedOwner.processStartedAt, acquiredAt: suppliedOwner.acquiredAt, manifestDigest: suppliedOwner.manifestDigest })
++    : currentReleaseOwner(options.manifestDigest);
++  if (owner.manifestDigest !== options.manifestDigest) fail('release owner manifest digest differs');
+   const acquired: OwnedFileClaim[] = [];
+   const releaseClaims: OwnedFileClaim[] = [];
+   const bridgeClaims: OwnedFileClaim[] = [];
+diff --git a/src/store.ts b/src/store.ts
+index e1391f6..3eaec68 100644
+--- a/src/store.ts
++++ b/src/store.ts
+@@ -18,7 +18,9 @@ import {
+ } from './release-admission.js';
+ 
+ export type StoreSnapshot = { state: MachineState | undefined; generation: number };
+-export type ArtifactFormat = 'legacy' | 'segmented';
++/** Artifact format selector. `segmented` is the shipped v1 format; v2 is an
++ * explicit opt-in marker and is intentionally not selected implicitly. */
++export type ArtifactFormat = 'legacy' | 'segmented' | 'segmented/v2' | 'segmented-v2';
+ export type ArtifactStoreOptions = { format?: ArtifactFormat; segmentEventCeiling?: number; faultInjector?: (point: string) => void };
+ 
+ /** Private pre-publication generation CAS conflict. */
+@@ -110,6 +112,13 @@ const SHA256 = /^[0-9a-f]{64}$/i;
+ const BRIDGE_SOURCE_ID = 'lunacy-runtime-skill-bridge/v1';
+ const RESERVED_PROJECTION_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
+ const NEXT_ACTIONS = new Set(['start', 'blocked', 'advance-ready-steps', 'await-dispatch-receipt', 'await-dispatch-reconciliation', 'await-worker-envelope', 'await-parent-gate-decision', 'complete']);
++function normalizeArtifactFormat(format: ArtifactFormat): ArtifactFormat {
++  if (format === 'segmented-v2') return 'segmented/v2';
++  return format;
++}
++function isSegmentedFormat(format: ArtifactFormat | CurrentManifest['format'] | undefined): boolean {
++  return format === 'segmented' || format === 'segmented/v1' || format === 'segmented/v2';
++}
+ 
+ /** Serialize calls from one process. The filesystem fence below extends the
+  * same CAS to independent kernel processes sharing a root directory. */
+@@ -594,7 +603,7 @@ type CurrentManifest = {
+   stateDigest: string;
+   journalEnd: number;
+   journalDigest: string;
+-  format?: 'segmented/v1';
++  format?: 'segmented/v1' | 'segmented/v2';
+   headDigest?: string;
+   checkpointRevision?: number;
+   segmentCount?: number;
+@@ -657,7 +666,7 @@ function validateCurrent(value: unknown): CurrentManifest {
+   invariant(typeof current.stateDigest === 'string' && SHA256.test(current.stateDigest), 'CURRENT stateDigest is invalid');
+   invariant(typeof current.journalDigest === 'string' && SHA256.test(current.journalDigest), 'CURRENT journalDigest is invalid');
+   if (segmented) {
+-    invariant(current.format === 'segmented/v1', 'CURRENT format is invalid');
++    invariant(current.format === 'segmented/v1' || current.format === 'segmented/v2', 'CURRENT format is invalid');
+     nonNegativeInteger(current.checkpointRevision, 'CURRENT checkpointRevision');
+     nonNegativeInteger(current.segmentCount, 'CURRENT segmentCount');
+     invariant(Number.isSafeInteger(current.activeCeiling) && (current.activeCeiling as number) > 0 && (current.activeCeiling as number) <= 10_000, 'CURRENT activeCeiling is invalid');
+@@ -683,6 +692,7 @@ type SegmentedHead = {
+   active: SegmentDescriptor;
+   activeCeiling: number;
+ };
++type SegmentedHeadV2 = Omit<SegmentedHead, 'schema' | 'format'> & { schema: 2; format: 'segmented/v2' };
+ const SEGMENTED_HEAD_KEYS = ['active', 'activeCeiling', 'checkpointDigest', 'checkpointRevision', 'format', 'generation', 'journalEnd', 'phaseId', 'revision', 'runId', 'schema', 'segments', 'writerFence'] as const;
+ const SEGMENT_KEYS = ['bytes', 'digest', 'endRevision', 'name', 'previousDigest', 'startRevision'] as const;
+ 
+@@ -728,6 +738,36 @@ function validateSegmentedHead(value: unknown): SegmentedHead {
+   return head as SegmentedHead;
+ }
+ 
++function validateSegmentedHeadV2(value: unknown): SegmentedHeadV2 {
++  invariant(value && typeof value === 'object' && !Array.isArray(value), 'segmented v2 head is invalid');
++  const head = value as Record<string, unknown>;
++  exactKeys(head, SEGMENTED_HEAD_KEYS, 'segmented v2 head');
++  invariant(head.schema === 2 && head.format === 'segmented/v2', 'segmented v2 head version is invalid');
++  for (const field of ['generation', 'revision', 'journalEnd', 'checkpointRevision'] as const) nonNegativeInteger(head[field], `segmented v2 head ${field}`);
++  invariant((head.generation as number) > 0 && head.revision === head.journalEnd, 'segmented v2 head revision is invalid');
++  invariant((head.checkpointRevision as number) <= (head.journalEnd as number), 'segmented v2 head checkpoint is invalid');
++  for (const field of ['runId', 'phaseId', 'writerFence'] as const) invariant(typeof head[field] === 'string' && (head[field] as string).length > 0, `segmented v2 head ${field} is invalid`);
++  invariant(typeof head.checkpointDigest === 'string' && SHA256.test(head.checkpointDigest), 'segmented v2 head checkpointDigest is invalid');
++  invariant(Array.isArray(head.segments) && head.segments.every((item, index) => validateSegmentDescriptor(item, `segmented v2 segment ${index + 1}`)), 'segmented v2 head segments are invalid');
++  invariant(head.active && typeof head.active === 'object', 'segmented v2 active suffix is invalid');
++  validateSegmentDescriptor(head.active, 'segmented v2 active suffix');
++  invariant(Number.isSafeInteger(head.activeCeiling) && (head.activeCeiling as number) > 0 && (head.activeCeiling as number) <= 10_000, 'segmented v2 active ceiling is invalid');
++  const descriptors = [...head.segments as SegmentDescriptor[], head.active as SegmentDescriptor];
++  let expected = 1; let previous: string = digest('');
++  for (const descriptor of descriptors) {
++    if (descriptor.endRevision === 0) invariant(descriptors.length === 1, 'segmented v2 empty suffix must be the only segment');
++    invariant(descriptor.startRevision === expected, 'segmented v2 journal has a gap or overlap');
++    invariant(descriptor.previousDigest === previous, 'segmented v2 digest chain is invalid');
++    expected = descriptor.endRevision === 0 ? 1 : descriptor.endRevision + 1;
++    previous = descriptor.digest;
++  }
++  invariant(expected - 1 === head.journalEnd, 'segmented v2 journal end is invalid');
++  invariant((head.active as SegmentDescriptor).endRevision - (head.active as SegmentDescriptor).startRevision + 1 <= (head.activeCeiling as number), 'segmented v2 active suffix exceeds bound');
++  invariant(head.segments.length === 0 || (head.segments.at(-1) as SegmentDescriptor).endRevision < (head.active as SegmentDescriptor).startRevision, 'segmented v2 active suffix overlaps sealed segment');
++  invariant(head.checkpointRevision === (head.segments.length ? (head.segments.at(-1) as SegmentDescriptor).endRevision : 0), 'segmented v2 checkpoint does not name sealed prefix');
++  return head as SegmentedHeadV2;
++}
++
+ function segmentBytes(entries: readonly Record<string, unknown>[]): string {
+   return entries.length ? `${entries.map((entry) => canonicalString(entry)).join('\n')}\n` : '';
+ }
+@@ -770,7 +810,7 @@ export class MemoryArtifactStore implements ArtifactStore {
+    * delayed publication in deterministic/in-memory tests as well as on disk. */
+   private readonly generationFences = new Map<number, { writerFence: string; runId: string; authorityEpoch: number }>();
+   constructor(options: ArtifactStoreOptions = {}) {
+-    this.format = options.format ?? 'legacy';
++    this.format = normalizeArtifactFormat(options.format ?? 'legacy');
+     this.segmentEventCeiling = Number.isSafeInteger(options.segmentEventCeiling) && (options.segmentEventCeiling as number) > 0 ? Math.min(options.segmentEventCeiling as number, 10_000) : 1000;
+   }
+   private async withFence<T>(fn: () => T | Promise<T>): Promise<T> {
+@@ -794,15 +834,16 @@ export class MemoryArtifactStore implements ArtifactStore {
+       if (previousGeneration !== this.generation) throw mintStoreGenerationConflict();
+       validateStateShape(state);
+       const journalText = state.journal.map((entry) => canonicalString(entry)).join('\n') + (state.journal.length ? '\n' : '');
+-      validateJournal(state, journalText, { segmented: this.format === 'segmented' });
++      validateJournal(state, journalText, { segmented: isSegmentedFormat(this.format) });
+       this.state = cloneState(state); this.generation += 1;
+       this.generationFences.set(this.generation, { writerFence: state.writerFence, runId: state.runId, authorityEpoch: state.authorityEpoch });
+       return this.generation;
+     });
+   }
+-  async selectFormat(format: ArtifactFormat): Promise<void> { if (format !== 'legacy' && format !== 'segmented') throw new Error('ManifestMismatch: unknown artifact format'); this.format = format; }
++  async selectFormat(format: ArtifactFormat): Promise<void> { if (!['legacy', 'segmented', 'segmented/v2', 'segmented-v2'].includes(format)) throw new Error('ManifestMismatch: unknown artifact format'); this.format = normalizeArtifactFormat(format); }
+   async migrateToSegmented(): Promise<number> { this.format = 'segmented'; return this.generation; }
+-  async migrate(): Promise<number> { return this.migrateToSegmented(); }
++  async migrateToSegmentedV2(): Promise<number> { this.format = 'segmented/v2'; return this.generation; }
++  async migrate(format?: ArtifactFormat): Promise<number> { return format === 'segmented/v2' || format === 'segmented-v2' || (format === undefined && this.format === 'segmented/v2') ? this.migrateToSegmentedV2() : this.migrateToSegmented(); }
+   async rollbackSegmented(): Promise<number> { this.format = 'legacy'; return this.generation; }
+   async rollback(): Promise<number> { return this.rollbackSegmented(); }
+   async compact(): Promise<{ removed: number }> { return { removed: 0 }; }
+@@ -866,7 +907,7 @@ export class FileArtifactStore implements ArtifactStore {
+     const selected = options.format ?? maybeOptions?.format;
+     this.expectedRootIdentity = identity;
+     this.rootIdentity = identity;
+-    this.format = selected ?? 'legacy';
++    this.format = normalizeArtifactFormat(selected ?? 'legacy');
+     const bound = options.segmentEventCeiling ?? maybeOptions?.segmentEventCeiling;
+     this.segmentEventCeiling = Number.isSafeInteger(bound) && (bound as number) > 0 ? Math.min(bound as number, 10_000) : 1000;
+     this.faultInjector = options.faultInjector ?? maybeOptions?.faultInjector;
+@@ -1508,7 +1549,7 @@ export class FileArtifactStore implements ArtifactStore {
+    * immutable canonical NDJSON files named by their revision range; the head
+    * is the sole authority for ordering, digest chaining, and the bounded active
+    * suffix. */
+-  private async readVerifiedSegmentedGeneration(current: CurrentManifest): Promise<{ state: MachineState; head: SegmentedHead }> {
++  private async readVerifiedSegmentedGeneration(current: CurrentManifest): Promise<{ state: MachineState; head: SegmentedHead | SegmentedHeadV2 }> {
+     const generationDir = join(this.generationsDir, `g${current.generation}`);
+     const statePath = join(generationDir, 'state.json');
+     const headPath = join(generationDir, 'head.json');
+@@ -1522,10 +1563,22 @@ export class FileArtifactStore implements ArtifactStore {
+         this.readRegular(headPath, `generation ${current.generation} head`, CURRENT_BYTE_CEILING),
+       ]);
+     } catch (error) { throw new Error(`ManifestMismatch: CURRENT segmented generation ${current.generation} is incomplete: ${(error as Error).message}`); }
+-    let state: MachineState; let head: SegmentedHead;
+-    try { state = parseCanonical<MachineState>(stateText); validateStateShape(state); }
+-    catch (error) { throw new Error(`ManifestMismatch: segmented state is invalid: ${(error as Error).message}`); }
+-    try { head = validateSegmentedHead(parseCanonical<unknown>(headText)); }
++    const v2 = current.format === 'segmented/v2';
++    let state: MachineState; let head: SegmentedHead | SegmentedHeadV2;
++    try {
++      const parsed = parseCanonical<Record<string, unknown>>(stateText);
++      if (v2) {
++        // v2 keeps the journal exclusively in authenticated segment files;
++        // state.json is a projection with the same schema minus `journal`.
++        const stateKeys = Object.keys(parsed).sort();
++        const expected = ['attemptEpoch', 'authorityEpoch', 'barrier', 'barrierEpoch', 'decisionTokens', 'gate', 'modeEpoch', 'nextAction', 'outbox', 'phaseId', 'planDigest', 'processed', 'revision', 'runId', 'schema', 'status', 'steps', 'writerFence'];
++        invariant(stateKeys.length === expected.length && stateKeys.every((key, index) => key === expected[index]), 'segmented v2 state fields are invalid');
++        state = parsed as unknown as MachineState;
++        state.journal = [];
++      } else state = parsed as MachineState;
++      validateStateShape(state);
++    } catch (error) { throw new Error(`ManifestMismatch: segmented state is invalid: ${(error as Error).message}`); }
++    try { head = v2 ? validateSegmentedHeadV2(parseCanonical<unknown>(headText)) : validateSegmentedHead(parseCanonical<unknown>(headText)); }
+     catch (error) { throw new Error(`ManifestMismatch: segmented head is invalid: ${(error as Error).message}`); }
+     // The active suffix ceiling is part of the signed head, so a reader may
+     // inspect a run created with a non-default ceiling without guessing the
+@@ -1553,6 +1606,7 @@ export class FileArtifactStore implements ArtifactStore {
+       }
+     }
+     const journalText = segmentBytes(entries);
++    if (v2) state.journal = entries as unknown as MachineState['journal'];
+     validateJournal(state, journalText, { segmented: true });
+     invariant(state.revision === head.revision && state.journal.length === head.journalEnd, 'segmented state revision disagrees with head');
+     invariant(digest(state) === current.stateDigest && digest(state.journal) === current.journalDigest, 'segmented state digest mismatch');
+@@ -1591,7 +1645,7 @@ export class FileArtifactStore implements ArtifactStore {
+       await this.quarantineOrphans(undefined);
+       return { state: undefined, generation: 0 };
+     }
+-    if (current.format === 'segmented/v1') {
++    if (current.format === 'segmented/v1' || current.format === 'segmented/v2') {
+       const verified = await this.readVerifiedSegmentedGeneration(current);
+       await this.quarantineOrphans(current.generation, true);
+       return includeCurrent ? { state: verified.state, generation: current.generation, current } : { state: verified.state, generation: current.generation };
+@@ -1712,7 +1766,7 @@ export class FileArtifactStore implements ArtifactStore {
+     catch (error) { throw new Error(`ManifestMismatch: ${(error as Error).message.replace(/^FilesystemTrust:\s*/, '')}`); }
+     if (!generationsIdentity) throw new Error('ManifestMismatch: generations directory is absent');
+     await this.validateReadOnlyNamespace(current.generation);
+-    if (current.format === 'segmented/v1') {
++    if (current.format === 'segmented/v1' || current.format === 'segmented/v2') {
+       const verified = await this.readVerifiedSegmentedGeneration(current);
+       const generationDir = join(this.generationsDir, `g${current.generation}`);
+       const generationIdentity = await trustedIdentity(generationDir, `generation ${current.generation}`, { surface: true, kind: 'directory' });
+@@ -1856,7 +1910,9 @@ export class FileArtifactStore implements ArtifactStore {
+           const statePath = join(generationDir, 'state.json');
+           // A segmented generation has no journal.ndjson. Its verified head
+           // is the immutable journal proof and must be rebound instead.
+-          const journalPath = snapshot.current?.format === 'segmented/v1' ? join(generationDir, 'head.json') : join(generationDir, 'journal.ndjson');
++          const journalPath = snapshot.current?.format === 'segmented/v1' || snapshot.current?.format === 'segmented/v2'
++            ? join(generationDir, 'head.json')
++            : join(generationDir, 'journal.ndjson');
+           let afterCurrentIdentity: FilesystemIdentity | undefined; let afterGenerationsIdentity: FilesystemIdentity | undefined; let afterGenerationIdentity: FilesystemIdentity | undefined; let afterStateIdentity: FilesystemIdentity | undefined; let afterJournalIdentity: FilesystemIdentity | undefined;
+           try {
+             afterCurrentIdentity = await trustedIdentity(join(this.kernelDir, 'CURRENT'), 'CURRENT', { surface: true, kind: 'file' });
+@@ -1893,12 +1949,13 @@ export class FileArtifactStore implements ArtifactStore {
+       this.verifiedGenerationMemo = undefined;
+       const verified = await this.readVerifiedCurrent(true);
+       if (verified.current?.format === 'segmented/v1') this.format = 'segmented';
++      else if (verified.current?.format === 'segmented/v2') this.format = 'segmented/v2';
+       // A staged pin is intentionally allowed to survive the commit call so
+       // publication can consume it.  Reconcile only at a load/restart
+       // boundary, where no in-flight caller can still prove ownership.
+       await this.reconcileReusePins();
+       // Never expose the private proof or retain it if reconciliation fails.
+-      if (verified.current === undefined) {
++      if (verified.current === undefined || verified.current.format === 'segmented/v2') {
+         this.verifiedGenerationMemo = undefined;
+       } else {
+         // Memo capture is an optimization-only proof.  If its optional
+@@ -1916,6 +1973,140 @@ export class FileArtifactStore implements ArtifactStore {
+     }, signal);
+   }
+ 
++  /** v2 publishes a journal-free state projection and only rewrites the
++   * mutable suffix.  Sealed descriptors are authenticated by the predecessor
++   * head and linked into the successor generation without rereading/fsyncing
++   * their bytes. */
++  private async commitSegmentedV2(previousGeneration: number, state: MachineState, currentBefore: CurrentManifest | undefined): Promise<number> {
++    const loadedGeneration = currentBefore?.generation ?? 0;
++    if (loadedGeneration !== previousGeneration) throw mintStoreGenerationConflict();
++    const generation = loadedGeneration + 1;
++    const stage = join(this.generationsDir, `.g${generation}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`);
++    const target = join(this.generationsDir, `g${generation}`);
++    await this.ensureDirectory(stage, 'staged segmented v2 generation directory');
++    const entries = state.journal as unknown as Array<Record<string, unknown>>;
++    let priorHead: SegmentedHeadV2 | undefined;
++    let priorState: MachineState | undefined;
++    const priorGenerationDir = currentBefore?.format === 'segmented/v2' ? join(this.generationsDir, `g${currentBefore.generation}`) : undefined;
++    if (currentBefore?.format === 'segmented/v2') {
++      const verified = await this.readVerifiedSegmentedGeneration(currentBefore);
++      priorHead = verified.head as unknown as SegmentedHeadV2;
++      priorState = verified.state;
++      if (entries.length < priorState.journal.length) throw new Error('ManifestMismatch: segmented v2 append would prune canonical history');
++      for (let index = 0; index < priorState.journal.length; index += 1) {
++        invariant(canonicalString(entries[index]) === canonicalString(priorState.journal[index]), 'segmented v2 prefix identity changed');
++      }
++    } else if (currentBefore?.format === 'segmented/v1') {
++      // Selecting the v2 writer over a verified v1 generation is an explicit
++      // format migration, not permission to prune its logical history.  The
++      // v1 head cannot be hard-linked into a v2 successor, but its complete
++      // replay still authenticates the append-only prefix boundary.
++      const verified = await this.readVerifiedSegmentedGeneration(currentBefore);
++      priorState = verified.state;
++      if (entries.length < priorState.journal.length) throw new Error('ManifestMismatch: segmented v2 append would prune canonical history');
++      for (let index = 0; index < priorState.journal.length; index += 1) {
++        invariant(canonicalString(entries[index]) === canonicalString(priorState.journal[index]), 'segmented v2 prefix identity changed');
++      }
++    }
++    const descriptors: SegmentDescriptor[] = [];
++    const priorDescriptors = priorHead ? [...priorHead.segments, priorHead.active] : [];
++    const prefixEnd = priorHead?.checkpointRevision ?? 0;
++    if (priorHead && prefixEnd > entries.length) throw new Error('ManifestMismatch: segmented v2 checkpoint exceeds candidate journal');
++    // Reuse only the authenticated sealed prefix. A mismatched descriptor is
++    // a hard failure rather than permission to rebuild or silently compact.
++    for (const descriptor of priorHead?.segments ?? []) {
++      const expectedText = segmentBytes(entries.slice(descriptor.startRevision - 1, descriptor.endRevision));
++      invariant(Buffer.byteLength(expectedText) === descriptor.bytes && digest(expectedText) === descriptor.digest, 'ManifestMismatch: segmented v2 sealed prefix mismatch');
++      const sourcePath = join(priorGenerationDir!, descriptor.name);
++      try {
++        // Rebind and authenticate the source before exposing a hard link in
++        // the successor. A source write/replacement between predecessor
++        // verification and this link must fail closed rather than publishing
++        // a mixed generation whose descriptor digest no longer matches bytes.
++        const sourceIdentity = await trustedIdentity(sourcePath, `segmented v2 source ${descriptor.name}`, { surface: true, kind: 'file' });
++        if (!sourceIdentity) throw new Error('ManifestMismatch: segmented v2 sealed prefix identity is unavailable');
++        const sourceText = await this.readRegular(sourcePath, `segmented v2 source ${descriptor.name}`, JOURNAL_BYTE_CEILING * 16);
++        invariant(sourceText === expectedText && digest(sourceText) === descriptor.digest, 'ManifestMismatch: segmented v2 sealed prefix source changed');
++        this.injectFault('hard-link');
++        const stagedPath = join(stage, descriptor.name);
++        await fs.link(sourcePath, stagedPath);
++        const reboundSource = await trustedIdentity(sourcePath, `segmented v2 source ${descriptor.name}`, { surface: true, kind: 'file' });
++        const linkedIdentity = await trustedIdentity(stagedPath, `staged segmented v2 ${descriptor.name}`, { surface: true, kind: 'file' });
++        if (!reboundSource || !sameFilesystemIdentity(sourceIdentity, reboundSource) || !linkedIdentity || !sameFilesystemIdentity(sourceIdentity, linkedIdentity)) throw new Error('ManifestMismatch: segmented v2 sealed prefix identity changed during link');
++        const linkedText = await this.readRegular(stagedPath, `staged segmented v2 ${descriptor.name}`, JOURNAL_BYTE_CEILING * 16);
++        invariant(linkedText === expectedText && digest(linkedText) === descriptor.digest, 'ManifestMismatch: segmented v2 sealed prefix changed during link');
++      } catch (error) {
++        const code = (error as NodeJS.ErrnoException).code;
++        if (code === 'ENOENT' || code === 'ELOOP' || (error as Error).message.startsWith('ManifestMismatch:')) throw new Error('ManifestMismatch: segmented v2 sealed prefix identity is unavailable');
++        await this.writeRegular(join(stage, descriptor.name), expectedText, 'staged segmented v2 sealed segment', true);
++        this.injectFault('segment-fsync'); await this.fsyncFile(join(stage, descriptor.name));
++      }
++      descriptors.push(descriptor);
++    }
++    let offset = prefixEnd;
++    if (entries.length === 0 && descriptors.length === 0) {
++      const descriptor: SegmentDescriptor = { name: 'segment-00000001-00000000.ndjson', startRevision: 1, endRevision: 0, bytes: 0, digest: digest(''), previousDigest: digest('') };
++      await this.writeRegular(join(stage, descriptor.name), '', 'staged segmented v2 active segment', true);
++      this.injectFault('segment-fsync'); await this.fsyncFile(join(stage, descriptor.name)); descriptors.push(descriptor);
++    }
++    while (offset < entries.length || descriptors.length === 0) {
++      const end = entries.length === 0 ? 0 : Math.min(entries.length, offset + this.segmentEventCeiling);
++      const start = entries.length === 0 ? 1 : offset + 1;
++      const text = entries.length === 0 ? '' : segmentBytes(entries.slice(offset, end));
++      const descriptor: SegmentDescriptor = { name: `segment-${String(start).padStart(8, '0')}-${String(end).padStart(8, '0')}.ndjson`, startRevision: start, endRevision: end, bytes: Buffer.byteLength(text), digest: digest(text), previousDigest: descriptors.length ? descriptors.at(-1)!.digest : digest('') };
++      const priorDescriptor = priorDescriptors.find((item) => item.name === descriptor.name && item.digest === descriptor.digest);
++      let reused = false;
++      if (priorDescriptor && priorGenerationDir) {
++        try {
++          const sourcePath = join(priorGenerationDir, descriptor.name);
++          const sourceIdentity = await trustedIdentity(sourcePath, `segmented v2 source ${descriptor.name}`, { surface: true, kind: 'file' });
++          if (!sourceIdentity) throw new Error('ManifestMismatch: segmented v2 source identity is unavailable');
++          const sourceText = await this.readRegular(sourcePath, `segmented v2 source ${descriptor.name}`, JOURNAL_BYTE_CEILING * 16);
++          invariant(sourceText === text && digest(sourceText) === descriptor.digest, 'ManifestMismatch: segmented v2 source changed');
++          this.injectFault('hard-link');
++          const stagedPath = join(stage, descriptor.name);
++          await fs.link(sourcePath, stagedPath);
++          const reboundSource = await trustedIdentity(sourcePath, `segmented v2 source ${descriptor.name}`, { surface: true, kind: 'file' });
++          const linkedIdentity = await trustedIdentity(stagedPath, `staged segmented v2 ${descriptor.name}`, { surface: true, kind: 'file' });
++          if (!reboundSource || !sameFilesystemIdentity(sourceIdentity, reboundSource) || !linkedIdentity || !sameFilesystemIdentity(sourceIdentity, linkedIdentity)) throw new Error('ManifestMismatch: segmented v2 source identity changed during link');
++          const linkedText = await this.readRegular(stagedPath, `staged segmented v2 ${descriptor.name}`, JOURNAL_BYTE_CEILING * 16);
++          invariant(linkedText === text && digest(linkedText) === descriptor.digest, 'ManifestMismatch: segmented v2 source changed during link');
++          reused = true;
++        } catch (error) {
++          if ((error as NodeJS.ErrnoException).code !== 'EEXIST' && (error as Error).message.startsWith('ManifestMismatch:')) throw error;
++        }
++      }
++      if (!reused) {
++        await this.writeRegular(join(stage, descriptor.name), text, 'staged segmented v2 journal segment', true);
++        this.injectFault('segment-fsync'); await this.fsyncFile(join(stage, descriptor.name));
++      }
++      descriptors.push(descriptor);
++      if (entries.length === 0) break;
++      offset = end;
++    }
++    const active = descriptors.at(-1)!;
++    const sealed = descriptors.slice(0, -1);
++    const checkpointRevision = sealed.length ? sealed.at(-1)!.endRevision : 0;
++    const head: SegmentedHeadV2 = { schema: 2, format: 'segmented/v2', generation, runId: state.runId, phaseId: state.phaseId, writerFence: state.writerFence, revision: state.revision, journalEnd: state.journal.length, checkpointRevision, checkpointDigest: digest(entries.slice(0, checkpointRevision)), segments: sealed, active, activeCeiling: this.segmentEventCeiling };
++    // Journal is intentionally absent from the v2 state projection. The
++    // digest still covers the complete reconstructed state for exact replay.
++    const { journal: _journal, ...stateProjection } = state;
++    await this.writeRegular(join(stage, 'state.json'), canonicalString(stateProjection), 'staged segmented v2 state', true);
++    await this.writeRegular(join(stage, 'head.json'), canonicalString(head), 'staged segmented v2 head', true);
++    this.injectFault('state-fsync'); await this.fsyncFile(join(stage, 'state.json')); this.injectFault('head-fsync'); await this.fsyncFile(join(stage, 'head.json')); this.injectFault('seal-fsync'); await this.fsyncDir(stage);
++    const existingTarget = await inspectTrustedPath(target, `generation ${generation}`, { allowMissing: true, surface: true, kind: 'directory' });
++    if (existingTarget) throw new Error(`ManifestMismatch: generation ${generation} already exists`);
++    this.injectFault('generation-rename'); await fs.rename(stage, target); this.injectFault('generation-published'); await this.fsyncDir(this.generationsDir);
++    const manifest: CurrentManifest = { schema: 1, generation, revision: state.revision, authorityEpoch: state.authorityEpoch, attemptEpoch: state.attemptEpoch, barrierEpoch: state.barrierEpoch, modeEpoch: state.modeEpoch, writerFence: state.writerFence, stateDigest: digest(state), journalEnd: state.journal.length, journalDigest: digest(state.journal), format: 'segmented/v2', headDigest: digest(head), checkpointRevision, segmentCount: descriptors.length, activeCeiling: this.segmentEventCeiling };
++    const currentPath = join(this.kernelDir, 'CURRENT');
++    const currentTmp = join(this.kernelDir, `.CURRENT.tmp-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`);
++    const currentIdentityBefore = await trustedIdentity(currentPath, 'CURRENT', { allowMissing: true, surface: true, kind: 'file' });
++    const currentIdentityNow = await trustedIdentity(currentPath, 'CURRENT', { allowMissing: true, surface: true, kind: 'file' });
++    if ((currentIdentityBefore === undefined) !== (currentIdentityNow === undefined) || (currentIdentityBefore && currentIdentityNow && !sameFilesystemIdentity(currentIdentityBefore, currentIdentityNow))) throw new Error('ManifestMismatch: CURRENT changed before segmented v2 commit');
++    await this.writeRegular(currentTmp, canonicalString(manifest), 'staged CURRENT', true); this.injectFault('CURRENT-fsync'); await this.fsyncFile(currentTmp); this.injectFault('CURRENT-rename'); await fs.rename(currentTmp, currentPath); this.injectFault('CURRENT-published'); await this.fsyncDir(this.kernelDir);
++    return generation;
++  }
++
+   private async commitSegmented(previousGeneration: number, state: MachineState, currentBefore: CurrentManifest | undefined): Promise<number> {
+     const loadedGeneration = currentBefore?.generation ?? 0;
+     if (loadedGeneration !== previousGeneration) throw mintStoreGenerationConflict();
+@@ -1938,8 +2129,31 @@ export class FileArtifactStore implements ArtifactStore {
+       const descriptor: SegmentDescriptor = { name: `segment-${String(startRevision).padStart(8, '0')}-${String(endRevision).padStart(8, '0')}.ndjson`, startRevision, endRevision, bytes: Buffer.byteLength(text), digest: digest(text), previousDigest: descriptors.length ? descriptors.at(-1)!.digest : digest('') };
+       const priorDescriptor = priorHead && [...priorHead.segments, priorHead.active].find((item) => item.name === descriptor.name && item.digest === descriptor.digest);
+       if (priorDescriptor && priorGenerationDir) {
+-        try { this.injectFault('hard-link'); await fs.link(join(priorGenerationDir, descriptor.name), join(stage, descriptor.name)); }
+-        catch { await this.writeRegular(join(stage, descriptor.name), text, 'staged segmented journal segment', true); }
++        let reused = false;
++        try {
++          // Bind and authenticate the predecessor source before exposing a
++          // hard-link in the successor. A source write/replacement during
++          // this window must fail closed rather than publishing a mixed
++          // generation whose descriptor no longer matches its bytes.
++          const sourcePath = join(priorGenerationDir, descriptor.name);
++          const sourceIdentity = await trustedIdentity(sourcePath, `segmented source ${descriptor.name}`, { surface: true, kind: 'file' });
++          if (!sourceIdentity) throw new Error('ManifestMismatch: segmented source identity is unavailable');
++          const sourceText = await this.readRegular(sourcePath, `segmented source ${descriptor.name}`, JOURNAL_BYTE_CEILING * 16);
++          invariant(sourceText === text && digest(sourceText) === descriptor.digest, 'ManifestMismatch: segmented source changed');
++          this.injectFault('hard-link');
++          const stagedPath = join(stage, descriptor.name);
++          await fs.link(sourcePath, stagedPath);
++          const reboundSource = await trustedIdentity(sourcePath, `segmented source ${descriptor.name}`, { surface: true, kind: 'file' });
++          const linkedIdentity = await trustedIdentity(stagedPath, `staged segmented ${descriptor.name}`, { surface: true, kind: 'file' });
++          if (!reboundSource || !sameFilesystemIdentity(sourceIdentity, reboundSource) || !linkedIdentity || !sameFilesystemIdentity(sourceIdentity, linkedIdentity)) throw new Error('ManifestMismatch: segmented source identity changed during link');
++          const linkedText = await this.readRegular(stagedPath, `staged segmented ${descriptor.name}`, JOURNAL_BYTE_CEILING * 16);
++          invariant(linkedText === text && digest(linkedText) === descriptor.digest, 'ManifestMismatch: segmented source changed during link');
++          reused = true;
++        } catch (error) {
++          const code = (error as NodeJS.ErrnoException).code;
++          if (code === 'ENOENT' || code === 'ELOOP' || (error as Error).message.startsWith('ManifestMismatch:')) throw new Error('ManifestMismatch: segmented source identity is unavailable');
++        }
++        if (!reused) await this.writeRegular(join(stage, descriptor.name), text, 'staged segmented journal segment', true);
+       } else await this.writeRegular(join(stage, descriptor.name), text, 'staged segmented journal segment', true);
+       this.injectFault('segment-fsync'); await this.fsyncFile(join(stage, descriptor.name));
+       descriptors.push(descriptor);
+@@ -1977,7 +2191,7 @@ export class FileArtifactStore implements ArtifactStore {
+     // not be able to publish a state whose journal projection is malformed,
+     // non-canonical, or disconnected from its event digests.
+     const candidateJournalText = state.journal.map((entry) => canonicalString(entry)).join('\n') + (state.journal.length ? '\n' : '');
+-    validateJournal(state, candidateJournalText, { segmented: this.format === 'segmented' });
++    validateJournal(state, candidateJournalText, { segmented: isSegmentedFormat(this.format) });
+     return this.withFence(async () => {
+       // Consume before probing: no failure path may leave proof that a later
+       // commit could accidentally reuse.  A miss falls through to the
+@@ -1991,8 +2205,15 @@ export class FileArtifactStore implements ArtifactStore {
+         try { await this.readVerifiedCurrent(); } catch { /* retain original parse error */ }
+         throw error;
+       }
++      const segmentedV2 = !this.rollbackRequested && (this.format === 'segmented/v2' || currentManifest?.format === 'segmented/v2');
+       const segmented = !this.rollbackRequested && (this.format === 'segmented' || currentManifest?.format === 'segmented/v1');
+       this.rollbackRequested = false;
++      if (segmentedV2) {
++        this.format = 'segmented/v2';
++        this.verifiedGenerationMemo = undefined;
++        const verifiedPrior = previousGeneration > 0 ? await this.readVerifiedCurrent(true) : undefined;
++        return this.commitSegmentedV2(previousGeneration, state, verifiedPrior?.current ?? currentManifest);
++      }
+       if (segmented) {
+         this.format = 'segmented';
+         this.verifiedGenerationMemo = undefined;
+@@ -2038,11 +2259,11 @@ export class FileArtifactStore implements ArtifactStore {
+    * Existing generations must first be migrated; ordinary append never
+    * changes format implicitly. */
+   async selectFormat(format: ArtifactFormat): Promise<void> {
+-    if (format !== 'legacy' && format !== 'segmented') throw new Error('ManifestMismatch: unknown artifact format');
++    if (!['legacy', 'segmented', 'segmented/v2', 'segmented-v2'].includes(format)) throw new Error('ManifestMismatch: unknown artifact format');
+     await this.withFence(async () => {
+       const current = await this.readCurrent();
+-      if (current?.format === 'segmented/v1' && format === 'legacy') throw new Error('ManifestMismatch: segmented format requires explicit rollback');
+-      this.format = format;
++      if ((current?.format === 'segmented/v1' || current?.format === 'segmented/v2') && format === 'legacy') throw new Error('ManifestMismatch: segmented format requires explicit rollback');
++      this.format = normalizeArtifactFormat(format);
+     });
+   }
+ 
+@@ -2058,6 +2279,7 @@ export class FileArtifactStore implements ArtifactStore {
+       await fs.unlink(migrationMarker).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'ENOENT') throw error; });
+       return loaded.generation;
+     }
++    if (this.format === 'segmented/v2') throw new Error('ManifestMismatch: already using segmented/v2; use explicit rollback or v2 migration');
+     await this.ensure();
+     this.injectFault('migration-marker');
+     await this.writeRegular(migrationMarker, canonicalString({ schema: 1, from: 'legacy', to: 'segmented/v1', priorGeneration: loaded.generation }), 'migration marker', true).catch(async (error) => {
+@@ -2073,7 +2295,46 @@ export class FileArtifactStore implements ArtifactStore {
+       return generation;
+     } catch (error) { throw error; }
+   }
+-  async migrate(): Promise<number> { return this.migrateToSegmented(); }
++  /** Resumable migration to the reader-first v2 namespace. The legacy/v1
++   * generation remains authoritative until the complete v2 successor swaps
++   * CURRENT; retries are idempotent through the exact marker. */
++  async migrateToSegmentedV2(): Promise<number> {
++    const loaded = await this.load();
++    if (!loaded.state) throw new Error('ManifestMismatch: cannot migrate an empty store');
++    const migrationMarker = join(this.kernelDir, 'MIGRATION.json');
++    // The constructor's format is an opt-in writer preference, not proof that
++    // CURRENT already names v2.  Re-read the verified manifest so an explicit
++    // v2 store opening an existing legacy/v1 root still performs migration.
++    const currentManifest = await this.readCurrent();
++    if (currentManifest?.format === 'segmented/v2') {
++      // A post-publication retry may still have the exact marker from the
++      // predecessor generation. Validate it before cleanup; malformed or
++      // foreign migration evidence must never be silently discarded merely
++      // because CURRENT already names v2.
++      const marker = await inspectTrustedPath(migrationMarker, 'migration marker', { allowMissing: true, surface: true, kind: 'file' });
++      if (marker) {
++        const existing = parseCanonical<Record<string, unknown>>(await this.readRegular(migrationMarker, 'migration marker', CURRENT_BYTE_CEILING));
++        exactKeys(existing, ['from', 'priorGeneration', 'schema', 'to'], 'migration marker');
++        invariant(existing.schema === 1 && (existing.from === 'legacy' || existing.from === 'segmented/v1') && existing.to === 'segmented/v2' && Number.isSafeInteger(existing.priorGeneration) && (existing.priorGeneration as number) > 0 && (existing.priorGeneration as number) < loaded.generation, 'migration marker conflicts with current generation');
++      }
++      await fs.unlink(migrationMarker).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'ENOENT') throw error; });
++      return loaded.generation;
++    }
++    await this.ensure();
++    const priorManifest = currentManifest;
++    this.injectFault('migration-marker');
++    await this.writeRegular(migrationMarker, canonicalString({ schema: 1, from: priorManifest?.format ?? 'legacy', to: 'segmented/v2', priorGeneration: loaded.generation }), 'migration marker', true).catch(async (error) => {
++      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
++      const existing = parseCanonical<Record<string, unknown>>(await this.readRegular(migrationMarker, 'migration marker', CURRENT_BYTE_CEILING));
++      invariant(existing.schema === 1 && (existing.from === 'legacy' || existing.from === 'segmented/v1') && existing.to === 'segmented/v2' && existing.priorGeneration === loaded.generation, 'migration marker conflicts with current generation');
++    });
++    this.format = 'segmented/v2';
++    const generation = await this.commit(loaded.generation, loaded.state);
++    await fs.unlink(migrationMarker).catch(() => undefined);
++    await this.fsyncDir(this.kernelDir).catch(() => undefined);
++    return generation;
++  }
++  async migrate(format?: ArtifactFormat): Promise<number> { return format === 'segmented/v2' || format === 'segmented-v2' || (format === undefined && this.format === 'segmented/v2') ? this.migrateToSegmentedV2() : this.migrateToSegmented(); }
+ 
+   /** Roll back by publishing a verified legacy successor while retaining all
+    * segmented generations for explicit later retention. */
+@@ -2091,7 +2352,7 @@ export class FileArtifactStore implements ArtifactStore {
+       if (marker) {
+         const existing = parseCanonical<Record<string, unknown>>(await this.readRegular(rollbackMarker, 'rollback marker', CURRENT_BYTE_CEILING));
+         exactKeys(existing, ['from', 'priorGeneration', 'schema', 'to'], 'rollback marker');
+-        invariant(existing.schema === 1 && existing.from === 'segmented/v1' && existing.to === 'legacy' && Number.isSafeInteger(existing.priorGeneration) && (existing.priorGeneration as number) > 0, 'rollback marker is invalid');
++        invariant(existing.schema === 1 && (existing.from === 'segmented/v1' || existing.from === 'segmented/v2') && existing.to === 'legacy' && Number.isSafeInteger(existing.priorGeneration) && (existing.priorGeneration as number) > 0, 'rollback marker is invalid');
+         await fs.unlink(rollbackMarker).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'ENOENT') throw error; });
+         await this.fsyncDir(this.kernelDir);
+       }
+@@ -2099,12 +2360,14 @@ export class FileArtifactStore implements ArtifactStore {
+       return loaded.generation;
+     }
+     this.injectFault('rollback-marker');
+-    await this.writeRegular(rollbackMarker, canonicalString({ schema: 1, from: 'segmented/v1', to: 'legacy', priorGeneration: loaded.generation }), 'rollback marker', true).catch(async (error) => {
++    const rollbackFrom = currentAfterLoad?.format ?? (this.format === 'segmented/v2' ? 'segmented/v2' : 'segmented/v1');
++    invariant(rollbackFrom === 'segmented/v1' || rollbackFrom === 'segmented/v2', 'ManifestMismatch: rollback requires a segmented generation');
++    await this.writeRegular(rollbackMarker, canonicalString({ schema: 1, from: rollbackFrom, to: 'legacy', priorGeneration: loaded.generation }), 'rollback marker', true).catch(async (error) => {
+       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+       // An earlier interrupted rollback is resumable only when it names the
+       // same predecessor; never overwrite a foreign marker.
+       const existing = parseCanonical<Record<string, unknown>>(await this.readRegular(rollbackMarker, 'rollback marker', CURRENT_BYTE_CEILING));
+-      invariant(existing.schema === 1 && existing.from === 'segmented/v1' && existing.to === 'legacy' && existing.priorGeneration === loaded.generation, 'rollback marker conflicts with current generation');
++      invariant(existing.schema === 1 && (existing.from === 'segmented/v1' || existing.from === 'segmented/v2') && existing.to === 'legacy' && existing.priorGeneration === loaded.generation, 'rollback marker conflicts with current generation');
+     });
+     this.format = 'legacy';
+     this.rollbackRequested = true;
+@@ -2151,9 +2414,25 @@ export class FileArtifactStore implements ArtifactStore {
+     let removalOrder: string[];
+     if (segmented) {
+       invariant(names.includes('head.json') || (names.length === 1 && names[0] === 'state.json'), `generation ${generation} segmented descriptor is incomplete`);
+-      const state = names.includes('state.json') ? parseCanonical<MachineState>(await this.readRegular(join(path, 'state.json'), `generation ${generation} state`, READ_ONLY_STATE_BYTE_CEILING)) : undefined;
+-      if (state) validateStateShape(state);
+-      const head = validateSegmentedHead(parseCanonical(await this.readRegular(join(path, 'head.json'), `generation ${generation} head`, CURRENT_BYTE_CEILING)));
++      const parsedState = names.includes('state.json') ? parseCanonical<Record<string, unknown>>(await this.readRegular(join(path, 'state.json'), `generation ${generation} state`, READ_ONLY_STATE_BYTE_CEILING)) : undefined;
++      const headRaw = parseCanonical<Record<string, unknown>>(await this.readRegular(join(path, 'head.json'), `generation ${generation} head`, CURRENT_BYTE_CEILING));
++      const isV2 = headRaw.format === 'segmented/v2';
++      let state: MachineState | undefined = parsedState as MachineState | undefined;
++      if (state) {
++        if (isV2) {
++          // Historical GC is still a trust boundary: do not silently drop an
++          // unexpected `journal` (or any other extra field) before deleting a
++          // generation. Match the reader's exact journal-free projection
++          // shape, then synthesize only the in-memory journal used for full
++          // segment validation below.
++          const projectionKeys = Object.keys(parsedState!).sort();
++          const expectedProjectionKeys = ['attemptEpoch', 'authorityEpoch', 'barrier', 'barrierEpoch', 'decisionTokens', 'gate', 'modeEpoch', 'nextAction', 'outbox', 'phaseId', 'planDigest', 'processed', 'revision', 'runId', 'schema', 'status', 'steps', 'writerFence'];
++          invariant(projectionKeys.length === expectedProjectionKeys.length && projectionKeys.every((key, index) => key === expectedProjectionKeys[index]), `generation ${generation} segmented v2 state projection is invalid`);
++          state = { ...parsedState!, journal: [] } as unknown as MachineState;
++        }
++        validateStateShape(state);
++      }
++      const head = isV2 ? validateSegmentedHeadV2(headRaw) : validateSegmentedHead(headRaw);
+       invariant(head.generation === generation && (!state || (head.runId === state.runId && head.phaseId === state.phaseId && head.writerFence === state.writerFence)), `generation ${generation} head identity is invalid`);
+       expected = ['state.json', 'head.json', ...head.segments.map((item) => item.name), head.active.name];
+       const unique = new Set(expected);
+@@ -2168,8 +2447,9 @@ export class FileArtifactStore implements ArtifactStore {
+         for (const line of lines) records.push(parseCanonical<Record<string, unknown>>(line));
+       }
+       if (state) {
+-        validateJournal(state, segmentBytes(records), { segmented: true });
+-        invariant(state.revision === head.revision && state.journal.length === head.journalEnd, `generation ${generation} state/head revision mismatch`);
++        const verifiedState = isV2 ? ({ ...state, journal: records as unknown as MachineState['journal'] } as MachineState) : state;
++        validateJournal(verifiedState, segmentBytes(records), { segmented: true });
++        invariant(verifiedState.revision === head.revision && verifiedState.journal.length === head.journalEnd, `generation ${generation} state/head revision mismatch`);
+       }
+       removalOrder = [...head.segments.map((item) => item.name), head.active.name, 'state.json', 'head.json'];
+     } else {
+@@ -2431,6 +2711,16 @@ export class FileArtifactStore implements ArtifactStore {
+     const statePath = join(this.generationsDir, `g${generation}`, 'state.json');
+     try {
+       await this.assertDirectory(generationDir, `generation ${generation}`);
++      // segmented/v2 stores intentionally persist a journal-free state
++      // projection.  Reuse publication still needs an authoritative fence,
++      // but must not reject that projection as a malformed legacy state.  A
++      // v2 CURRENT is re-verified through the immutable head/segment proof so
++      // a cache row can never use a projection detached from its journal.
++      const current = await this.readCurrent();
++      if (current?.generation === generation && current.format === 'segmented/v2') {
++        const verified = await this.readVerifiedSegmentedGeneration(current);
++        return { writerFence: verified.state.writerFence, runId: verified.state.runId, authorityEpoch: verified.state.authorityEpoch };
++      }
+       const state = parseCanonical<MachineState>(await this.readRegular(statePath, 'reuse generation state'));
+       validateStateShape(state);
+       return { writerFence: state.writerFence, runId: state.runId, authorityEpoch: state.authorityEpoch };
+diff --git a/test/r2-deployment.test.js b/test/r2-deployment.test.js
+index 0f5bbc4..8113b81 100644
+--- a/test/r2-deployment.test.js
++++ b/test/r2-deployment.test.js
+@@ -42,9 +42,10 @@ test('R2 complete-tree publication removes owned stale files but preserves unrel
+     result = runDeploy(repo, target, '--check');
+     assert.equal(result.status, 0, result.stderr);
+     const report = JSON.parse(result.stdout);
+-    // R4 carries the private recovery route's two modules (JS, declaration,
+-    // and source-map artifacts) in the signed managed runtime inventory.
+-    assert.equal(report.managedFiles, 164);
++    // R4 carries the private recovery route, P1 carries the private fleet
++    // coordinator, and P2 carries the private decision inbox in the signed
++    // managed runtime inventory.
++    assert.equal(report.managedFiles, 175);
+     assert.match(report.managedAggregate, /^[0-9a-f]{64}$/);
+   } finally {
+     await rm(repo, { recursive: true, force: true });
+diff --git a/test/recovery-forensics.test.js b/test/recovery-forensics.test.js
+index 6c4e804..e60c586 100644
+--- a/test/recovery-forensics.test.js
++++ b/test/recovery-forensics.test.js
+@@ -60,6 +60,35 @@ test('R4 wrong command digest is a closed mismatch and CLI stays private', async
+   assert.equal(result.stderr, '');
+ });
+ 
++test('segmented/v2 recovery capsule reports bounded journal budget', async () => {
++  const { root } = await fixture('r4-v2-budget');
++  try {
++    await new FileArtifactStore(root).migrateToSegmentedV2();
++    const capsule = await inspectRecovery({ runRoot: root, runId: 'r4-v2-budget', launchToken: 'missing-token' });
++    assert.equal(capsule.journal.format, 'segmented');
++    assert.equal(capsule.journal.events.ceiling, null);
++    assert.equal(capsule.journal.bytes.ceiling, null);
++    assert.equal(capsule.journal.activeSuffix.ceiling, 1000);
++    assert.equal(capsule.journal.activeSuffix.used, 1);
++    validateRecoveryCapsule(capsule);
++  } finally {
++    await import('node:fs/promises').then(({ rm }) => rm(root, { recursive: true, force: true }));
++  }
++});
++
++test('managed transition defaults do not select the segmented/v2 writer', async () => {
++  const root = await mkdtemp(join(tmpdir(), 'r4-default-format-'));
++  const plan = { phaseId: 'phase-default-format', steps: [{ stepId: 'step-default-format' }] };
++  try {
++    await transition({ runDir: root, runId: 'r4-default-format', mode: 'runtime', plan }, { event: { kind: 'START', intentRef: { id: 'plan', digest: digest(plan) } }, eventId: 'start' });
++    const current = JSON.parse(await readFile(join(root, '.kernel', 'CURRENT'), 'utf8'));
++    assert.equal(Object.hasOwn(current, 'format'), false);
++    assert.notEqual(current.format, 'segmented/v2');
++  } finally {
++    await import('node:fs/promises').then(({ rm }) => rm(root, { recursive: true, force: true }));
++  }
++});
++
+ test('R4 malformed effect evidence fails closed without cleanup', async () => {
+   const { root } = await fixture('r4-malformed');
+   const effects = join(root, '.codex-effects', createHash('sha256').update('bad-token').digest('hex'));
+diff --git a/tools/deploy-skill.mjs b/tools/deploy-skill.mjs
+index b313567..6067f89 100755
+--- a/tools/deploy-skill.mjs
++++ b/tools/deploy-skill.mjs
+@@ -1,7 +1,7 @@
+ #!/usr/bin/env node
+ 
+ import { createHash, randomUUID } from 'node:crypto';
+-import { constants as fsConstants, promises as fs } from 'node:fs';
++import { constants as fsConstants, existsSync, promises as fs } from 'node:fs';
+ import { basename, dirname, join, relative, resolve, sep } from 'node:path';
+ import { tmpdir } from 'node:os';
+ import { fileURLToPath } from 'node:url';
+@@ -315,6 +315,7 @@ const managedRootFiles = new Set([
+   'runtime/BEADS.md',
+   'runtime/BRIDGE.md',
+   'runtime/CODEX_EXEC.md',
++  'runtime/DECISION_INBOX.md',
+   'runtime/DEPLOYMENT.json',
+   'runtime/README.md',
+   'runtime/WORKFRONT.md',
+@@ -744,6 +745,23 @@ async function readTransaction(target) {
+   return { ...value, tempName, failedName, recoveryPhase, inventory, previousInventory };
+ }
+ 
++/**
++ * The outer envelope is only allowed to adopt an inner transaction that was
++ * created by the exact owner bound to that envelope.  The transaction marker
++ * has no manifest field of its own, so the owner id is the narrow shared
++ * identity: target-lock ownership and transaction publication both receive
++ * this id.  A well-formed marker from another release must remain untouched
++ * rather than being implicitly recovered by `--resume-release`.
++ */
++async function assertResumableInnerBinding(target, expectedOwnerId) {
++  const transaction = await readTransaction(target);
++  if (!transaction) return undefined;
++  if (typeof expectedOwnerId !== 'string' || transaction.ownerId !== expectedOwnerId) {
++    throw new Error('inner deployment transaction is not bound to the outer release owner');
++  }
++  return transaction;
++}
++
+ async function syncParent(target) { await syncDir(target); }
+ 
+ async function syncTreeBottomUp(root, label = 'managed tree') {
+@@ -1226,12 +1244,14 @@ function assertExactLegacyRecoveryBinding(transaction, bundles) {
+ }
+ 
+ function parseArgs(argv) {
+-  let target = process.env.LUNACY_SKILL_ROOT || defaultTarget; let check = false; let restore = false; let exactLegacyDeploy = false; let payload; let inventory; let aggregate; let candidatePayload; let candidateInventory; let candidateAggregate; let releaseManifest;
++  let target = process.env.LUNACY_SKILL_ROOT || defaultTarget; let check = false; let restore = false; let exactLegacyDeploy = false; let payload; let inventory; let aggregate; let candidatePayload; let candidateInventory; let candidateAggregate; let releaseManifest; let releaseEnvelope = false; let envelopeStatus = false; let resumeRelease = false;
+   for (let i = 0; i < argv.length; i += 1) {
+     const arg = argv[i];
+     if (arg === '--check') { check = true; continue; }
+     if (arg === '--restore') { restore = true; continue; }
+     if (arg === '--exact-0.2.12-to-candidate') { exactLegacyDeploy = true; continue; }
++    if (arg === '--release-envelope' || arg === '--resume-release') { releaseEnvelope = true; if (arg === '--resume-release') resumeRelease = true; continue; }
++    if (arg === '--release-envelope-status' || arg === '--status-release') { envelopeStatus = true; continue; }
+     if (arg === '--payload' || arg === '--rollback-payload' || arg === '--rollback-dir') { payload = argv[++i]; if (!payload || payload.startsWith('--')) throw new Error(`${arg} requires a path`); continue; }
+     if (arg === '--inventory' || arg === '--rollback-inventory' || arg === '--expected-inventory') { inventory = argv[++i]; if (!inventory || inventory.startsWith('--')) throw new Error(`${arg} requires a path`); continue; }
+     if (arg === '--aggregate' || arg === '--rollback-aggregate' || arg === '--expected-aggregate') { aggregate = argv[++i]; if (!aggregate || aggregate.startsWith('--') || !/^[0-9a-f]{64}$/.test(aggregate)) throw new Error(`${arg} requires a 64-character SHA-256 digest`); continue; }
+@@ -1240,15 +1260,16 @@ function parseArgs(argv) {
+     if (arg === '--candidate-aggregate') { candidateAggregate = argv[++i]; if (!candidateAggregate || candidateAggregate.startsWith('--') || !/^[0-9a-f]{64}$/.test(candidateAggregate)) throw new Error('--candidate-aggregate requires a 64-character SHA-256 digest'); continue; }
+     if (arg === '--target') { target = argv[++i]; if (!target || target.startsWith('--')) throw new Error('--target requires a path'); continue; }
+     if (arg === '--release-manifest') { releaseManifest = argv[++i]; if (!releaseManifest || releaseManifest.startsWith('--')) throw new Error('--release-manifest requires a path'); continue; }
+-    if (arg === '--help' || arg === '-h') { console.log('Usage: node tools/deploy-skill.mjs [--target SKILL_ROOT] [--check]\n       node tools/deploy-skill.mjs --target SKILL_ROOT --restore --payload PAYLOAD_DIR --inventory INVENTORY.json --aggregate SHA256\n       private exact predecessor deploy: --exact-0.2.12-to-candidate plus rollback and candidate payload/inventory/aggregate and --release-manifest\n       add --release-manifest MANIFEST.json for the production release boundary'); process.exit(0); }
++    if (arg === '--help' || arg === '-h') { console.log('Usage: node tools/deploy-skill.mjs [--target SKILL_ROOT] [--check] [--release-envelope]\n       node tools/deploy-skill.mjs --target SKILL_ROOT --restore --payload PAYLOAD_DIR --inventory INVENTORY.json --aggregate SHA256\n       private exact predecessor deploy: --exact-0.2.12-to-candidate plus rollback and candidate payload/inventory/aggregate and --release-manifest\n       add --release-manifest MANIFEST.json for the production release boundary\n       --release-envelope-status inspects the private resumable envelope without mutation'); process.exit(0); }
+     throw new Error(`unknown argument ${arg}`);
+   }
+   if ([check, restore, exactLegacyDeploy].filter(Boolean).length > 1) throw new Error('--check, --restore, and --exact-0.2.12-to-candidate are mutually exclusive');
++  if (envelopeStatus && (releaseEnvelope || resumeRelease || check || restore || exactLegacyDeploy)) throw new Error('release envelope status is read-only and cannot be combined with an operation');
+   if (restore && (!payload || !inventory || aggregate === undefined)) throw new Error('--restore requires --payload, --inventory, and --aggregate');
+   if (exactLegacyDeploy && (!payload || !inventory || aggregate === undefined || !candidatePayload || !candidateInventory || candidateAggregate === undefined || !releaseManifest)) throw new Error('--exact-0.2.12-to-candidate requires rollback and candidate payload/inventory/aggregate plus --release-manifest');
+   if (!restore && !exactLegacyDeploy && (payload || inventory || aggregate !== undefined)) throw new Error('--payload, --inventory, and --aggregate require --restore or --exact-0.2.12-to-candidate');
+   if (!exactLegacyDeploy && (candidatePayload || candidateInventory || candidateAggregate !== undefined)) throw new Error('candidate payload, inventory, and aggregate require --exact-0.2.12-to-candidate');
+-  return { target: resolve(target), check, restore, exactLegacyDeploy, payload: payload ? resolve(payload) : undefined, inventory: inventory ? resolve(inventory) : undefined, aggregate, candidatePayload: candidatePayload ? resolve(candidatePayload) : undefined, candidateInventory: candidateInventory ? resolve(candidateInventory) : undefined, candidateAggregate, releaseManifest: releaseManifest ? resolve(releaseManifest) : undefined };
++  return { target: resolve(target), check, restore, exactLegacyDeploy, releaseEnvelope, envelopeStatus, resumeRelease, payload: payload ? resolve(payload) : undefined, inventory: inventory ? resolve(inventory) : undefined, aggregate, candidatePayload: candidatePayload ? resolve(candidatePayload) : undefined, candidateInventory: candidateInventory ? resolve(candidateInventory) : undefined, candidateAggregate, releaseManifest: releaseManifest ? resolve(releaseManifest) : undefined };
+ }
+ 
+ function makeWrapper(expectedDigest, expectedFiles, expectedRuntimeVersion, expectedManifestDigest, expectedLauncherDigest, expectedNode) {
+@@ -1420,6 +1441,7 @@ async function executeOperation({ target, check, restore, exactLegacyDeploy, pay
+     { source: join(sourceRoot, 'docs', 'BRIDGE.md'), relative: 'runtime/BRIDGE.md' },
+     { source: join(sourceRoot, 'docs', 'BEADS.md'), relative: 'runtime/BEADS.md' },
+     { source: join(sourceRoot, 'docs', 'WORKFRONT.md'), relative: 'runtime/WORKFRONT.md' },
++    { source: join(sourceRoot, 'docs', 'DECISION_INBOX.md'), relative: 'runtime/DECISION_INBOX.md' },
+     // The Codex host seam is private, but its closed schemas and capability
+     // probe are part of the managed skill release.  Keeping them in the
+     // signed payload lets a host bind policy paths to the exact deployed
+@@ -1429,10 +1451,23 @@ async function executeOperation({ target, check, restore, exactLegacyDeploy, pay
+     { source: join(sourceRoot, 'schemas', 'codex-launch-intent-record.schema.json'), relative: 'runtime/schemas/codex-launch-intent-record.schema.json' },
+     { source: join(sourceRoot, 'schemas', 'codex-launch-record.schema.json'), relative: 'runtime/schemas/codex-launch-record.schema.json' },
+     { source: join(sourceRoot, 'schemas', 'codex-terminal-record.schema.json'), relative: 'runtime/schemas/codex-terminal-record.schema.json' },
++    { source: join(sourceRoot, 'schemas', 'decision-inbox.schema.json'), relative: 'runtime/schemas/decision-inbox.schema.json' },
++    { source: join(sourceRoot, 'schemas', 'phase-handoff.schema.json'), relative: 'runtime/schemas/phase-handoff.schema.json' },
+     { source: join(sourceRoot, 'tools', 'probe-codex-exec.mjs'), relative: 'runtime/tools/probe-codex-exec.mjs' },
+     { source: join(sourceRoot, 'tools', 'bind-release-process-snapshot.mjs'), relative: 'runtime/tools/bind-release-process-snapshot.mjs' },
+     { source: join(sourceRoot, 'tools', 'verify-release-quiescence.mjs'), relative: 'runtime/tools/verify-release-quiescence.mjs' },
+-  ];
++  ].filter((file) => {
++    // Some recovery/deployment tests exercise this script from a tracked-only
++    // temporary checkout.  The P2 inbox contract is additive and may not be
++    // present in that fixture yet; omit only these optional files rather than
++    // weakening validation for the established release surface.
++    const optionalP2 = new Set([
++      'runtime/DECISION_INBOX.md',
++      'runtime/schemas/decision-inbox.schema.json',
++      'runtime/schemas/phase-handoff.schema.json',
++    ]);
++    return !optionalP2.has(file.relative) || existsSync(file.source);
++  });
+   sourceFiles.sort((a, b) => stableCompare(a.relative, b.relative));
+   const sourceRecords = [];
+   const payloadSourceFiles = [];
+@@ -1462,6 +1497,11 @@ drive route.  The managed runtime also carries the exact closed Codex result,
+ launch-intent, launch, and terminal schemas plus the capability probe under runtime/schemas/
+ and runtime/tools/; all are covered by DEPLOYMENT.json.
+ Use "$NODE" runtime/bridge.mjs workfront --help for a read-only dependency capsule.
++Use "$NODE" runtime/bridge.mjs inbox --help for explicitly selected,
++digest-bound decision entries; submit-decision and promote-phase remain
++separate parent-authorized operations.
++See runtime/DECISION_INBOX.md and runtime/schemas/{decision-inbox,phase-handoff}.schema.json
++for the private envelope contracts.
+ Use "$NODE" runtime/bridge.mjs inspect-recovery --help for the token-scoped,
+ read-only recovery/effect forensics capsule.
+ The optional read-only Beads v1.2.2 adapter is documented in runtime/BEADS.md
+@@ -1512,7 +1552,20 @@ async function readProductionSnapshot(path, ownership) {
+ 
+ async function main() {
+   const args = parseArgs(process.argv.slice(2));
++  if (args.envelopeStatus) {
++    const { releaseOperationStatus } = await import('../dist/release-operation.js');
++    let manifest;
++    let manifestDigest;
++    if (args.releaseManifest) {
++      const loaded = await import('../dist/release-admission.js').then(({ readReleaseManifest }) => readReleaseManifest(args.releaseManifest));
++      manifest = loaded.manifest; manifestDigest = loaded.digest;
++    }
++    const result = await releaseOperationStatus({ target: args.target, ...(manifest === undefined ? {} : { manifest }), ...(manifestDigest === undefined ? {} : { manifestDigest }) });
++    console.log(canonical(result));
++    return;
++  }
+   if (!args.releaseManifest) {
++    if (args.releaseEnvelope || args.resumeRelease) throw new Error('--release-envelope requires --release-manifest');
+     await ensureDir(args.target, 'skill root');
+     const targetLock = await acquireTargetLock(args.target);
+     try { return await executeOperation(args, targetLock); }
+@@ -1521,27 +1574,84 @@ async function main() {
+   const [admission, releaseOperation, quiescence] = await Promise.all([
+     import('../dist/release-admission.js'), import('../dist/release-operation.js'), import('../dist/release-quiescence.js'),
+   ]);
+-  const { readReleaseManifest, releaseOwnerIsLive } = admission;
+-  const { withReleaseExclusion } = releaseOperation;
++  const { readReleaseManifest, releaseOwnerIsLive, currentReleaseOwner } = admission;
++  const { withReleaseExclusion, createReleaseOperationEnvelope, readReleaseOperationEnvelope, transitionReleaseOperationEnvelope, writeReleaseOperationEnvelope } = releaseOperation;
+   const { verifyReleaseQuiescence, verifyExactLegacyDeployQuiescence } = quiescence;
+   const release = await readReleaseManifest(args.releaseManifest);
+   const expectedOperation = args.exactLegacyDeploy ? 'deploy-exact-0.2.12' : args.restore ? 'restore' : args.check ? 'check' : 'deploy';
+   if (release.manifest.installedTarget !== args.target || release.manifest.operation !== expectedOperation) throw new Error('release manifest target/operation differs from invocation');
+-  if (!await trustedIdentity(args.target, 'installed skill target', { surface: true, kind: 'directory' })) throw new Error('release installed target is absent');
+-  if (await lstat(release.manifest.processSnapshotPath, 'release process snapshot')) throw new Error('release process snapshot path must be absent before ownership');
+-  return withReleaseExclusion({ manifest: release.manifest, manifestDigest: release.digest }, async (ownership) => {
++  const targetTrusted = await inspectTrustedPath(args.target, 'installed skill target', { surface: true, kind: 'directory' });
++  if (!targetTrusted) throw new Error('release installed target is absent');
++  if (await lstat(release.manifest.processSnapshotPath, 'release process snapshot') && !args.resumeRelease) throw new Error('release process snapshot path must be absent before ownership');
++  let outer;
++  let outerOwner;
++  let outerSnapshotOwner;
++  const makeOuterOwner = (epoch) => { const { schema: _schema, ...owner } = currentReleaseOwner(release.digest); return { ...owner, epoch }; };
++  if (args.releaseEnvelope || args.resumeRelease) {
++    const observed = await readReleaseOperationEnvelope(args.target);
++    if (observed.state === 'VALID') {
++      if (!args.resumeRelease) throw new Error('release operation envelope already exists; use --resume-release');
++      const manifestIdentityDigest = createHash('sha256').update(canonical({ operation: release.manifest.operation, installedTarget: release.manifest.installedTarget, discoveryParents: release.manifest.discoveryParents, runRoots: release.manifest.runRoots, processSnapshotPath: release.manifest.processSnapshotPath })).digest('hex');
++      // Envelope identity digests use the shared canonical-value digest (the
++      // path is a JSON string, not raw pathname bytes).  Keep CLI creation and
++      // resume validation on that exact representation.
++      const pathDigest = (value) => createHash('sha256').update(canonical(value)).digest('hex');
++      if (observed.envelope.operation !== expectedOperation || observed.envelope.manifestDigest !== release.digest || observed.envelope.manifestIdentityDigest !== manifestIdentityDigest || observed.envelope.discoveryParentsDigest !== pathDigest(release.manifest.discoveryParents) || observed.envelope.runRootsDigest !== pathDigest(release.manifest.runRoots) || observed.envelope.processSnapshotPathDigest !== pathDigest(release.manifest.processSnapshotPath) || observed.envelope.installedTarget.pathDigest !== pathDigest(args.target) || observed.envelope.installedTarget.dev !== targetTrusted.identity.dev || observed.envelope.installedTarget.ino !== targetTrusted.identity.ino) throw new Error('release operation envelope binding differs from invocation');
++      outer = observed;
++      outerSnapshotOwner = observed.envelope.owner;
++      const live = releaseOwnerIsLive(observed.envelope.owner);
++      if (live && observed.envelope.owner.pid !== process.pid) throw new Error('release operation envelope owner is live');
++      if (!live) {
++        outerOwner = makeOuterOwner(observed.envelope.owner.epoch + 1);
++        const rebound = { ...observed.envelope, owner: outerOwner, targetLock: null, phase: 'prepared', status: 'READY', recovery: { code: null, attempts: observed.envelope.recovery.attempts + 1 } };
++        outer = await transitionReleaseOperationEnvelope(args.target, observed, rebound);
++      } else outerOwner = observed.envelope.owner;
++    } else if (observed.state === 'ABSENT') {
++      // `--resume-release` is an explicit retry of a previously published
++      // outer operation.  Without its exact marker there is no durable proof
++      // that an earlier effect is safe to adopt; never turn resume into a
++      // fresh (and potentially duplicate) release.
++      if (args.resumeRelease) throw new Error('cannot resume release without an outer envelope');
++      outerOwner = makeOuterOwner(0);
++      outerSnapshotOwner = outerOwner;
++      const envelope = createReleaseOperationEnvelope({ operation: expectedOperation, manifest: release.manifest, manifestDigest: release.digest, targetIdentity: { pathDigest: pathDigest(args.target), dev: targetTrusted.identity.dev, ino: targetTrusted.identity.ino }, owner: outerOwner });
++      outer = await writeReleaseOperationEnvelope(args.target, envelope);
++    } else throw new Error(`release operation envelope is ${observed.state.toLowerCase()}`);
++  }
++  const runRelease = withReleaseExclusion({ manifest: release.manifest, manifestDigest: release.digest, ...(outerOwner === undefined ? {} : { owner: outerOwner }) }, async (ownership) => {
++    if (outer) {
++      const currentTarget = await inspectTrustedPath(args.target, 'release installed target', { surface: true, kind: 'directory' });
++      if (!currentTarget || currentTarget.identity.dev !== outer.envelope.installedTarget.dev || currentTarget.identity.ino !== outer.envelope.installedTarget.ino) throw new Error('release operation target identity changed before admission');
++    }
+     const targetLock = await acquireTargetLock(args.target, { reclaimStaleExactRelease: true, releaseOwner: ownership.owner, releaseOwnerIsLive });
+     try {
++      if (outer) {
++        const lockIdentity = await inspectTrustedPath(targetLock.path, 'release target lock', { surface: true, kind: 'file' });
++        if (!lockIdentity) throw new Error('release target lock disappeared');
++        const admitted = { ...outer.envelope, phase: 'admitted', status: 'READY', targetLock: { pathDigest: createHash('sha256').update(targetLock.path).digest('hex'), dev: lockIdentity.identity.dev, ino: lockIdentity.identity.ino, ownerId: ownership.owner.id } };
++        outer = await transitionReleaseOperationEnvelope(args.target, outer, admitted);
++      }
+       // Only the closed predecessor route adopts its own exact stale release
+       // transaction before the fresh quiescence snapshot. Ordinary v1 keeps
+       // treating any transaction residue as red.
+       let exactLegacyBundles;
++      // Before delegating recovery, bind any existing inner marker to the
++      // owner recorded by the outer envelope.  A marker with a different
++      // owner may be valid in isolation but belongs to another release and is
++      // never safe for this resume to adopt.
++      if (args.resumeRelease) await assertResumableInnerBinding(args.target, outerSnapshotOwner?.id ?? ownership.owner.id);
+       if (args.exactLegacyDeploy) {
+         exactLegacyBundles = await readExactLegacyDeployBundles(args, release.manifest);
+         assertExactLegacyRecoveryBinding(await readTransaction(args.target), exactLegacyBundles);
+         await recoverTransaction(args.target);
+       }
+-      const processSnapshot = await readProductionSnapshot(release.manifest.processSnapshotPath, ownership);
++      // An opted-in resume is the one route allowed to adopt the existing
++      // inner transaction before quiescence.  The target lock and release
++      // claims are already held; recoverTransaction remains the sole authority
++      // for deciding whether the marker converges to the prior/candidate tree.
++      if (args.resumeRelease && !args.exactLegacyDeploy) await recoverTransaction(args.target);
++      const processSnapshot = await readProductionSnapshot(release.manifest.processSnapshotPath, outerSnapshotOwner && outerSnapshotOwner.id !== ownership.owner.id ? { ...ownership, owner: { schema: 'lunacy-release-owner/v1', ...outerSnapshotOwner } } : ownership);
++      if (outer?.envelope.snapshot && createHash('sha256').update(canonical(processSnapshot)).digest('hex') !== outer.envelope.snapshot.digest) throw new Error('release operation process snapshot binding differs from envelope');
+       const quiescenceInput = {
+         installedTarget: args.target,
+         runRoots: release.manifest.runRoots,
+@@ -1557,9 +1667,31 @@ async function main() {
+       };
+       if (args.exactLegacyDeploy) await verifyExactLegacyDeployQuiescence(quiescenceInput);
+       else await verifyReleaseQuiescence(quiescenceInput);
+-      return await executeOperation({ ...args, exactLegacyManifest: args.exactLegacyDeploy ? release.manifest : undefined, exactLegacyBundles }, targetLock);
++      if (outer) {
++        const currentTarget = await inspectTrustedPath(args.target, 'release installed target', { surface: true, kind: 'directory' });
++        if (!currentTarget || currentTarget.identity.dev !== outer.envelope.installedTarget.dev || currentTarget.identity.ino !== outer.envelope.installedTarget.ino) throw new Error('release operation target identity changed before delegation');
++      }
++      if (outer) {
++        const quiesced = { ...outer.envelope, phase: 'quiesced', status: 'READY', snapshot: { pathDigest: pathDigest(release.manifest.processSnapshotPath), digest: createHash('sha256').update(canonical(processSnapshot)).digest('hex'), capturedAt: processSnapshot.capturedAt } };
++        outer = await transitionReleaseOperationEnvelope(args.target, outer, quiesced);
++        outer = await transitionReleaseOperationEnvelope(args.target, outer, { ...outer.envelope, phase: 'delegated', status: 'READY' });
++      }
++      const result = await executeOperation({ ...args, exactLegacyManifest: args.exactLegacyDeploy ? release.manifest : undefined, exactLegacyBundles }, targetLock);
++      if (outer) {
++        let aggregate = null;
++        try { const runtime = join(args.target, 'runtime'); const inventory = await captureRuntimeInventory(runtime, 'outer committed managed tree'); aggregate = inventory.aggregate; } catch { aggregate = null; }
++        if (!aggregate) throw new Error('outer release commit lacks an exact inner aggregate');
++        outer = await transitionReleaseOperationEnvelope(args.target, outer, { ...outer.envelope, phase: 'committed', status: 'COMMITTED', inner: { ...outer.envelope.inner, aggregate } });
++      }
++      return result;
+     } finally { await targetLock.release(); }
+   });
++  return runRelease.catch(async (error) => {
++    if (outer && outer.state === 'VALID' && outer.envelope.phase !== 'committed' && outer.envelope.phase !== 'failed') {
++      try { await transitionReleaseOperationEnvelope(args.target, outer, { ...outer.envelope, phase: 'attention', status: 'ATTENTION', recovery: { code: 'operation-failed', attempts: outer.envelope.recovery.attempts + 1 } }); } catch { /* preserve the first failure and never mask it with marker cleanup */ }
++    }
++    throw error;
++  });
+ }
+ 
+ main().catch((error) => { console.error(error?.stack ?? String(error)); process.exitCode = 1; });

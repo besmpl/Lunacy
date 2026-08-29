@@ -80,10 +80,33 @@ Long-lived local runs may select the private `FileArtifactStore` format through
 the operator/store seam described in [durability](DURABILITY.md); ordinary
 append never implicitly migrates or compacts a run.
 
+The opt-in `segmented/v2` selector (or `migrateToSegmentedV2()`) stores a
+journal-free state projection beside an authenticated sealed-prefix/checkpoint
+and bounded active suffix. The reader reconstructs and verifies the complete
+logical journal before returning a snapshot; v1 and legacy selectors are
+unchanged. This is a private experiment and remains value-unclaimed until the
+paired corpus and recovery/fault evidence authorize a release decision.
+
 The private driver hook is documented in [installation](INSTALL.md). Only the
 composition subpath documented there is intentionally available for host binding;
 other `dist/` modules are not package exports and may change between releases.
 Do not persist or depend on private `MachineState` fields outside `.kernel`.
+
+### Private decision inbox and phase handoff
+
+`dist/decision-inbox.js` is a private, additive route. `listDecisionInbox`
+accepts only an explicit list of run roots and returns deterministic,
+redacted `lunacy-decision-inbox/v1` projections. `submitParentDecision`
+rebinds the projection's generation, cursor, epochs, plan digest, and token
+identity before delegating one `PARENT_DECISION` to `RunKernel.advance`.
+Invalid bindings do not consume a token; retries use the same event identity
+and return the kernel's committed replay.
+
+`promotePhase` accepts one `lunacy-phase-handoff/v1` envelope containing exact
+predecessor proof, successor plan/phase identity, and a parent authorization
+digest. It requires predecessor `COMPLETE`/`PASS` with no live old work before
+calling `initRun` for the explicitly named successor. It performs no discovery,
+queue scheduling, automatic approval, or general DAG traversal.
 
 ### Private bridge filesystem boundary
 

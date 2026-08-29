@@ -1,0 +1,20 @@
+[lunacy-production-orchestration-routing 9e77159] Implement complete roadmap runtime and release surfaces
+ 30 files changed, 3572 insertions(+), 394 deletions(-)
+ create mode 100644 bench/r2-corpus.json
+ create mode 100644 docs/RECOVERY.md
+ create mode 100644 docs/ROADMAP.md
+ create mode 100644 schemas/recovery-forensics.schema.json
+ create mode 100644 src/dispatch-coordinator.ts
+ create mode 100644 src/recovery-forensics.ts
+ create mode 100644 src/recovery.ts
+ create mode 100644 test/controller.test.js
+ create mode 100644 test/fixtures/recovery/absent.json
+ create mode 100644 test/fixtures/recovery/golden-manifest.json
+ create mode 100644 test/fixtures/recovery/goldens/absent-token.json
+ create mode 100644 test/fixtures/recovery/goldens/acked.json
+ create mode 100644 test/fixtures/recovery/goldens/malformed.json
+ create mode 100644 test/fixtures/recovery/goldens/unknown-with-launch.json
+ create mode 100644 test/fixtures/recovery/goldens/unknown-without-evidence.json
+ create mode 100644 test/p3-late-dispatch-lease.test.js
+ create mode 100644 test/r2-segmented.test.js
+ create mode 100644 test/recovery-forensics.test.js

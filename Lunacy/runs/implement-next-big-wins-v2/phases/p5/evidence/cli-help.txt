@@ -1,0 +1,24 @@
+Usage: lunacy-runtime --plan PLAN.json --event EVENT.json [options]
+
+Read one canonical plan and one canonical event, invoke RunKernel.advance, and
+write canonical Yield JSON to stdout. No provider, token, or host capability is
+claimed; an uncomposed dispatch remains a truthful HumanReceiptRequired block.
+
+Options:
+  --plan PATH              Canonical plan JSON (required)
+  --event PATH             Canonical event JSON (required)
+  --run-id ID              Run identity (default: cli-run)
+  --event-id ID            Event identity (default: cli-event)
+  --phase-id ID            Identity phase (default: plan.phaseId)
+  --step-id ID             Identity step (default: run)
+  --root-dir PATH          Durable root containing .kernel/
+  --expected-revision N    Optimistic revision fence
+  --attempt-epoch N        Identity attempt epoch (default: 0)
+  --authority-epoch N      Identity authority epoch (default: 0)
+  --barrier-epoch N        Identity barrier epoch (default: 0)
+  --launch-token TOKEN     Dispatch/receipt identity token
+  --fleet-manifest PATH    Run one explicit multi-run fleet turn (private additive route)
+  --fleet-state PATH       Explicit fleet metadata path (required only when manifest omits statePath)
+  --help                   Show this help
+
+Use '-' as PATH to read that JSON document from stdin (only once).

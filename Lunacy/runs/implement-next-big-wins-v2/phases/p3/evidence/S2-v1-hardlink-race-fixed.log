@@ -1,0 +1,9 @@
+{
+  "beforeBytes": 962,
+  "beforeDigest": "7af76bd5f202a13058b54f291b2b62412a8b584f6b0c02a611ccff4398bc8d36",
+  "sourceAfter": "tampered-v1\\n",
+  "commit": "reject:ManifestMismatch: segmented source identity is unavailable",
+  "currentGeneration": 1,
+  "currentFormat": "segmented/v1",
+  "load": "reject:ManifestMismatch: segmented segment-00000001-00000002.ndjson byte count mismatch"
+}

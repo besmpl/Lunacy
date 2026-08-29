@@ -1,0 +1,9 @@
+{
+  "payload": "/Users/mark/Desktop/lunacy/Lunacy/runs/production-orchestration-upstream/phases/p4/evidence/production-release-sequence/boundary-04-production-smoke-final-audit/recovery-capsule/payloads/rollback-0.2.12",
+  "inventory": "/Users/mark/Desktop/lunacy/Lunacy/runs/production-orchestration-upstream/phases/p4/evidence/production-release-sequence/boundary-04-production-smoke-final-audit/recovery-capsule/payloads/rollback-0.2.12-inventory.json",
+  "inventoryBytes": 12935,
+  "inventoryFileDigest": "b5855c9aef1fdf1c353e3f2947effb8248d1326495e581880dbe83f0856a6f92",
+  "aggregate": "ce68a7095365e8d730861db53af5beb68e8bb53e2a3f66d50f64b5a5167a68fd",
+  "runtimeVersion": "0.2.12",
+  "bridgeVersion": "0.1.0"
+}

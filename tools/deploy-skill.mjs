@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { createHash, randomUUID } from 'node:crypto';
-import { constants as fsConstants, promises as fs } from 'node:fs';
+import { constants as fsConstants, existsSync, promises as fs } from 'node:fs';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -48,6 +48,10 @@ function canonical(value) {
   if (value && typeof value === 'object') return `{${Object.keys(value).sort(stableCompare).map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(',')}}`;
   return JSON.stringify(value);
 }
+// Envelope identity paths are digests of canonical JSON values. Keep this
+// helper at module scope so fresh creation, resume validation, and quiescence
+// transitions all use the same representation.
+function pathDigest(value) { return createHash('sha256').update(canonical(value)).digest('hex'); }
 async function lstat(path, label) {
   try { return (await inspectTrustedPath(resolve(path), label, { allowMissing: true, surface: true }))?.stat; }
   catch (error) { throw new Error(error.message.replace(/^FilesystemTrust:\s*/, '')); }
@@ -315,6 +319,7 @@ const managedRootFiles = new Set([
   'runtime/BEADS.md',
   'runtime/BRIDGE.md',
   'runtime/CODEX_EXEC.md',
+  'runtime/DECISION_INBOX.md',
   'runtime/DEPLOYMENT.json',
   'runtime/README.md',
   'runtime/WORKFRONT.md',
@@ -742,6 +747,23 @@ async function readTransaction(target) {
   const recoveryPhase = value.recoveryPhase ?? null;
   if (!recoveryPhases.has(recoveryPhase)) throw new Error('deployment transaction recovery phase is malformed');
   return { ...value, tempName, failedName, recoveryPhase, inventory, previousInventory };
+}
+
+/**
+ * The outer envelope is only allowed to adopt an inner transaction that was
+ * created by the exact owner bound to that envelope.  The transaction marker
+ * has no manifest field of its own, so the owner id is the narrow shared
+ * identity: target-lock ownership and transaction publication both receive
+ * this id.  A well-formed marker from another release must remain untouched
+ * rather than being implicitly recovered by `--resume-release`.
+ */
+async function assertResumableInnerBinding(target, expectedOwnerId) {
+  const transaction = await readTransaction(target);
+  if (!transaction) return undefined;
+  if (typeof expectedOwnerId !== 'string' || transaction.ownerId !== expectedOwnerId) {
+    throw new Error('inner deployment transaction is not bound to the outer release owner');
+  }
+  return transaction;
 }
 
 async function syncParent(target) { await syncDir(target); }
@@ -1226,12 +1248,14 @@ function assertExactLegacyRecoveryBinding(transaction, bundles) {
 }
 
 function parseArgs(argv) {
-  let target = process.env.LUNACY_SKILL_ROOT || defaultTarget; let check = false; let restore = false; let exactLegacyDeploy = false; let payload; let inventory; let aggregate; let candidatePayload; let candidateInventory; let candidateAggregate; let releaseManifest;
+  let target = process.env.LUNACY_SKILL_ROOT || defaultTarget; let check = false; let restore = false; let exactLegacyDeploy = false; let payload; let inventory; let aggregate; let candidatePayload; let candidateInventory; let candidateAggregate; let releaseManifest; let releaseEnvelope = false; let envelopeStatus = false; let resumeRelease = false;
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--check') { check = true; continue; }
     if (arg === '--restore') { restore = true; continue; }
     if (arg === '--exact-0.2.12-to-candidate') { exactLegacyDeploy = true; continue; }
+    if (arg === '--release-envelope' || arg === '--resume-release') { releaseEnvelope = true; if (arg === '--resume-release') resumeRelease = true; continue; }
+    if (arg === '--release-envelope-status' || arg === '--status-release') { envelopeStatus = true; continue; }
     if (arg === '--payload' || arg === '--rollback-payload' || arg === '--rollback-dir') { payload = argv[++i]; if (!payload || payload.startsWith('--')) throw new Error(`${arg} requires a path`); continue; }
     if (arg === '--inventory' || arg === '--rollback-inventory' || arg === '--expected-inventory') { inventory = argv[++i]; if (!inventory || inventory.startsWith('--')) throw new Error(`${arg} requires a path`); continue; }
     if (arg === '--aggregate' || arg === '--rollback-aggregate' || arg === '--expected-aggregate') { aggregate = argv[++i]; if (!aggregate || aggregate.startsWith('--') || !/^[0-9a-f]{64}$/.test(aggregate)) throw new Error(`${arg} requires a 64-character SHA-256 digest`); continue; }
@@ -1240,15 +1264,16 @@ function parseArgs(argv) {
     if (arg === '--candidate-aggregate') { candidateAggregate = argv[++i]; if (!candidateAggregate || candidateAggregate.startsWith('--') || !/^[0-9a-f]{64}$/.test(candidateAggregate)) throw new Error('--candidate-aggregate requires a 64-character SHA-256 digest'); continue; }
     if (arg === '--target') { target = argv[++i]; if (!target || target.startsWith('--')) throw new Error('--target requires a path'); continue; }
     if (arg === '--release-manifest') { releaseManifest = argv[++i]; if (!releaseManifest || releaseManifest.startsWith('--')) throw new Error('--release-manifest requires a path'); continue; }
-    if (arg === '--help' || arg === '-h') { console.log('Usage: node tools/deploy-skill.mjs [--target SKILL_ROOT] [--check]\n       node tools/deploy-skill.mjs --target SKILL_ROOT --restore --payload PAYLOAD_DIR --inventory INVENTORY.json --aggregate SHA256\n       private exact predecessor deploy: --exact-0.2.12-to-candidate plus rollback and candidate payload/inventory/aggregate and --release-manifest\n       add --release-manifest MANIFEST.json for the production release boundary'); process.exit(0); }
+    if (arg === '--help' || arg === '-h') { console.log('Usage: node tools/deploy-skill.mjs [--target SKILL_ROOT] [--check] [--release-envelope]\n       node tools/deploy-skill.mjs --target SKILL_ROOT --restore --payload PAYLOAD_DIR --inventory INVENTORY.json --aggregate SHA256\n       private exact predecessor deploy: --exact-0.2.12-to-candidate plus rollback and candidate payload/inventory/aggregate and --release-manifest\n       add --release-manifest MANIFEST.json for the production release boundary\n       --release-envelope-status inspects the private resumable envelope without mutation'); process.exit(0); }
     throw new Error(`unknown argument ${arg}`);
   }
   if ([check, restore, exactLegacyDeploy].filter(Boolean).length > 1) throw new Error('--check, --restore, and --exact-0.2.12-to-candidate are mutually exclusive');
+  if (envelopeStatus && (releaseEnvelope || resumeRelease || check || restore || exactLegacyDeploy)) throw new Error('release envelope status is read-only and cannot be combined with an operation');
   if (restore && (!payload || !inventory || aggregate === undefined)) throw new Error('--restore requires --payload, --inventory, and --aggregate');
   if (exactLegacyDeploy && (!payload || !inventory || aggregate === undefined || !candidatePayload || !candidateInventory || candidateAggregate === undefined || !releaseManifest)) throw new Error('--exact-0.2.12-to-candidate requires rollback and candidate payload/inventory/aggregate plus --release-manifest');
   if (!restore && !exactLegacyDeploy && (payload || inventory || aggregate !== undefined)) throw new Error('--payload, --inventory, and --aggregate require --restore or --exact-0.2.12-to-candidate');
   if (!exactLegacyDeploy && (candidatePayload || candidateInventory || candidateAggregate !== undefined)) throw new Error('candidate payload, inventory, and aggregate require --exact-0.2.12-to-candidate');
-  return { target: resolve(target), check, restore, exactLegacyDeploy, payload: payload ? resolve(payload) : undefined, inventory: inventory ? resolve(inventory) : undefined, aggregate, candidatePayload: candidatePayload ? resolve(candidatePayload) : undefined, candidateInventory: candidateInventory ? resolve(candidateInventory) : undefined, candidateAggregate, releaseManifest: releaseManifest ? resolve(releaseManifest) : undefined };
+  return { target: resolve(target), check, restore, exactLegacyDeploy, releaseEnvelope, envelopeStatus, resumeRelease, payload: payload ? resolve(payload) : undefined, inventory: inventory ? resolve(inventory) : undefined, aggregate, candidatePayload: candidatePayload ? resolve(candidatePayload) : undefined, candidateInventory: candidateInventory ? resolve(candidateInventory) : undefined, candidateAggregate, releaseManifest: releaseManifest ? resolve(releaseManifest) : undefined };
 }
 
 function makeWrapper(expectedDigest, expectedFiles, expectedRuntimeVersion, expectedManifestDigest, expectedLauncherDigest, expectedNode) {
@@ -1420,6 +1445,7 @@ async function executeOperation({ target, check, restore, exactLegacyDeploy, pay
     { source: join(sourceRoot, 'docs', 'BRIDGE.md'), relative: 'runtime/BRIDGE.md' },
     { source: join(sourceRoot, 'docs', 'BEADS.md'), relative: 'runtime/BEADS.md' },
     { source: join(sourceRoot, 'docs', 'WORKFRONT.md'), relative: 'runtime/WORKFRONT.md' },
+    { source: join(sourceRoot, 'docs', 'DECISION_INBOX.md'), relative: 'runtime/DECISION_INBOX.md' },
     // The Codex host seam is private, but its closed schemas and capability
     // probe are part of the managed skill release.  Keeping them in the
     // signed payload lets a host bind policy paths to the exact deployed
@@ -1429,10 +1455,23 @@ async function executeOperation({ target, check, restore, exactLegacyDeploy, pay
     { source: join(sourceRoot, 'schemas', 'codex-launch-intent-record.schema.json'), relative: 'runtime/schemas/codex-launch-intent-record.schema.json' },
     { source: join(sourceRoot, 'schemas', 'codex-launch-record.schema.json'), relative: 'runtime/schemas/codex-launch-record.schema.json' },
     { source: join(sourceRoot, 'schemas', 'codex-terminal-record.schema.json'), relative: 'runtime/schemas/codex-terminal-record.schema.json' },
+    { source: join(sourceRoot, 'schemas', 'decision-inbox.schema.json'), relative: 'runtime/schemas/decision-inbox.schema.json' },
+    { source: join(sourceRoot, 'schemas', 'phase-handoff.schema.json'), relative: 'runtime/schemas/phase-handoff.schema.json' },
     { source: join(sourceRoot, 'tools', 'probe-codex-exec.mjs'), relative: 'runtime/tools/probe-codex-exec.mjs' },
     { source: join(sourceRoot, 'tools', 'bind-release-process-snapshot.mjs'), relative: 'runtime/tools/bind-release-process-snapshot.mjs' },
     { source: join(sourceRoot, 'tools', 'verify-release-quiescence.mjs'), relative: 'runtime/tools/verify-release-quiescence.mjs' },
-  ];
+  ].filter((file) => {
+    // Some recovery/deployment tests exercise this script from a tracked-only
+    // temporary checkout.  The P2 inbox contract is additive and may not be
+    // present in that fixture yet; omit only these optional files rather than
+    // weakening validation for the established release surface.
+    const optionalP2 = new Set([
+      'runtime/DECISION_INBOX.md',
+      'runtime/schemas/decision-inbox.schema.json',
+      'runtime/schemas/phase-handoff.schema.json',
+    ]);
+    return !optionalP2.has(file.relative) || existsSync(file.source);
+  });
   sourceFiles.sort((a, b) => stableCompare(a.relative, b.relative));
   const sourceRecords = [];
   const payloadSourceFiles = [];
@@ -1462,6 +1501,11 @@ drive route.  The managed runtime also carries the exact closed Codex result,
 launch-intent, launch, and terminal schemas plus the capability probe under runtime/schemas/
 and runtime/tools/; all are covered by DEPLOYMENT.json.
 Use "$NODE" runtime/bridge.mjs workfront --help for a read-only dependency capsule.
+Use "$NODE" runtime/bridge.mjs inbox --help for explicitly selected,
+digest-bound decision entries; submit-decision and promote-phase remain
+separate parent-authorized operations.
+See runtime/DECISION_INBOX.md and runtime/schemas/{decision-inbox,phase-handoff}.schema.json
+for the private envelope contracts.
 Use "$NODE" runtime/bridge.mjs inspect-recovery --help for the token-scoped,
 read-only recovery/effect forensics capsule.
 The optional read-only Beads v1.2.2 adapter is documented in runtime/BEADS.md
@@ -1512,7 +1556,20 @@ async function readProductionSnapshot(path, ownership) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
+  if (args.envelopeStatus) {
+    const { releaseOperationStatus } = await import('../dist/release-operation.js');
+    let manifest;
+    let manifestDigest;
+    if (args.releaseManifest) {
+      const loaded = await import('../dist/release-admission.js').then(({ readReleaseManifest }) => readReleaseManifest(args.releaseManifest));
+      manifest = loaded.manifest; manifestDigest = loaded.digest;
+    }
+    const result = await releaseOperationStatus({ target: args.target, ...(manifest === undefined ? {} : { manifest }), ...(manifestDigest === undefined ? {} : { manifestDigest }) });
+    console.log(canonical(result));
+    return;
+  }
   if (!args.releaseManifest) {
+    if (args.releaseEnvelope || args.resumeRelease) throw new Error('--release-envelope requires --release-manifest');
     await ensureDir(args.target, 'skill root');
     const targetLock = await acquireTargetLock(args.target);
     try { return await executeOperation(args, targetLock); }
@@ -1521,27 +1578,80 @@ async function main() {
   const [admission, releaseOperation, quiescence] = await Promise.all([
     import('../dist/release-admission.js'), import('../dist/release-operation.js'), import('../dist/release-quiescence.js'),
   ]);
-  const { readReleaseManifest, releaseOwnerIsLive } = admission;
-  const { withReleaseExclusion } = releaseOperation;
+  const { readReleaseManifest, releaseOwnerIsLive, currentReleaseOwner } = admission;
+  const { withReleaseExclusion, createReleaseOperationEnvelope, readReleaseOperationEnvelope, transitionReleaseOperationEnvelope, writeReleaseOperationEnvelope } = releaseOperation;
   const { verifyReleaseQuiescence, verifyExactLegacyDeployQuiescence } = quiescence;
   const release = await readReleaseManifest(args.releaseManifest);
   const expectedOperation = args.exactLegacyDeploy ? 'deploy-exact-0.2.12' : args.restore ? 'restore' : args.check ? 'check' : 'deploy';
   if (release.manifest.installedTarget !== args.target || release.manifest.operation !== expectedOperation) throw new Error('release manifest target/operation differs from invocation');
-  if (!await trustedIdentity(args.target, 'installed skill target', { surface: true, kind: 'directory' })) throw new Error('release installed target is absent');
-  if (await lstat(release.manifest.processSnapshotPath, 'release process snapshot')) throw new Error('release process snapshot path must be absent before ownership');
-  return withReleaseExclusion({ manifest: release.manifest, manifestDigest: release.digest }, async (ownership) => {
+  const targetTrusted = await inspectTrustedPath(args.target, 'installed skill target', { surface: true, kind: 'directory' });
+  if (!targetTrusted) throw new Error('release installed target is absent');
+  if (await lstat(release.manifest.processSnapshotPath, 'release process snapshot') && !args.resumeRelease) throw new Error('release process snapshot path must be absent before ownership');
+  let outer;
+  let outerOwner;
+  let outerSnapshotOwner;
+  const makeOuterOwner = (epoch) => { const { schema: _schema, ...owner } = currentReleaseOwner(release.digest); return { ...owner, epoch }; };
+  if (args.releaseEnvelope || args.resumeRelease) {
+    const observed = await readReleaseOperationEnvelope(args.target);
+    if (observed.state === 'VALID') {
+      if (!args.resumeRelease) throw new Error('release operation envelope already exists; use --resume-release');
+      const manifestIdentityDigest = createHash('sha256').update(canonical({ operation: release.manifest.operation, installedTarget: release.manifest.installedTarget, discoveryParents: release.manifest.discoveryParents, runRoots: release.manifest.runRoots, processSnapshotPath: release.manifest.processSnapshotPath })).digest('hex');
+      if (observed.envelope.operation !== expectedOperation || observed.envelope.manifestDigest !== release.digest || observed.envelope.manifestIdentityDigest !== manifestIdentityDigest || observed.envelope.discoveryParentsDigest !== pathDigest(release.manifest.discoveryParents) || observed.envelope.runRootsDigest !== pathDigest(release.manifest.runRoots) || observed.envelope.processSnapshotPathDigest !== pathDigest(release.manifest.processSnapshotPath) || observed.envelope.installedTarget.pathDigest !== pathDigest(args.target) || observed.envelope.installedTarget.dev !== targetTrusted.identity.dev || observed.envelope.installedTarget.ino !== targetTrusted.identity.ino) throw new Error('release operation envelope binding differs from invocation');
+      outer = observed;
+      outerSnapshotOwner = observed.envelope.owner;
+      const live = releaseOwnerIsLive(observed.envelope.owner);
+      if (live && observed.envelope.owner.pid !== process.pid) throw new Error('release operation envelope owner is live');
+      if (!live) {
+        outerOwner = makeOuterOwner(observed.envelope.owner.epoch + 1);
+        const rebound = { ...observed.envelope, owner: outerOwner, targetLock: null, phase: 'prepared', status: 'READY', recovery: { code: null, attempts: observed.envelope.recovery.attempts + 1 } };
+        outer = await transitionReleaseOperationEnvelope(args.target, observed, rebound);
+      } else outerOwner = observed.envelope.owner;
+    } else if (observed.state === 'ABSENT') {
+      // `--resume-release` is an explicit retry of a previously published
+      // outer operation.  Without its exact marker there is no durable proof
+      // that an earlier effect is safe to adopt; never turn resume into a
+      // fresh (and potentially duplicate) release.
+      if (args.resumeRelease) throw new Error('cannot resume release without an outer envelope');
+      outerOwner = makeOuterOwner(0);
+      outerSnapshotOwner = outerOwner;
+      const envelope = createReleaseOperationEnvelope({ operation: expectedOperation, manifest: release.manifest, manifestDigest: release.digest, targetIdentity: { pathDigest: pathDigest(args.target), dev: targetTrusted.identity.dev, ino: targetTrusted.identity.ino }, owner: outerOwner });
+      outer = await writeReleaseOperationEnvelope(args.target, envelope);
+    } else throw new Error(`release operation envelope is ${observed.state.toLowerCase()}`);
+  }
+  const runRelease = withReleaseExclusion({ manifest: release.manifest, manifestDigest: release.digest, ...(outerOwner === undefined ? {} : { owner: outerOwner }) }, async (ownership) => {
+    if (outer) {
+      const currentTarget = await inspectTrustedPath(args.target, 'release installed target', { surface: true, kind: 'directory' });
+      if (!currentTarget || currentTarget.identity.dev !== outer.envelope.installedTarget.dev || currentTarget.identity.ino !== outer.envelope.installedTarget.ino) throw new Error('release operation target identity changed before admission');
+    }
     const targetLock = await acquireTargetLock(args.target, { reclaimStaleExactRelease: true, releaseOwner: ownership.owner, releaseOwnerIsLive });
     try {
+      if (outer) {
+        const lockIdentity = await inspectTrustedPath(targetLock.path, 'release target lock', { surface: true, kind: 'file' });
+        if (!lockIdentity) throw new Error('release target lock disappeared');
+        const admitted = { ...outer.envelope, phase: 'admitted', status: 'READY', targetLock: { pathDigest: createHash('sha256').update(targetLock.path).digest('hex'), dev: lockIdentity.identity.dev, ino: lockIdentity.identity.ino, ownerId: ownership.owner.id } };
+        outer = await transitionReleaseOperationEnvelope(args.target, outer, admitted);
+      }
       // Only the closed predecessor route adopts its own exact stale release
       // transaction before the fresh quiescence snapshot. Ordinary v1 keeps
       // treating any transaction residue as red.
       let exactLegacyBundles;
+      // Before delegating recovery, bind any existing inner marker to the
+      // owner recorded by the outer envelope.  A marker with a different
+      // owner may be valid in isolation but belongs to another release and is
+      // never safe for this resume to adopt.
+      if (args.resumeRelease) await assertResumableInnerBinding(args.target, outerSnapshotOwner?.id ?? ownership.owner.id);
       if (args.exactLegacyDeploy) {
         exactLegacyBundles = await readExactLegacyDeployBundles(args, release.manifest);
         assertExactLegacyRecoveryBinding(await readTransaction(args.target), exactLegacyBundles);
         await recoverTransaction(args.target);
       }
-      const processSnapshot = await readProductionSnapshot(release.manifest.processSnapshotPath, ownership);
+      // An opted-in resume is the one route allowed to adopt the existing
+      // inner transaction before quiescence.  The target lock and release
+      // claims are already held; recoverTransaction remains the sole authority
+      // for deciding whether the marker converges to the prior/candidate tree.
+      if (args.resumeRelease && !args.exactLegacyDeploy) await recoverTransaction(args.target);
+      const processSnapshot = await readProductionSnapshot(release.manifest.processSnapshotPath, outerSnapshotOwner && outerSnapshotOwner.id !== ownership.owner.id ? { ...ownership, owner: { schema: 'lunacy-release-owner/v1', ...outerSnapshotOwner } } : ownership);
+      if (outer?.envelope.snapshot && createHash('sha256').update(canonical(processSnapshot)).digest('hex') !== outer.envelope.snapshot.digest) throw new Error('release operation process snapshot binding differs from envelope');
       const quiescenceInput = {
         installedTarget: args.target,
         runRoots: release.manifest.runRoots,
@@ -1557,8 +1667,30 @@ async function main() {
       };
       if (args.exactLegacyDeploy) await verifyExactLegacyDeployQuiescence(quiescenceInput);
       else await verifyReleaseQuiescence(quiescenceInput);
-      return await executeOperation({ ...args, exactLegacyManifest: args.exactLegacyDeploy ? release.manifest : undefined, exactLegacyBundles }, targetLock);
+      if (outer) {
+        const currentTarget = await inspectTrustedPath(args.target, 'release installed target', { surface: true, kind: 'directory' });
+        if (!currentTarget || currentTarget.identity.dev !== outer.envelope.installedTarget.dev || currentTarget.identity.ino !== outer.envelope.installedTarget.ino) throw new Error('release operation target identity changed before delegation');
+      }
+      if (outer) {
+        const quiesced = { ...outer.envelope, phase: 'quiesced', status: 'READY', snapshot: { pathDigest: pathDigest(release.manifest.processSnapshotPath), digest: createHash('sha256').update(canonical(processSnapshot)).digest('hex'), capturedAt: processSnapshot.capturedAt } };
+        outer = await transitionReleaseOperationEnvelope(args.target, outer, quiesced);
+        outer = await transitionReleaseOperationEnvelope(args.target, outer, { ...outer.envelope, phase: 'delegated', status: 'READY' });
+      }
+      const result = await executeOperation({ ...args, exactLegacyManifest: args.exactLegacyDeploy ? release.manifest : undefined, exactLegacyBundles }, targetLock);
+      if (outer) {
+        let aggregate = null;
+        try { const runtime = join(args.target, 'runtime'); const inventory = await captureRuntimeInventory(runtime, 'outer committed managed tree'); aggregate = inventory.aggregate; } catch { aggregate = null; }
+        if (!aggregate) throw new Error('outer release commit lacks an exact inner aggregate');
+        outer = await transitionReleaseOperationEnvelope(args.target, outer, { ...outer.envelope, phase: 'committed', status: 'COMMITTED', inner: { ...outer.envelope.inner, aggregate } });
+      }
+      return result;
     } finally { await targetLock.release(); }
+  });
+  return runRelease.catch(async (error) => {
+    if (outer && outer.state === 'VALID' && outer.envelope.phase !== 'committed' && outer.envelope.phase !== 'failed') {
+      try { await transitionReleaseOperationEnvelope(args.target, outer, { ...outer.envelope, phase: 'attention', status: 'ATTENTION', recovery: { code: 'operation-failed', attempts: outer.envelope.recovery.attempts + 1 } }); } catch { /* preserve the first failure and never mask it with marker cleanup */ }
+    }
+    throw error;
   });
 }
 

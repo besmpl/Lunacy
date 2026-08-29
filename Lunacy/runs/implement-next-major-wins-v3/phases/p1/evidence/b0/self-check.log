@@ -1,0 +1,4 @@
+{"status":"PASS","byteRecords":24,"baselineAggregate":"f43e01678ee60a8ef5b503fbc101245e50a9d909a1b1086709c9a1447e61120e","manualReplay":true,"releasePathDigest":true,"acceptedItems":3}
+
+COMMAND: node /tmp/check-b0-evidence.mjs
+EXIT: 0

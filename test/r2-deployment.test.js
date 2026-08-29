@@ -42,9 +42,9 @@ test('R2 complete-tree publication removes owned stale files but preserves unrel
     result = runDeploy(repo, target, '--check');
     assert.equal(result.status, 0, result.stderr);
     const report = JSON.parse(result.stdout);
-    // R4 carries the private recovery route's two modules (JS, declaration,
-    // and source-map artifacts) in the signed managed runtime inventory.
-    assert.equal(report.managedFiles, 164);
+    // The accepted recovery, fleet, inbox, proof, and continuation surfaces
+    // are all present in the signed managed runtime inventory.
+    assert.equal(report.managedFiles, 183);
     assert.match(report.managedAggregate, /^[0-9a-f]{64}$/);
   } finally {
     await rm(repo, { recursive: true, force: true });

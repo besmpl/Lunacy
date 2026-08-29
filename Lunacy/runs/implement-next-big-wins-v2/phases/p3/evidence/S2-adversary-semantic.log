@@ -1,0 +1,15 @@
+head-gap: reject
+head-overlap: reject
+head-unknown-schema: reject
+v2-projection-extra-journal: reject
+fault-state-fsync: commit-fail, restart old-or-new
+fault-segment-fsync: commit-fail, restart old-or-new
+fault-head-fsync: commit-fail, restart old-or-new
+fault-seal-fsync: commit-fail, restart old-or-new
+fault-generation-rename: commit-fail, restart old-or-new
+fault-generation-published: commit-fail, restart old-or-new
+fault-CURRENT-fsync: commit-fail, restart old-or-new
+fault-CURRENT-rename: commit-fail, restart old-or-new
+fault-CURRENT-published: commit-fail, restart old-or-new
+fault-hard-link: commit-ok, restart old-or-new
+memory-file-parity: 37 records + readOnly PASS

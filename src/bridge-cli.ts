@@ -24,7 +24,10 @@ function usage(): string {
        lunacy-bridge lifecycle --command init|run|resume --run-dir RUN --run-id ID --mode runtime --plan PLAN.json [options]
 
 Read-only dependency explanation:
-  lunacy-bridge workfront --run-root RUN --run-id ID [--limit 16] [--focus STEP]
+       lunacy-bridge workfront --run-root RUN --run-id ID [--limit 16] [--focus STEP]
+       lunacy-bridge inbox --entries ENTRIES.json [--limit 16]
+       lunacy-bridge submit-decision --inbox INBOX.json --plan PLAN.json --run-root RUN --run-id ID --token TOKEN --value PASS|FINDINGS|ADOPT_JSON
+       lunacy-bridge promote-phase --handoff HANDOFF.json
        lunacy-bridge inspect-recovery --run-root RUN --run-id ID --launch-token TOKEN [--command-digest HEX] [--policy POLICY.json]
 
 Invoke one private runtime-to-skill transition. The bridge calls only
@@ -260,6 +263,18 @@ export async function runBridgeCli(argv = process.argv.slice(2), injectedDriver?
     try { return await runWorkfrontCli(argv.slice(1)); }
     catch (error) { throw safeWorkfrontError(error); }
   }
+  if (argv[0] === 'inbox' || argv[0] === 'decision-inbox') {
+    try { return await runInboxCli(argv.slice(1)); }
+    catch (error) { throw safeInboxError(error); }
+  }
+  if (argv[0] === 'submit-decision' || argv[0] === 'submit-parent-decision') {
+    try { return await runSubmitDecisionCli(argv.slice(1)); }
+    catch (error) { throw safeInboxError(error); }
+  }
+  if (argv[0] === 'promote-phase' || argv[0] === 'promote') {
+    try { return await runPromotePhaseCli(argv.slice(1)); }
+    catch (error) { throw safeInboxError(error); }
+  }
   const flags = parseArgs(argv);
   if (flags.help) { await writeOutput(`${usage()}\n`); return 0; }
   if (!flags.modeProvided || flags.mode === undefined) throw new Error('--mode is required; choose runtime or markdown explicitly');
@@ -367,6 +382,94 @@ async function runWorkfrontCli(argv: string[]): Promise<number> {
   const capsule = await inspectWorkfront({ kernelRoot: flags.runRoot, expectedRunId: flags.runId, ...(flags.limit === undefined ? {} : { limit: flags.limit }), ...(flags.focus === undefined ? {} : { focusStepId: flags.focus }) });
   await writeOutput(`${canonicalString(capsule)}\n`);
   return 0;
+}
+
+type InboxFlags = { entries?: string; runRoot?: string; runId?: string; token?: string; planDigest?: string; policyDigest?: string; limit?: number; help: boolean };
+function parseInboxArgs(argv: string[]): InboxFlags {
+  const flags: InboxFlags = { help: false };
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === '--help' || arg === '-h') { flags.help = true; continue; }
+    if (!arg.startsWith('--')) throw new Error(`unknown inbox argument ${arg}`);
+    const value = argv[++index]; if (value === undefined || value.startsWith('--')) throw new Error(`${arg} requires a value`);
+    if (arg === '--entries') flags.entries = value;
+    else if (arg === '--run-root') flags.runRoot = value;
+    else if (arg === '--run-id') flags.runId = value;
+    else if (arg === '--token') flags.token = value;
+    else if (arg === '--plan-digest') flags.planDigest = value;
+    else if (arg === '--policy-digest') flags.policyDigest = value;
+    else if (arg === '--limit') flags.limit = numberFlag('limit', value);
+    else throw new Error(`unknown inbox option ${arg}`);
+  }
+  return flags;
+}
+function safeInboxError(error: unknown): Error {
+  const message = error instanceof Error ? error.message : String(error);
+  let code = 'DecisionInboxError';
+  if (message.includes('ManifestMismatch') || message.includes('FilesystemTrust') || message.includes('changed during read')) code = 'ManifestMismatch';
+  else if (message.includes('output exceeds') || message.includes('ceiling')) code = 'CapsuleLimit';
+  else if (message.startsWith('DecisionInbox:') || message.includes('requires a value') || message.includes('unknown inbox') || message.includes('unknown submit') || message.includes('unknown promote')) code = 'InvalidInboxInput';
+  const result = new Error(code); result.name = 'DecisionInboxError'; return result;
+}
+async function runInboxCli(argv: string[]): Promise<number> {
+  const flags = parseInboxArgs(argv);
+  if (flags.help) { await writeOutput('Usage: lunacy-bridge inbox --entries ENTRIES.json [--limit 16]\n'); return 0; }
+  const { listDecisionInbox } = await import('./decision-inbox.js');
+  let input: any;
+  if (flags.entries) input = await readCanonical(flags.entries);
+  else {
+    if (!flags.runRoot || !flags.runId) throw new Error('--entries or --run-root/--run-id are required');
+    input = { entries: [{ runRoot: flags.runRoot, runId: flags.runId, ...(flags.token === undefined ? {} : { token: flags.token }), ...(flags.planDigest === undefined ? {} : { planDigest: flags.planDigest }), ...(flags.policyDigest === undefined ? {} : { policyDigest: flags.policyDigest }) }], ...(flags.limit === undefined ? {} : { limit: flags.limit }) };
+  }
+  if (flags.limit !== undefined && input.limit === undefined) input = { ...input, limit: flags.limit };
+  const capsule = await listDecisionInbox(input);
+  await writeOutput(`${canonicalString(capsule)}\n`); return 0;
+}
+
+type SubmitFlags = { inbox?: string; plan?: string; runRoot?: string; runId?: string; token?: string; value?: string; eventId?: string; policy?: string; help: boolean };
+function parseSubmitArgs(argv: string[]): SubmitFlags {
+  const flags: SubmitFlags = { help: false };
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === '--help' || arg === '-h') { flags.help = true; continue; }
+    if (!arg.startsWith('--')) throw new Error(`unknown submit argument ${arg}`);
+    const value = argv[++index]; if (value === undefined || value.startsWith('--')) throw new Error(`${arg} requires a value`);
+    if (arg === '--inbox') flags.inbox = value; else if (arg === '--plan') flags.plan = value; else if (arg === '--run-root') flags.runRoot = value; else if (arg === '--run-id') flags.runId = value; else if (arg === '--token') flags.token = value; else if (arg === '--value') flags.value = value; else if (arg === '--event-id') flags.eventId = value; else if (arg === '--policy') flags.policy = value; else throw new Error(`unknown submit option ${arg}`);
+  }
+  return flags;
+}
+async function runSubmitDecisionCli(argv: string[]): Promise<number> {
+  const flags = parseSubmitArgs(argv);
+  if (flags.help) { await writeOutput('Usage: lunacy-bridge submit-decision --inbox INBOX.json --plan PLAN.json --run-root RUN --run-id ID --token TOKEN --value PASS|FINDINGS|ADOPT_JSON\n'); return 0; }
+  if (!flags.inbox || !flags.plan || !flags.runRoot || !flags.runId || !flags.token || !flags.value) throw new Error('--inbox, --plan, --run-root, --run-id, --token, and --value are required');
+  const { submitParentDecision } = await import('./decision-inbox.js');
+  const inbox = await readCanonical(flags.inbox) as any; const plan = await readCanonical(flags.plan) as Plan; let policy: unknown;
+  if (flags.policy) policy = await readCanonical(flags.policy);
+  let value: unknown = flags.value;
+  if (flags.value.startsWith('{')) value = parseCanonical(flags.value);
+  const result = await submitParentDecision({ selection: { runRoot: flags.runRoot, runId: flags.runId, token: flags.token }, inbox, plan, value, ...(flags.eventId === undefined ? {} : { eventId: flags.eventId }), ...(policy === undefined ? {} : { policy: policy as any }) });
+  await writeOutput(`${canonicalString(result)}\n`); return 0;
+}
+
+type PromoteFlags = { handoff?: string; help: boolean };
+function parsePromoteArgs(argv: string[]): PromoteFlags {
+  const flags: PromoteFlags = { help: false };
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === '--help' || arg === '-h') { flags.help = true; continue; }
+    if (arg !== '--handoff') throw new Error(`unknown promote argument ${arg}`);
+    const value = argv[++index]; if (value === undefined || value.startsWith('--')) throw new Error('--handoff requires a value'); flags.handoff = value;
+  }
+  return flags;
+}
+async function runPromotePhaseCli(argv: string[]): Promise<number> {
+  const flags = parsePromoteArgs(argv);
+  if (flags.help) { await writeOutput('Usage: lunacy-bridge promote-phase --handoff HANDOFF.json\n'); return 0; }
+  if (!flags.handoff) throw new Error('--handoff is required');
+  const { promotePhase } = await import('./decision-inbox.js');
+  const handoff = await readCanonical(flags.handoff) as any;
+  const result = await promotePhase({ handoff });
+  await writeOutput(`${canonicalString(result)}\n`); return 0;
 }
 
 let isMain = false;

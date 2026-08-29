@@ -1,0 +1,1 @@
+Usage: lunacy-bridge init|run|resume --run-dir RUN --run-id ID --mode runtime --plan PLAN.json [--policy POLICY.json] [--max-transitions N]

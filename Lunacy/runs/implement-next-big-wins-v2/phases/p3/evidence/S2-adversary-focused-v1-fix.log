@@ -1,0 +1,28 @@
+✔ segmented/v2 reconstructs a journal-free state and reuses its sealed prefix (286.367208ms)
+✔ segmented/v2 read-only inspection and reuse fences accept the journal-free projection (315.275875ms)
+✔ segmented/v2 refuses a tampered sealed source before publishing CURRENT (156.331959ms)
+✔ segmented/v1 refuses a tampered reused source before publishing CURRENT (168.951833ms)
+✔ segmented/v2 compaction rejects an extra journal field in historical projections (212.936125ms)
+✔ segmented/v2 rejects prefix tamper before exposing state and preserves Memory parity (141.835167ms)
+✔ legacy migration to segmented/v2 and explicit rollback retain exact logical history (345.338833ms)
+✔ segmented/v2 publication faults converge to one complete old-or-new generation (2584.549375ms)
+✔ segmented file reader preserves a long logical prefix and active suffix (1440.058709ms)
+✔ segmented transitions over 10,000 records match the deterministic semantic oracle (1521.146708ms)
+✔ memory and file segmented stores expose identical logical history (466.515458ms)
+✔ migration, rollback, and explicit compaction retain crash-safe generations (510.716792ms)
+✔ unknown segmented version is rejected before state use (131.839875ms)
+✔ segmented reader rejects mixed legacy files before state use (126.891417ms)
+✔ P2-ORPHAN-GENERATION quarantines a renamed successor and permits retry (259.493583ms)
+✔ P2-READONLY-SEGMENTED verifies head identity without a legacy journal path (120.688708ms)
+✔ P2-CURRENT-CONTINUITY rejects independently tampered segmented fields without mutation or reuse (590.657ms)
+✔ P2-MARKER-LEGACY never lets an object-local marker lift legacy ceilings (370.697167ms)
+✔ P2-ROLLBACK-GC preserves marker-referenced history and is idempotent (286.172125ms)
+✔ P2-FAULT-MATRIX leaves only old-or-new authority across publication boundaries (3022.284875ms)
+ℹ tests 20
+ℹ suites 0
+ℹ pass 20
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 8938.482209

@@ -1,0 +1,11 @@
+total_files 132
+package_size 353301
+unpacked_size 1758530
+docs/FLEET.md True
+docs/DECISION_INBOX.md True
+schemas/decision-inbox.schema.json False
+schemas/phase-handoff.schema.json False
+schemas/release-operation.schema.json False
+dist/fleet-coordinator.js True
+dist/decision-inbox.js True
+dist/release-operation.js True

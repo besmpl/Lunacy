@@ -6,9 +6,10 @@ import { fileURLToPath } from 'node:url';
 import { canonicalString, digest, parseCanonical } from './canonical.js';
 import { makeRunKernel, type KernelOptions } from './public.js';
 import type { AdvanceInput, Event, Plan } from './model.js';
+import type { FleetManifest } from './fleet-coordinator.js';
 
 type Flags = {
-  plan?: string; event?: string; runId: string; eventId: string; phaseId?: string; stepId: string;
+  plan?: string; event?: string; fleetManifest?: string; fleetState?: string; runId: string; eventId: string; phaseId?: string; stepId: string;
   rootDir?: string; expectedRevision?: number; attemptEpoch: number; authorityEpoch: number;
   barrierEpoch: number; launchToken?: string; help: boolean;
 };
@@ -33,6 +34,8 @@ Options:
   --authority-epoch N      Identity authority epoch (default: 0)
   --barrier-epoch N        Identity barrier epoch (default: 0)
   --launch-token TOKEN     Dispatch/receipt identity token
+  --fleet-manifest PATH    Run one explicit multi-run fleet turn (private additive route)
+  --fleet-state PATH       Explicit fleet metadata path (required only when manifest omits statePath)
   --help                   Show this help
 
 Use '-' as PATH to read that JSON document from stdin (only once).`;
@@ -55,6 +58,7 @@ function parseArgs(argv: string[]): Flags {
     if (value === undefined || value.startsWith('--')) throw new Error(`--${name} requires a value`);
     switch (name) {
       case 'plan': flags.plan = value; break; case 'event': flags.event = value; break;
+      case 'fleet-manifest': flags.fleetManifest = value; break; case 'fleet-state': flags.fleetState = value; break;
       case 'run-id': flags.runId = value; break; case 'event-id': flags.eventId = value; break;
       case 'phase-id': flags.phaseId = value; break; case 'step-id': flags.stepId = value; break;
       case 'root-dir': flags.rootDir = value; break;
@@ -92,6 +96,14 @@ function planFrom(value: unknown): Plan {
 export async function runCli(argv = process.argv.slice(2)): Promise<number> {
   const flags = parseArgs(argv);
   if (flags.help) { process.stdout.write(`${usage()}\n`); return 0; }
+  if (flags.fleetManifest) {
+    const stdin = { used: false };
+    const manifest = await readCanonical(flags.fleetManifest, stdin) as FleetManifest;
+    const { runFleet } = await import('./fleet-coordinator.js');
+    const result = await runFleet({ manifest, ...(flags.fleetState === undefined ? {} : { statePath: flags.fleetState }) });
+    process.stdout.write(`${canonicalString(result)}\n`);
+    return 0;
+  }
   if (!flags.plan || !flags.event) throw new Error('--plan and --event are required');
   const stdin = { used: false };
   const plan = planFrom(await readCanonical(flags.plan, stdin));

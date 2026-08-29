@@ -1,0 +1,6 @@
+retention-marker: compact removed 1, retained g2
+rollback-v2: exact logical journal restored
+migration-migration-marker: retry generation 2 exact
+migration-state-fsync: retry generation 2 exact
+migration-generation-rename: retry generation 2 exact
+migration-CURRENT-rename: retry generation 2 exact

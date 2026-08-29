@@ -1,0 +1,17 @@
+✔ decision inbox listing is deterministic, redacted, and mutation-free (344.744959ms)
+✔ valid decision submission commits once and exact retry replays (1081.989625ms)
+✔ stale bindings do not consume a token and identical concurrent submits journal once (1123.1125ms)
+✔ phase binding is exact and a tampered inbox phase cannot consume a token (1018.88925ms)
+✔ submit snapshots caller plan before the verified read can yield (969.840917ms)
+✔ exact phase promotion requires predecessor PASS and is retry-safe (1394.882167ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 6013.212083
+
+COMMAND: node --test test/decision-inbox.test.js
+EXIT: 0

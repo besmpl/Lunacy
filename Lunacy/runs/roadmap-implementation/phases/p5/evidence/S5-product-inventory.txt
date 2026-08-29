@@ -1,0 +1,34 @@
+S5 product inventory
+captured=2026-08-28T21:28:11Z
+
+[included product paths]
+bench/r2-corpus.json
+docs/API.md
+docs/BRIDGE.md
+docs/DURABILITY.md
+docs/MIGRATION.md
+docs/RECOVERY.md
+docs/ROADMAP.md
+schemas/recovery-forensics.schema.json
+src/bridge-cli.ts
+src/codex-effect-records.ts
+src/dispatch-coordinator.ts
+src/orchestration.ts
+src/public.ts
+src/recovery-forensics.ts
+src/recovery.ts
+src/reducer.ts
+src/store.ts
+test/controller.test.js
+test/fixtures/recovery/
+test/p3-late-dispatch-lease.test.js
+test/r2-deployment.test.js
+test/r2-segmented.test.js
+test/recovery-forensics.test.js
+tools/deploy-skill.mjs
+
+[excluded Lunacy run-control/evidence]
+Lunacy/
+
+[excluded external logs]
+none in repository worktree

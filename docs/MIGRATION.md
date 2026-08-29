@@ -37,6 +37,15 @@ only an explicit `compact()` may remove unreachable generations, and pending
 markers pin their referenced history. No ordinary append performs retention or
 history deletion.
 
+The private `segmented/v2` route is opt-in through `format: 'segmented/v2'` or
+`migrateToSegmentedV2()`. Its state projection omits `journal`; readers rebuild
+and authenticate the complete journal from the sealed prefix and bounded active
+suffix before exposing state. Sealed ranges are reused by identity (never
+rewritten in place), while each successor publishes a complete v2 head/state
+and `CURRENT` with the same old-or-new fence. The writer remains disabled as a
+release claim until the paired value corpus demonstrates bounded-prefix value;
+reader/oracle support is safe to retain when that decision is unclaimed.
+
 Deletion testing removes graph indexes, context compiler output, and reuse
 blobs/indexes, then replays the same fixture through OFF. The expected result is
 byte/identity-equivalent yields, revisions, journal transitions, refs,

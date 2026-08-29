@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "lunacy-worker-proof-v1",
+  "title": "Lunacy disposable worker proof",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "version", "contractDigest", "phaseId", "stepId", "attemptEpoch", "launchToken", "commandDigest", "terminalDigest", "reportDigest", "diffDigest", "artifactDigests", "producer", "checks", "evidence", "createdAt", "expiresAt"],
+  "properties": {
+    "schema": { "const": "lunacy-worker-proof/v1" },
+    "version": { "const": 1 },
+    "contractDigest": { "$ref": "#/$defs/digest" },
+    "phaseId": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "stepId": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "attemptEpoch": { "type": "integer", "minimum": 0 },
+    "launchToken": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "commandDigest": { "$ref": "#/$defs/digest" },
+    "terminalDigest": { "$ref": "#/$defs/digest" },
+    "reportDigest": { "anyOf": [{ "$ref": "#/$defs/digest" }, { "type": "null" }] },
+    "diffDigest": { "anyOf": [{ "$ref": "#/$defs/digest" }, { "type": "null" }] },
+    "artifactDigests": { "type": "array", "maxItems": 128, "items": { "$ref": "#/$defs/digest" } },
+    "producer": { "$ref": "#/$defs/producer" },
+    "checks": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "$ref": "#/$defs/proofCheck" } },
+    "evidence": { "type": "array", "maxItems": 128, "items": { "$ref": "#/$defs/proofEvidence" } },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "expiresAt": { "type": "string", "format": "date-time" }
+  },
+  "$defs": {
+    "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "producer": { "type": "object", "additionalProperties": false, "required": ["kind", "version"], "properties": { "kind": { "type": "string", "minLength": 1, "maxLength": 256 }, "version": { "type": "string", "minLength": 1, "maxLength": 256 } } },
+    "proofCheck": { "type": "object", "additionalProperties": false, "required": ["id", "result", "evidence"], "properties": { "id": { "type": "string", "minLength": 1, "maxLength": 256 }, "result": { "enum": ["PASS", "FAIL"] }, "evidence": { "type": "array", "maxItems": 128, "items": { "type": "string", "minLength": 1, "maxLength": 256 } } } },
+    "proofEvidence": { "type": "object", "additionalProperties": false, "required": ["id", "digest", "bytes"], "properties": { "id": { "type": "string", "minLength": 1, "maxLength": 256 }, "digest": { "$ref": "#/$defs/digest" }, "bytes": { "type": "integer", "minimum": 0, "maximum": 1048576 } } }
+  }
+}

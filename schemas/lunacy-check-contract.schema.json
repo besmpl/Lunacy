@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "lunacy-check-contract-v1",
+  "title": "Lunacy closed worker check contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "version", "phaseId", "stepId", "attemptEpoch", "expectedResult", "producer", "checks", "requiredEvidence", "ceilings", "expiresAt"],
+  "properties": {
+    "schema": { "const": "lunacy-check-contract/v1" },
+    "version": { "const": 1 },
+    "phaseId": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "stepId": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "attemptEpoch": { "type": "integer", "minimum": 0 },
+    "expectedResult": { "const": "PASS" },
+    "producer": { "$ref": "#/$defs/producer" },
+    "checks": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "$ref": "#/$defs/check" } },
+    "requiredEvidence": { "type": "array", "maxItems": 128, "items": { "$ref": "#/$defs/evidence" } },
+    "ceilings": { "type": "object", "additionalProperties": false, "required": ["maxChecks", "maxEvidence", "maxEvidenceBytes", "maxRecordBytes"], "properties": { "maxChecks": { "type": "integer", "minimum": 1, "maximum": 64 }, "maxEvidence": { "type": "integer", "minimum": 1, "maximum": 128 }, "maxEvidenceBytes": { "type": "integer", "minimum": 1, "maximum": 1048576 }, "maxRecordBytes": { "type": "integer", "minimum": 1, "maximum": 262144 } } },
+    "expiresAt": { "type": "string", "format": "date-time" }
+  },
+  "$defs": {
+    "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "producer": { "type": "object", "additionalProperties": false, "required": ["kind", "version"], "properties": { "kind": { "type": "string", "minLength": 1, "maxLength": 256 }, "version": { "type": "string", "minLength": 1, "maxLength": 256 } } },
+    "check": { "type": "object", "additionalProperties": false, "required": ["id", "expected", "evidence"], "properties": { "id": { "type": "string", "minLength": 1, "maxLength": 256 }, "expected": { "const": "PASS" }, "evidence": { "type": "array", "maxItems": 128, "items": { "type": "string", "minLength": 1, "maxLength": 256 } } } },
+    "evidence": { "type": "object", "additionalProperties": false, "required": ["id", "digest", "maxBytes", "sensitivity", "retention"], "properties": { "id": { "type": "string", "minLength": 1, "maxLength": 256 }, "digest": { "$ref": "#/$defs/digest" }, "maxBytes": { "type": "integer", "minimum": 1, "maximum": 1048576 }, "sensitivity": { "enum": ["redacted", "public"] }, "retention": { "enum": ["ephemeral", "run"] } } }
+  }
+}

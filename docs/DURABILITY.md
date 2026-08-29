@@ -65,6 +65,16 @@ generation references in pending migration/rollback markers. `rollbackSegmented(
 publishes a verified legacy successor while retaining segmented generations until
 a later explicit retention pass.
 
+The private `segmented/v2` marker is a separate opt-in protocol. v2 keeps
+`state.json` journal-free, authenticates a contiguous sealed prefix/checkpoint
+and bounded active suffix from `head.json`, and reconstructs the full logical
+journal before reducer/effect use. Successors hard-link only verified unchanged
+sealed ranges and stage changed suffix/state/head bytes under the existing
+writer fence; ordinary append never prunes canonical history. Migration is
+available through `migrateToSegmentedV2()`, rollback remains explicit, and
+`compact()` is the only retention/GC operation. v2 writer enablement is
+value-unclaimed until the required paired corpus and fault/parity evidence pass.
+
 The segmented protocol changes storage layout only: reducer/event semantics,
 generation CAS, writer fences, outbox/effect records, and replay bytes remain
 unchanged. Measurements belong to the paired release corpus; no latency,

@@ -1,0 +1,112 @@
+{
+  "schema": "lunacy-b0-bytes/v1",
+  "fixture": {
+    "manualRunRoot": "/tmp/lunacy-b0-manual",
+    "manualRunId": "b0-manual-run",
+    "localRecordRunId": "b0-local-run",
+    "fixedClock": "2025-01-01T00:00:00.000Z",
+    "fakeProcessIds": [
+      1001,
+      1002
+    ]
+  },
+  "manual": {
+    "plan": {
+      "bytes": "{\"phaseId\":\"b0-manual\",\"steps\":[{\"stepId\":\"one\"}]}",
+      "sha256": "0ede60676bcddbb90ad2500e1d687b462b18a3ec37e4782409eb1e552d5bc442"
+    },
+    "startEvent": {
+      "bytes": "{\"intentRef\":{\"bytes\":\"{\\\"phaseId\\\":\\\"b0-manual\\\",\\\"schema\\\":\\\"lunacy-plan-v1\\\",\\\"steps\\\":[{\\\"claims\\\":[],\\\"dependencies\\\":[],\\\"stepId\\\":\\\"one\\\"}]}\",\"digest\":\"bebf0f1901305deea111f321dc6b2a6f29b1e23d834301ea0d2785e7cbbd555b\",\"id\":\"plan\",\"scope\":\"plan\"},\"kind\":\"START\"}",
+      "sha256": "ded783ac1430e7c6d09d87aeb2967ca8677cd48b59084d262fd39cd8464ba511"
+    },
+    "parentDecisionEvent": {
+      "bytes": "{\"kind\":\"PARENT_DECISION\",\"token\":\"gate-5-1\",\"value\":\"PASS\"}",
+      "sha256": "e6b01753f6bad13b9b73e9597aa3293ca7361b449b87c0b58671ba2a2e0c2bb5"
+    },
+    "initLifecycle": {
+      "bytes": "{\"command\":\"init\",\"counters\":{\"declarationBytes\":106,\"declarationReads\":1,\"projectionBytesRead\":0,\"projectionBytesWritten\":1221,\"projectionReads\":0,\"projectionWrites\":2,\"routineWakeups\":1,\"runtimeBytes\":2533,\"runtimeReads\":2,\"transitions\":1},\"projected\":true,\"projection\":{\"digest\":\"88736acac493fec2949d9b78727dc23f1a4d2821728330f8ddbfde52fcf0a42f\",\"revision\":1,\"statePath\":\"/tmp/lunacy-b0-manual/STATE.md\",\"stepsPath\":\"/tmp/lunacy-b0-manual/phases/b0-manual/STEPS.md\"},\"schema\":\"lunacy-lifecycle/v1\",\"status\":\"attention\",\"stop\":\"initialized\",\"stopReason\":\"initialized\",\"transitions\":1,\"version\":1,\"yield\":{\"cursor\":{\"attemptEpoch\":0,\"authorityEpoch\":0,\"barrierEpoch\":0,\"revision\":1},\"kind\":\"WAITING\",\"snapshot\":{\"activeCount\":1,\"attemptEpoch\":0,\"authorityEpoch\":0,\"barrier\":\"OPEN\",\"barrierEpoch\":0,\"gate\":\"NOT-DUE\",\"nextAction\":\"await-dispatch-receipt\",\"pendingDispatchCount\":1,\"phase\":\"b0-manual\",\"readyCount\":0,\"revision\":1,\"runStatus\":\"ACTIVE\",\"unknownDispatchCount\":0}}}",
+      "sha256": "fbfa718ea777e9623e6a211cb81be040b276451f3ec0dfd24eeb3b5acba5c9e0"
+    },
+    "runLifecycle": {
+      "bytes": "{\"command\":\"run\",\"counters\":{\"declarationBytes\":106,\"declarationReads\":1,\"projectionBytesRead\":2438,\"projectionBytesWritten\":1221,\"projectionReads\":4,\"projectionWrites\":2,\"routineWakeups\":1,\"runtimeBytes\":15060,\"runtimeReads\":2,\"transitions\":1},\"projected\":true,\"projection\":{\"digest\":\"2d79feeb58d6bf1c725131c0c026be9885335ceeeb7178ed36e3e55b87007171\",\"revision\":5,\"statePath\":\"/tmp/lunacy-b0-manual/STATE.md\",\"stepsPath\":\"/tmp/lunacy-b0-manual/phases/b0-manual/STEPS.md\"},\"schema\":\"lunacy-lifecycle/v1\",\"status\":\"terminal\",\"stop\":\"parent-boundary\",\"stopReason\":\"parent-boundary\",\"transitions\":2,\"version\":1,\"yield\":{\"artifacts\":[{\"bytes\":\"{\\\"gate\\\":\\\"DUE\\\",\\\"token\\\":\\\"gate-5-1\\\"}\",\"digest\":\"2cab90fa25020e18c0e29b028913bb02206ad0f05fef37ef417ae8ddb7e8f26b\",\"id\":\"decision:gate-5-1\",\"scope\":\"gate\"}],\"kind\":\"FINAL\",\"snapshot\":{\"activeCount\":0,\"attemptEpoch\":0,\"authorityEpoch\":0,\"barrier\":\"CLOSED\",\"barrierEpoch\":1,\"gate\":\"DUE\",\"nextAction\":\"await-parent-gate-decision\",\"pendingDispatchCount\":0,\"phase\":\"b0-manual\",\"readyCount\":0,\"revision\":5,\"runStatus\":\"ACTIVE\",\"unknownDispatchCount\":0},\"status\":\"phase-ready\"}}",
+      "sha256": "4662edba5874a34341198b52a01bce9ce0833cc125db70724653d472ece482d1"
+    },
+    "inbox": {
+      "bytes": "{\"attention\":{\"code\":\"GATE_DUE\",\"nextProof\":\"submit the explicit parent gate decision\"},\"briefDigest\":null,\"cursor\":{\"attemptEpoch\":0,\"authorityEpoch\":0,\"barrierEpoch\":1,\"revision\":5},\"evidenceDigest\":null,\"nextProof\":\"submit the explicit parent gate decision\",\"redaction\":{\"brief\":null,\"evidence\":null,\"paths\":null,\"receipts\":null},\"run\":{\"generation\":5,\"phaseId\":\"b0-manual\",\"planDigest\":\"bebf0f1901305deea111f321dc6b2a6f29b1e23d834301ea0d2785e7cbbd555b\",\"policyDigest\":null,\"revision\":5,\"runId\":\"b0-manual-run\",\"runRoot\":\"/tmp/lunacy-b0-manual\"},\"schema\":\"lunacy-decision-inbox/v1\",\"status\":\"READY\",\"token\":{\"consumed\":false,\"expectedDigest\":null,\"identityDigest\":\"86900ad4ffccc5dab98cae4cda044946dea2de96ed156007419e745d25c0cbdb\",\"kind\":\"GATE\",\"observedDigest\":null,\"targetDigest\":null,\"value\":\"gate-5-1\"},\"version\":1}",
+      "sha256": "0f8a4e139092e7e5abd2209bdfb6a794ffe5096332da2b2e26c0228bb29ae0ff"
+    },
+    "submitResult": {
+      "bytes": "{\"consumed\":true,\"eventId\":\"b0-parent-pass\",\"revision\":6,\"schema\":\"lunacy-decision-inbox/v1\",\"status\":\"committed\",\"version\":1,\"yield\":{\"artifacts\":[],\"kind\":\"FINAL\",\"snapshot\":{\"activeCount\":0,\"attemptEpoch\":0,\"authorityEpoch\":0,\"barrier\":\"CLOSED\",\"barrierEpoch\":1,\"gate\":\"PASS\",\"nextAction\":\"complete\",\"pendingDispatchCount\":0,\"phase\":\"b0-manual\",\"readyCount\":0,\"revision\":6,\"runStatus\":\"COMPLETE\",\"unknownDispatchCount\":0},\"status\":\"complete\"}}",
+      "sha256": "44d264ca3606c09bbe708e4001b49fdc05ae671cea03510bd515465e1bfc336b"
+    },
+    "replayResult": {
+      "bytes": "{\"consumed\":false,\"eventId\":\"b0-parent-pass\",\"revision\":6,\"schema\":\"lunacy-decision-inbox/v1\",\"status\":\"replayed\",\"version\":1,\"yield\":{\"artifacts\":[],\"kind\":\"FINAL\",\"snapshot\":{\"activeCount\":0,\"attemptEpoch\":0,\"authorityEpoch\":0,\"barrier\":\"CLOSED\",\"barrierEpoch\":1,\"gate\":\"PASS\",\"nextAction\":\"complete\",\"pendingDispatchCount\":0,\"phase\":\"b0-manual\",\"readyCount\":0,\"revision\":6,\"runStatus\":\"COMPLETE\",\"unknownDispatchCount\":0},\"status\":\"complete\"}}",
+      "sha256": "df5b5516bf2504d52e266687ca02244866a38f111ba8f22d49556ff359ed314b"
+    },
+    "journalEvents": [
+      {
+        "bytes": "{\"intentRef\":{\"bytes\":\"{\\\"phaseId\\\":\\\"b0-manual\\\",\\\"schema\\\":\\\"lunacy-plan-v1\\\",\\\"steps\\\":[{\\\"claims\\\":[],\\\"dependencies\\\":[],\\\"stepId\\\":\\\"one\\\"}]}\",\"digest\":\"bebf0f1901305deea111f321dc6b2a6f29b1e23d834301ea0d2785e7cbbd555b\",\"id\":\"plan\",\"scope\":\"plan\"},\"kind\":\"START\"}",
+        "sha256": "ded783ac1430e7c6d09d87aeb2967ca8677cd48b59084d262fd39cd8464ba511"
+      },
+      {
+        "bytes": "{\"category\":\"HOST\",\"kind\":\"OBSERVATION\",\"ref\":{\"bytes\":\"{\\\"commandDigest\\\":\\\"d34b589225ed546d81020920851c06b789967b36eba656c66a209e4ae74df360\\\",\\\"launchToken\\\":\\\"launch-0db1a7074f890dda5b1c71b8489f344c\\\"}\",\"digest\":\"5577834e8fb9636e9a5cc38e62d03a72c8c7ab4d87e9163e3f5669adb7d42bae\",\"id\":\"claim:launch-0db1a7074f890dda5b1c71b8489f344c\",\"scope\":\"outbox\"}}",
+        "sha256": "c2786400ba05179ef96a34b3b38aa3a57c1bf8912cb747eec9764c476732eee6"
+      },
+      {
+        "bytes": "{\"kind\":\"RESUME\"}",
+        "sha256": "cda3b50ebcb064e356e4b891efbe6b2867aad66d155db403b92e3bf9ed6f1185"
+      },
+      {
+        "bytes": "{\"kind\":\"DISPATCH_RECEIPT\",\"ref\":{\"bytes\":\"{\\\"commandDigest\\\":\\\"d34b589225ed546d81020920851c06b789967b36eba656c66a209e4ae74df360\\\",\\\"launchToken\\\":\\\"launch-0db1a7074f890dda5b1c71b8489f344c\\\",\\\"receipt\\\":{\\\"bytes\\\":\\\"{\\\\\\\"ok\\\\\\\":true}\\\",\\\"digest\\\":\\\"4062edaf750fb8074e7e83e0c9028c94e32468a8b6f1614774328ef045150f93\\\",\\\"id\\\":\\\"launch\\\",\\\"scope\\\":\\\"effect\\\"}}\",\"digest\":\"ead7dd3ad7ee614b77f80eaa1c492996ee41c48dbe4955b8a96a775dbe4bbac6\",\"id\":\"receipt:launch-0db1a7074f890dda5b1c71b8489f344c\",\"scope\":\"outbox/receipt\"}}",
+        "sha256": "a695b273279a924a57035abc1fff36023716443e8b4050dfed81a3a9cae3efb6"
+      },
+      {
+        "bytes": "{\"kind\":\"WORKER_ENVELOPE\",\"ref\":{\"bytes\":\"{\\\"status\\\":\\\"DONE\\\"}\",\"digest\":\"2aee3a305e1ebeb100782ba578b0a3aeb0a7fae2fef3e9e917dd04323bc89076\",\"id\":\"worker:launch-0db1a7074f890dda5b1c71b8489f344c\",\"scope\":\"codex/worker\"}}",
+        "sha256": "c3f3733f8c862d8443e3f4014e20ad6e5e4f4baec17929bda2473b0c1a546f5f"
+      },
+      {
+        "bytes": "{\"kind\":\"PARENT_DECISION\",\"token\":\"gate-5-1\",\"value\":\"PASS\"}",
+        "sha256": "e6b01753f6bad13b9b73e9597aa3293ca7361b449b87c0b58671ba2a2e0c2bb5"
+      }
+    ],
+    "invariants": {
+      "submitStatus": "committed",
+      "replayStatus": "replayed",
+      "submitConsumed": true,
+      "replayConsumed": false,
+      "submitReplayYieldBytesEqual": true,
+      "finalRevision": 6,
+      "parentDecisionJournalCount": 1
+    }
+  },
+  "localEffects": {
+    "command": {
+      "bytes": "{\"attemptEpoch\":0,\"authorityEpoch\":0,\"barrierEpoch\":0,\"commandDigest\":\"389ad84e72e7422a3a057da633b3051d2118476fc3cc39e9954b695e1227d006\",\"commandId\":\"command-b0-local\",\"launchToken\":\"launch-b0-local\",\"modeEpoch\":0,\"phaseId\":\"phase-local\",\"runId\":\"b0-local-run\",\"stepId\":\"step-local\"}",
+      "sha256": "1c94de221b5624154b1d8e4514197710cf08b8c21ecc45fc26bd057743537c69"
+    },
+    "launch": {
+      "bytes": "{\"argvDigest\":\"4444444444444444444444444444444444444444444444444444444444444444\",\"attempt\":0,\"attemptEpoch\":0,\"authorityDigest\":\"2222222222222222222222222222222222222222222222222222222222222222\",\"authorityEpoch\":0,\"barrierEpoch\":0,\"child\":{\"pid\":1002},\"codexBinaryDigest\":\"5555555555555555555555555555555555555555555555555555555555555555\",\"codexPath\":\"/usr/local/bin/codex\",\"codexVersion\":\"0.145.0\",\"commandDigest\":\"389ad84e72e7422a3a057da633b3051d2118476fc3cc39e9954b695e1227d006\",\"commandId\":\"command-b0-local\",\"handoffDigest\":\"3333333333333333333333333333333333333333333333333333333333333333\",\"launchToken\":\"launch-b0-local\",\"phaseId\":\"phase-local\",\"policyDigest\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"runId\":\"b0-local-run\",\"schema\":\"lunacy-codex-launch/v1\",\"startedAt\":\"2025-01-01T00:00:00.000Z\",\"stepId\":\"step-local\",\"supervisor\":{\"pid\":1001},\"workspace\":\"/tmp/lunacy-b0-local/workspace\"}",
+      "sha256": "e3e2c73ee5b62f57050b10a44512a24f1681b7301984e1731926a36ea7a444e2"
+    },
+    "launchRef": {
+      "bytes": "{\"bytes\":\"{\\\"argvDigest\\\":\\\"4444444444444444444444444444444444444444444444444444444444444444\\\",\\\"attempt\\\":0,\\\"attemptEpoch\\\":0,\\\"authorityDigest\\\":\\\"2222222222222222222222222222222222222222222222222222222222222222\\\",\\\"authorityEpoch\\\":0,\\\"barrierEpoch\\\":0,\\\"child\\\":{\\\"pid\\\":1002},\\\"codexBinaryDigest\\\":\\\"5555555555555555555555555555555555555555555555555555555555555555\\\",\\\"codexPath\\\":\\\"/usr/local/bin/codex\\\",\\\"codexVersion\\\":\\\"0.145.0\\\",\\\"commandDigest\\\":\\\"389ad84e72e7422a3a057da633b3051d2118476fc3cc39e9954b695e1227d006\\\",\\\"commandId\\\":\\\"command-b0-local\\\",\\\"handoffDigest\\\":\\\"3333333333333333333333333333333333333333333333333333333333333333\\\",\\\"launchToken\\\":\\\"launch-b0-local\\\",\\\"phaseId\\\":\\\"phase-local\\\",\\\"policyDigest\\\":\\\"1111111111111111111111111111111111111111111111111111111111111111\\\",\\\"runId\\\":\\\"b0-local-run\\\",\\\"schema\\\":\\\"lunacy-codex-launch/v1\\\",\\\"startedAt\\\":\\\"2025-01-01T00:00:00.000Z\\\",\\\"stepId\\\":\\\"step-local\\\",\\\"supervisor\\\":{\\\"pid\\\":1001},\\\"workspace\\\":\\\"/tmp/lunacy-b0-local/workspace\\\"}\",\"digest\":\"e3e2c73ee5b62f57050b10a44512a24f1681b7301984e1731926a36ea7a444e2\",\"id\":\"codex-launch:launch-b0-local\",\"scope\":\"codex/effect/launch\"}",
+      "sha256": "3a6461489988bb70dff93eabbdde19d98be51f216e9919bf6da80da93917ca48"
+    },
+    "receiptRef": {
+      "bytes": "{\"bytes\":\"{\\\"ok\\\":true}\",\"digest\":\"4062edaf750fb8074e7e83e0c9028c94e32468a8b6f1614774328ef045150f93\",\"id\":\"launch-b0-local\",\"scope\":\"effect\"}",
+      "sha256": "89a83d47fe2fe0266c4db7b58bc9dff904865adb43496e8ad68fa2ae3acb3dbc"
+    },
+    "receiptEnvelope": {
+      "bytes": "{\"commandDigest\":\"389ad84e72e7422a3a057da633b3051d2118476fc3cc39e9954b695e1227d006\",\"launchToken\":\"launch-b0-local\",\"receipt\":{\"bytes\":\"{\\\"ok\\\":true}\",\"digest\":\"4062edaf750fb8074e7e83e0c9028c94e32468a8b6f1614774328ef045150f93\",\"id\":\"launch-b0-local\",\"scope\":\"effect\"}}",
+      "sha256": "58f60aa965a45120f8827e95606680aa98a7da033a947d1a5963648ea548041e"
+    },
+    "terminal": {
+      "bytes": "{\"commandDigest\":\"389ad84e72e7422a3a057da633b3051d2118476fc3cc39e9954b695e1227d006\",\"eventsDigest\":\"6556c32d1257c16a08865d4eb4a31eb630ed2df0322bbc0859637bb6db83bf7d\",\"exitCode\":0,\"finishedAt\":\"2025-01-01T00:00:00.000Z\",\"launchToken\":\"launch-b0-local\",\"outcome\":\"normal-completion\",\"reportDigest\":null,\"reportPath\":null,\"resultDigest\":null,\"schema\":\"lunacy-codex-terminal/v1\",\"signal\":null,\"status\":\"PASS\"}",
+      "sha256": "a32b3b7084b7df3464059c2067c7876e12a62772e066b5e4eee4ef3174ddd718"
+    },
+    "terminalRef": {
+      "bytes": "{\"bytes\":\"{\\\"commandDigest\\\":\\\"389ad84e72e7422a3a057da633b3051d2118476fc3cc39e9954b695e1227d006\\\",\\\"eventsDigest\\\":\\\"6556c32d1257c16a08865d4eb4a31eb630ed2df0322bbc0859637bb6db83bf7d\\\",\\\"exitCode\\\":0,\\\"finishedAt\\\":\\\"2025-01-01T00:00:00.000Z\\\",\\\"launchToken\\\":\\\"launch-b0-local\\\",\\\"outcome\\\":\\\"normal-completion\\\",\\\"reportDigest\\\":null,\\\"reportPath\\\":null,\\\"resultDigest\\\":null,\\\"schema\\\":\\\"lunacy-codex-terminal/v1\\\",\\\"signal\\\":null,\\\"status\\\":\\\"PASS\\\"}\",\"digest\":\"a32b3b7084b7df3464059c2067c7876e12a62772e066b5e4eee4ef3174ddd718\",\"id\":\"codex-terminal:launch-b0-local\",\"scope\":\"codex/effect/terminal\"}",
+      "sha256": "94a2fc75c525bdf269c9bd1c898fc900e3eecd0eda4b8e447f7d67367bc7caee"
+    }
+  }
+}

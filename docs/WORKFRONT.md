@@ -54,3 +54,13 @@ public tarball because their runtime modules are intentionally not exported.
 The local paired gate binds a frozen corpus and golden capsule digests and
 enforces checkpoint, byte-reduction, output-size, and p95 latency thresholds.
 Provider token or value savings are **NOT_CLAIMED**.
+
+## Decision inbox handoff
+
+The private `lunacy-bridge inbox` route is a projection over the same verified
+generation used by Workfront. It accepts only explicitly supplied run roots;
+rows contain bounded cursor/epoch and digest identities, with briefs,
+receipts, paths, and payloads redacted. `submit-decision` rebinds that row and
+delegates one canonical `PARENT_DECISION` to `RunKernel.advance`; it never
+consumes a token itself. See [`DECISION_INBOX.md`](DECISION_INBOX.md) for the
+exact parent-authorized phase promotion envelope.

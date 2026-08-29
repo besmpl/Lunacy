@@ -1,0 +1,45 @@
+✔ driver echoes exact token/digest and observe fails closed for malformed evidence (761.990625ms)
+✔ driver rejects dispatch for wrong token or command digest before spawning (34.332792ms)
+✔ restart terminal reconciliation rejects authority and executable drift (788.837917ms)
+✔ restart terminal reconciliation binds exact result and report bytes (845.510208ms)
+✔ supervisor publishes launch evidence before returning and terminal binds report/result (781.024916ms)
+✔ one supervisor cannot launch a successor token (776.606834ms)
+✔ malformed structured final output is blocked and distinct from absence (833.276417ms)
+✔ duplicate structured final output keys are blocked rather than last-write-wins (693.523834ms)
+✔ authority bytes changed after initial attestation block spawn (35.095125ms)
+✔ the command-selected phase STEPS file is mandatory for launch authority (24.64675ms)
+✔ immutable launch image rejects executable replacement after final attestation while authority is blocked (575.030125ms)
+✔ immutable launch directories reject workspace and run-root replacement after final inspection (781.233959ms)
+✔ authority snapshot rejects same-byte inode replacement and transient mutate/restore after STEPS read (416.540833ms)
+✔ all parent authority and identity mutations after reservation fence spawn (2198.357875ms)
+✔ raw-byte reads reject invalid UTF-8 and distinguish byte aliases (12.809167ms)
+✔ invalid UTF-8 report bytes cannot produce a passing terminal (755.811959ms)
+✔ launch intent is durable before spawn and blocks a retry after launch publication fails (2892.876334ms)
+✔ executable is re-attested immediately before reserving and spawning (62.226875ms)
+✔ executable is re-attested after launch reservation before spawn (55.291417ms)
+✔ cancellation during final executable attestation fences spawn (77.063708ms)
+✔ R1 init is idempotent and duplicate START replays exact bytes (593.246541ms)
+✔ R1 run drives dependent steps and returns bounded terminal result (2809.08625ms)
+✔ R1 resume of UNKNOWN observes once and never relaunches (2246.161333ms)
+✔ R1 invalid driver fails before touching root and max transition is bounded (431.029209ms)
+✔ R1 duplicate RESUME invocations share one launch and exact final state (2040.914125ms)
+✔ R1 cancellation returns attention without relaunching (66.952458ms)
+✔ R1 projection failure keeps committed START replayable without a second transition (700.905708ms)
+✔ drive lets the kernel select each successor and stops at phase-ready (2872.30375ms)
+✔ non-pass terminal status is enveloped once and prevents successor launch (1582.595958ms)
+✔ restart reconciles a claimed token through observe without relaunching (2227.854333ms)
+✔ restart performs one asynchronous exact-token observation (2058.012875ms)
+✔ receipt settlement tolerates early and late callbacks (1620.913083ms)
+✔ competing pumps settle one launch and do not strand a waiter (1263.225334ms)
+✔ abort closes the notification channel while a late receipt is still pending (420.865834ms)
+ℹ tests 34
+ℹ suites 0
+ℹ pass 34
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 12329.410292
+
+COMMAND: node --test test/controller.test.js test/orchestration.test.js test/codex-exec-driver.test.js test/codex-exec-supervisor.test.js
+EXIT: 0

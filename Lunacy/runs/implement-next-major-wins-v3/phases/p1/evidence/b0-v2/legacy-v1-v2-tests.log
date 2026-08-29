@@ -1,0 +1,54 @@
+✔ private composition driver receipt-to-completion reaches gate and finality (10.570167ms)
+✔ UNKNOWN dispatch is never retried blindly and can recover by observation (4.55ms)
+✔ truthful prose receipt exposes launch token and accepts one manual receipt (1.527ms)
+✔ delimiter-safe identity rejects conflicting reuse without splitting fields (0.682375ms)
+✔ deterministic bounded claims admit a stable batch (0.576375ms)
+✔ claims serialize conflicting resources while preserving deterministic batch order (0.780375ms)
+✔ authority drift yields a decision without overwriting the committed plan digest (0.829ms)
+✔ CURRENT metadata and journal bytes are verified before state trust (408.474417ms)
+✔ crash debris is quarantined instead of becoming a trusted generation (346.174291ms)
+✔ concurrent filesystem writers are fenced by generation CAS (288.191292ms)
+✔ exact duplicate START CAS losers replay the one durable row without a second generation (313.441125ms)
+✔ exact duplicate dispatching RESUME replays WAITING and only the claim winner launches (612.062916ms)
+✔ same eventId with a conflicting identity remains Conflict and never replays winner bytes (433.273125ms)
+✔ durable publication followed by release failure replays without retrying the commit (369.446125ms)
+✔ replay misses preserve the original mapped commit error for no-row and recovery failures (409.247125ms)
+✔ private classifier preserves exact replay and rejects processed-only eventId reuse in Memory and File stores (924.576834ms)
+✔ processed-only collision remains visible after FileArtifactStore restart (425.160292ms)
+✔ existing generation CAS permits one same-eventId START winner and classifies loser retry (307.25975ms)
+✔ malformed generation rejection remains ahead of committed replay classification (405.658375ms)
+✔ active-Beads non-capturing DISPATCH_RECEIPT route shares classifier and does not mutate (2346.774416ms)
+✔ segmented/v2 reconstructs a journal-free state and reuses its sealed prefix (392.744458ms)
+✔ segmented/v2 read-only inspection and reuse fences accept the journal-free projection (496.080125ms)
+✔ segmented/v2 refuses a tampered sealed source before publishing CURRENT (247.192166ms)
+✔ segmented/v1 refuses a tampered reused source before publishing CURRENT (239.593333ms)
+✔ segmented/v2 compaction rejects an extra journal field in historical projections (301.190083ms)
+✔ segmented/v2 selection over v1 cannot prune the verified prefix (264.239ms)
+✔ segmented/v2 rejects prefix tamper before exposing state and preserves Memory parity (239.35125ms)
+✔ legacy migration to segmented/v2 and explicit rollback retain exact logical history (690.515167ms)
+✔ explicit v2 migration preference still migrates a legacy CURRENT (342.623708ms)
+✔ segmented/v2 migration retry rejects a foreign marker instead of deleting it (133.160709ms)
+✔ segmented/v2 publication faults converge to one complete old-or-new generation (2869.100291ms)
+✔ segmented file reader preserves a long logical prefix and active suffix (1731.441583ms)
+✔ segmented transitions over 10,000 records match the deterministic semantic oracle (1803.635166ms)
+✔ memory and file segmented stores expose identical logical history (494.169709ms)
+✔ migration, rollback, and explicit compaction retain crash-safe generations (529.503ms)
+✔ unknown segmented version is rejected before state use (158.177709ms)
+✔ segmented reader rejects mixed legacy files before state use (133.931917ms)
+✔ P2-ORPHAN-GENERATION quarantines a renamed successor and permits retry (363.949916ms)
+✔ P2-READONLY-SEGMENTED verifies head identity without a legacy journal path (170.422708ms)
+✔ P2-CURRENT-CONTINUITY rejects independently tampered segmented fields without mutation or reuse (730.069584ms)
+✔ P2-MARKER-LEGACY never lets an object-local marker lift legacy ceilings (356.543375ms)
+✔ P2-ROLLBACK-GC preserves marker-referenced history and is idempotent (285.868208ms)
+✔ P2-FAULT-MATRIX leaves only old-or-new authority across publication boundaries (2856.195541ms)
+ℹ tests 43
+ℹ suites 0
+ℹ pass 43
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 9693.764417
+
+COMMAND: node --test test/r2-segmented.test.js test/p3-segmented-v2.test.js test/kernel-repair.test.js test/p3-committed-replay.test.js
+EXIT: 0

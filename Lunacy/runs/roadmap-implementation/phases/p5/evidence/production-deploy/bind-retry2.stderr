@@ -1,0 +1,2 @@
+Error: process snapshot predates release ownership
+    at main (file:///Users/mark/Documents/Codex/2026-08-26/continuously-pursue-major-local-lunacy-architecture/work/lunacy-postrelease-sol-routing/tools/bind-release-process-snapshot.mjs:77:135)

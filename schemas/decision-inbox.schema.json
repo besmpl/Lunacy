@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "lunacy-decision-inbox/v1",
+  "title": "Digest-bound decision inbox projection",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "version", "entries", "truncation"],
+  "properties": {
+    "schema": {"const": "lunacy-decision-inbox/v1"},
+    "version": {"const": 1},
+    "entries": {"type": "array", "maxItems": 64, "items": {"$ref": "#/$defs/entry"}},
+    "truncation": {"type": "boolean"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "entry": {"type": "object", "additionalProperties": false, "required": ["schema", "version", "run", "token", "cursor", "status", "attention", "briefDigest", "evidenceDigest", "nextProof", "redaction"], "properties": {
+      "schema": {"const": "lunacy-decision-inbox/v1"}, "version": {"const": 1},
+      "run": {"type": "object", "additionalProperties": false, "required": ["runRoot", "runId", "phaseId", "generation", "revision", "planDigest", "policyDigest"], "properties": {"runRoot": {"type": "string"}, "runId": {"type": "string"}, "phaseId": {"type": "string"}, "generation": {"type": "integer", "minimum": 0}, "revision": {"type": "integer", "minimum": 0}, "planDigest": {"$ref": "#/$defs/digest"}, "policyDigest": {"anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]}}},
+      "token": {"type": "object", "additionalProperties": false, "required": ["value", "kind", "identityDigest", "consumed", "expectedDigest", "observedDigest", "targetDigest"], "properties": {"value": {"anyOf": [{"type": "string"}, {"type": "null"}]}, "kind": {"anyOf": [{"type": "string"}, {"type": "null"}]}, "identityDigest": {"anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]}, "consumed": {"anyOf": [{"type": "boolean"}, {"type": "null"}]}, "expectedDigest": {"anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]}, "observedDigest": {"anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]}, "targetDigest": {"anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]}}},
+      "cursor": {"type": "object", "additionalProperties": false, "required": ["revision", "authorityEpoch", "attemptEpoch", "barrierEpoch"], "properties": {"revision": {"type": "integer", "minimum": 0}, "authorityEpoch": {"type": "integer", "minimum": 0}, "attemptEpoch": {"type": "integer", "minimum": 0}, "barrierEpoch": {"type": "integer", "minimum": 0}}},
+      "status": {"enum": ["READY", "CONSUMED", "ABSENT", "ATTENTION"]},
+      "briefDigest": {"anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]}, "evidenceDigest": {"anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]}, "nextProof": {"anyOf": [{"type": "string", "maxLength": 256}, {"type": "null"}]},
+      "attention": {"type": "object", "additionalProperties": false, "required": ["code", "nextProof"], "properties": {"code": {"enum": ["NONE", "GATE_DUE", "GATE_FINDINGS", "UNKNOWN_DISPATCH", "RUN_BLOCKED", "BARRIER_CLOSED", "STALE_BINDING", "MALFORMED"]}, "nextProof": {"anyOf": [{"type": "string", "maxLength": 256}, {"type": "null"}]}}},
+      "redaction": {"type": "object", "additionalProperties": false, "required": ["brief", "evidence", "receipts", "paths"], "properties": {"brief": {"type": "null"}, "evidence": {"type": "null"}, "receipts": {"type": "null"}, "paths": {"type": "null"}}}
+    }}
+  }
+}

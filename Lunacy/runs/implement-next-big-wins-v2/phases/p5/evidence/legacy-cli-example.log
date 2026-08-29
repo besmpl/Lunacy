@@ -1,0 +1,9 @@
+
+> lunacy-runtime@0.3.0 cli:example
+> npm run build && node dist/cli.js --plan examples/canonical-plan.json --event examples/canonical-event.json
+
+
+> lunacy-runtime@0.3.0 build
+> tsc -p tsconfig.build.json
+
+{"cursor":{"attemptEpoch":0,"authorityEpoch":0,"barrierEpoch":0,"revision":1},"kind":"WAITING","snapshot":{"activeCount":1,"attemptEpoch":0,"authorityEpoch":0,"barrier":"OPEN","barrierEpoch":0,"gate":"NOT-DUE","nextAction":"await-dispatch-receipt","pendingDispatchCount":1,"phase":"example","readyCount":0,"revision":1,"runStatus":"ACTIVE","unknownDispatchCount":0}}

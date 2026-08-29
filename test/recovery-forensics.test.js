@@ -60,6 +60,35 @@ test('R4 wrong command digest is a closed mismatch and CLI stays private', async
   assert.equal(result.stderr, '');
 });
 
+test('segmented/v2 recovery capsule reports bounded journal budget', async () => {
+  const { root } = await fixture('r4-v2-budget');
+  try {
+    await new FileArtifactStore(root).migrateToSegmentedV2();
+    const capsule = await inspectRecovery({ runRoot: root, runId: 'r4-v2-budget', launchToken: 'missing-token' });
+    assert.equal(capsule.journal.format, 'segmented');
+    assert.equal(capsule.journal.events.ceiling, null);
+    assert.equal(capsule.journal.bytes.ceiling, null);
+    assert.equal(capsule.journal.activeSuffix.ceiling, 1000);
+    assert.equal(capsule.journal.activeSuffix.used, 1);
+    validateRecoveryCapsule(capsule);
+  } finally {
+    await import('node:fs/promises').then(({ rm }) => rm(root, { recursive: true, force: true }));
+  }
+});
+
+test('managed transition defaults do not select the segmented/v2 writer', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'r4-default-format-'));
+  const plan = { phaseId: 'phase-default-format', steps: [{ stepId: 'step-default-format' }] };
+  try {
+    await transition({ runDir: root, runId: 'r4-default-format', mode: 'runtime', plan }, { event: { kind: 'START', intentRef: { id: 'plan', digest: digest(plan) } }, eventId: 'start' });
+    const current = JSON.parse(await readFile(join(root, '.kernel', 'CURRENT'), 'utf8'));
+    assert.equal(Object.hasOwn(current, 'format'), false);
+    assert.notEqual(current.format, 'segmented/v2');
+  } finally {
+    await import('node:fs/promises').then(({ rm }) => rm(root, { recursive: true, force: true }));
+  }
+});
+
 test('R4 malformed effect evidence fails closed without cleanup', async () => {
   const { root } = await fixture('r4-malformed');
   const effects = join(root, '.codex-effects', createHash('sha256').update('bad-token').digest('hex'));

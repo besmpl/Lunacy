@@ -1,0 +1,45 @@
+Usage: lunacy-bridge --run-dir RUN --run-id ID --mode runtime --plan PLAN.json --event EVENT.json [options]
+       lunacy-bridge drive --run-dir RUN --run-id ID --mode runtime --plan PLAN.json --policy POLICY.json [options]
+       lunacy-bridge init|run|resume --run-dir RUN --run-id ID --mode runtime --plan PLAN.json [--policy POLICY.json]
+       lunacy-bridge lifecycle --command init|run|resume --run-dir RUN --run-id ID --mode runtime --plan PLAN.json [options]
+
+Read-only dependency explanation:
+       lunacy-bridge workfront --run-root RUN --run-id ID [--limit 16] [--focus STEP]
+       lunacy-bridge inbox --entries ENTRIES.json [--limit 16]
+       lunacy-bridge submit-decision --inbox INBOX.json --plan PLAN.json --run-root RUN --run-id ID --token TOKEN --value PASS|FINDINGS|ADOPT_JSON
+       lunacy-bridge promote-phase --handoff HANDOFF.json
+       lunacy-bridge inspect-recovery --run-root RUN --run-id ID --launch-token TOKEN [--command-digest HEX] [--policy POLICY.json]
+
+Invoke one private runtime-to-skill transition. The bridge calls only
+RunKernel.advance and projects machine-owned sections into STATE.md/STEPS.md;
+it never schedules workers/providers or installs packages.
+
+Options:
+  --run-dir PATH          Absolute run root containing .kernel/ (required)
+  --run-id ID             Run identity (required for runtime transitions)
+  --mode runtime|markdown Explicit per-run mode (required)
+  --plan PATH             Canonical parent-owned Plan JSON (runtime transition)
+  --event PATH            Canonical Event JSON (one event per invocation)
+  --event-id ID           Event identity (required for runtime transition)
+  --phase-id ID           Identity phase (default: plan.phaseId)
+  --step-id ID            Identity step (default: run)
+  --state PATH            Projection STATE.md path under run root
+  --steps PATH            Projection STEPS.md path under run root
+  --expected-revision N   Optimistic revision fence
+  --attempt-epoch N       Identity epoch
+  --authority-epoch N     Identity epoch
+  --barrier-epoch N       Identity epoch
+  --launch-token TOKEN    Dispatch/receipt identity token
+  --beads-mode off|shadow|active  Explicit read-only Beads planning mode
+  --bd-path PATH          Absolute operator-provisioned bd v1.2.2 executable
+  --beads-workspace PATH  Absolute Beads workspace
+  --beads-sha256 HEX      Expected SHA-256 of the bd executable
+  --beads-home PATH       Isolated HOME for bd
+  --beads-config PATH     Isolated XDG_CONFIG_HOME for bd
+  --beads-phase ID        Phase identity for the generated Beads plan
+  --beads-ack PATH        Canonical acknowledgement JSON (active mode)
+  --disable               Quiescently disable bridge metadata
+  --delete                Quiescently delete bridge metadata only
+  --help                  Show this help
+
+All JSON files must be canonical. Use '-' for one JSON document from stdin.

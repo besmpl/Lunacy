@@ -1,0 +1,28 @@
+{
+  "schema": "lunacy-b0-release-path-digest/v1",
+  "rule": "pathDigest(value) = SHA-256(canonical(value))",
+  "manifest": {
+    "bytes": "{\"discoveryParents\":[\"/tmp/lunacy-b0-release/discovery\"],\"installedTarget\":\"/tmp/lunacy-b0-release/target\",\"operation\":\"deploy\",\"processSnapshotPath\":\"/tmp/lunacy-b0-release/evidence/snapshot-response.json\",\"runRoots\":[],\"schema\":\"lunacy-release-operation/v1\"}",
+    "sha256": "6dfc8064365cfdabeca3ad705e744467a945e7357fcc5817eed58da59397e7e9"
+  },
+  "pathDigests": {
+    "installedTarget": "bfcf09867aca7554255d6dbdb78a6909b6fa609e706671587733ea119c528f7c",
+    "discoveryParents": "09486f12bd2fa218b8ea1d00ca879713c10e6c765d17c4f4bfc3e328ad8bdfa5",
+    "runRoots": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "processSnapshotPath": "608194ce7e3cbd19d5eb4c84cc5446ca4545922adf5d68b8c301d21a2c214cd0",
+    "manifestIdentity": "38bda36ceebd40fae72765c7fe42b4bb9a7fe35022850ac5fd5d36b026e121bc"
+  },
+  "preparedEnvelope": {
+    "bytes": "{\"discoveryParentsDigest\":\"09486f12bd2fa218b8ea1d00ca879713c10e6c765d17c4f4bfc3e328ad8bdfa5\",\"inner\":{\"aggregate\":null,\"markerDigest\":null,\"previousAggregate\":null},\"installedTarget\":{\"dev\":\"1\",\"ino\":\"2\",\"pathDigest\":\"bfcf09867aca7554255d6dbdb78a6909b6fa609e706671587733ea119c528f7c\"},\"manifestDigest\":\"6dfc8064365cfdabeca3ad705e744467a945e7357fcc5817eed58da59397e7e9\",\"manifestIdentityDigest\":\"38bda36ceebd40fae72765c7fe42b4bb9a7fe35022850ac5fd5d36b026e121bc\",\"operation\":\"deploy\",\"operationId\":\"22222222-2222-4222-8222-222222222222\",\"owner\":{\"acquiredAt\":\"2025-01-01T00:00:00.000Z\",\"epoch\":0,\"id\":\"11111111-1111-4111-8111-111111111111\",\"manifestDigest\":\"6dfc8064365cfdabeca3ad705e744467a945e7357fcc5817eed58da59397e7e9\",\"pid\":1001,\"processStartedAt\":\"2025-01-01T00:00:00.000Z\"},\"phase\":\"prepared\",\"processSnapshotPathDigest\":\"608194ce7e3cbd19d5eb4c84cc5446ca4545922adf5d68b8c301d21a2c214cd0\",\"recovery\":{\"attempts\":0,\"code\":null},\"runRootsDigest\":\"4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945\",\"schema\":\"lunacy-release-operation/v2\",\"snapshot\":{\"capturedAt\":\"2025-01-01T00:00:00.000Z\",\"digest\":\"50baa39b6cc399df67e6da8ff30ca83b315c2d84a3484a21db18d2edf019ce72\",\"pathDigest\":\"608194ce7e3cbd19d5eb4c84cc5446ca4545922adf5d68b8c301d21a2c214cd0\"},\"status\":\"READY\",\"targetLock\":null}",
+    "sha256": "875f60746f83be3ab2bcc37f208336ec8ae7556229930d13e1770666182178cf"
+  },
+  "committedEnvelope": {
+    "bytes": "{\"discoveryParentsDigest\":\"09486f12bd2fa218b8ea1d00ca879713c10e6c765d17c4f4bfc3e328ad8bdfa5\",\"inner\":{\"aggregate\":\"4444444444444444444444444444444444444444444444444444444444444444\",\"markerDigest\":\"3333333333333333333333333333333333333333333333333333333333333333\",\"previousAggregate\":\"5555555555555555555555555555555555555555555555555555555555555555\"},\"installedTarget\":{\"dev\":\"1\",\"ino\":\"2\",\"pathDigest\":\"bfcf09867aca7554255d6dbdb78a6909b6fa609e706671587733ea119c528f7c\"},\"manifestDigest\":\"6dfc8064365cfdabeca3ad705e744467a945e7357fcc5817eed58da59397e7e9\",\"manifestIdentityDigest\":\"38bda36ceebd40fae72765c7fe42b4bb9a7fe35022850ac5fd5d36b026e121bc\",\"operation\":\"deploy\",\"operationId\":\"22222222-2222-4222-8222-222222222222\",\"owner\":{\"acquiredAt\":\"2025-01-01T00:00:00.000Z\",\"epoch\":0,\"id\":\"11111111-1111-4111-8111-111111111111\",\"manifestDigest\":\"6dfc8064365cfdabeca3ad705e744467a945e7357fcc5817eed58da59397e7e9\",\"pid\":1001,\"processStartedAt\":\"2025-01-01T00:00:00.000Z\"},\"phase\":\"committed\",\"processSnapshotPathDigest\":\"608194ce7e3cbd19d5eb4c84cc5446ca4545922adf5d68b8c301d21a2c214cd0\",\"recovery\":{\"attempts\":0,\"code\":null},\"runRootsDigest\":\"4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945\",\"schema\":\"lunacy-release-operation/v2\",\"snapshot\":{\"capturedAt\":\"2025-01-01T00:00:00.000Z\",\"digest\":\"50baa39b6cc399df67e6da8ff30ca83b315c2d84a3484a21db18d2edf019ce72\",\"pathDigest\":\"608194ce7e3cbd19d5eb4c84cc5446ca4545922adf5d68b8c301d21a2c214cd0\"},\"status\":\"COMMITTED\",\"targetLock\":null}",
+    "sha256": "6a4474bee846647435fe95ca9af185629926ab12640e6dce3e3b04dfb6bd8218"
+  },
+  "assertions": {
+    "targetMatchesDigest": true,
+    "snapshotMatchesDigest": true,
+    "committedCarriesInnerAggregate": true
+  }
+}

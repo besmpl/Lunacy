@@ -1,0 +1,25 @@
+{
+  "authority": "accepted repair-release-envelope-path-digest P2 evidence",
+  "items": [
+    {
+      "byteLength": 288,
+      "bytes": "{\"status\":\"deployed\",\"target\":\"/Users/mark/.codex/skills/lunacy\",\"sourceDigest\":\"4c6703de632a9c21cfefbcf84aef1ed114704fbe8d7d5da6b81ac0028be7a6da\",\"files\":171,\"managedFiles\":174,\"managedDirectories\":4,\"managedAggregate\":\"4a3dc512c4b18c00fda2e31625c824a516bba1b30512eb6b5cdfc1522f9af925\"}\n",
+      "sha256": "46bae2c41c2a83936a16184c633701c98be06a23d9a3342005fa6c192424c6d3",
+      "source": "Lunacy/runs/repair-release-envelope-path-digest/phases/p2/evidence/production-deploy.json"
+    },
+    {
+      "byteLength": 275,
+      "bytes": "{\"status\":\"current\",\"target\":\"/Users/mark/.codex/skills/lunacy\",\"sourceDigest\":\"4c6703de632a9c21cfefbcf84aef1ed114704fbe8d7d5da6b81ac0028be7a6da\",\"managedFiles\":174,\"managedDirectories\":4,\"managedAggregate\":\"4a3dc512c4b18c00fda2e31625c824a516bba1b30512eb6b5cdfc1522f9af925\"}\n",
+      "sha256": "5f861187a24b1a115cbf6ccbe4013b382f21c4a757f25bf0228d08811ae4c529",
+      "source": "Lunacy/runs/repair-release-envelope-path-digest/phases/p2/evidence/production-check.json"
+    },
+    {
+      "byteLength": 210,
+      "bytes": "{\"nextAction\":\"none\",\"operation\":\"deploy\",\"operationId\":\"cb620f5d-6e10-45ac-b3c5-d372a327e73f\",\"phase\":\"committed\",\"recovery\":{\"attempts\":0,\"code\":null},\"schema\":\"lunacy-release-operation/v2\",\"status\":\"VALID\"}\n",
+      "sha256": "c2a115d0a9f900bee94eec0766300d7cb4bc7cae33383917987b5cca5250df57",
+      "source": "Lunacy/runs/repair-release-envelope-path-digest/phases/p2/evidence/release-envelope-status.json"
+    }
+  ],
+  "pathDigestRule": "tools/deploy-skill.mjs:54; SHA-256(canonical(value)); regression test test/r11e-release-envelope.test.js",
+  "schema": "lunacy-b0-release-accepted/v1"
+}

@@ -1,0 +1,41 @@
+✔ segmented/v2 reconstructs a journal-free state and reuses its sealed prefix (342.276917ms)
+✔ segmented/v2 read-only inspection and reuse fences accept the journal-free projection (424.158667ms)
+✔ segmented/v2 refuses a tampered sealed source before publishing CURRENT (192.154833ms)
+✔ segmented/v1 refuses a tampered reused source before publishing CURRENT (188.745917ms)
+✔ segmented/v2 compaction rejects an extra journal field in historical projections (233.190416ms)
+✔ segmented/v2 selection over v1 cannot prune the verified prefix (213.165834ms)
+✔ segmented/v2 rejects prefix tamper before exposing state and preserves Memory parity (192.262792ms)
+✔ legacy migration to segmented/v2 and explicit rollback retain exact logical history (451.393625ms)
+✔ explicit v2 migration preference still migrates a legacy CURRENT (346.393708ms)
+✔ segmented/v2 migration retry rejects a foreign marker instead of deleting it (164.802167ms)
+✔ segmented/v2 publication faults converge to one complete old-or-new generation (2997.840625ms)
+✔ segmented file reader preserves a long logical prefix and active suffix (1618.293333ms)
+✔ segmented transitions over 10,000 records match the deterministic semantic oracle (1723.343584ms)
+✔ memory and file segmented stores expose identical logical history (575.715625ms)
+✔ migration, rollback, and explicit compaction retain crash-safe generations (453.796208ms)
+✔ unknown segmented version is rejected before state use (141.303375ms)
+✔ segmented reader rejects mixed legacy files before state use (137.926833ms)
+✔ P2-ORPHAN-GENERATION quarantines a renamed successor and permits retry (344.989ms)
+✔ P2-READONLY-SEGMENTED verifies head identity without a legacy journal path (165.491792ms)
+✔ P2-CURRENT-CONTINUITY rejects independently tampered segmented fields without mutation or reuse (691.505125ms)
+✔ P2-MARKER-LEGACY never lets an object-local marker lift legacy ceilings (382.605458ms)
+✔ P2-ROLLBACK-GC preserves marker-referenced history and is idempotent (289.148333ms)
+✔ P2-FAULT-MATRIX leaves only old-or-new authority across publication boundaries (4249.12875ms)
+✔ R4 absent-token capsule is canonical, redacted, bounded, and deterministic (413.796083ms)
+✔ R4 wrong command digest is a closed mismatch and CLI stays private (487.671333ms)
+✔ segmented/v2 recovery capsule reports bounded journal budget (469.679541ms)
+✔ managed transition defaults do not select the segmented/v2 writer (312.497375ms)
+✔ R4 malformed effect evidence fails closed without cleanup (310.965833ms)
+✔ R4 frozen golden corpus is canonical and digest-manifest bound (2.687209ms)
+✔ R4 targeted oversized and symlink records stay bounded and fail closed (431.481708ms)
+✔ R4 selector aliases reject conflicting API values (351.223ms)
+✔ P4-SCHEMA-BOUNDS rejects overlong request and committed identities (649.783166ms)
+✔ P4-SCHEMA-BOUNDS redacts path/control-bearing step IDs and validates output schema (401.004334ms)
+ℹ tests 33
+ℹ suites 0
+ℹ pass 33
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 10870.39925

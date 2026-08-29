@@ -1,0 +1,18 @@
+✔ v2 envelope is closed, exact-name, resumable, and status is mutation-free (45.794958ms)
+✔ tampered envelope and manifest bindings fail closed without mutation (16.158208ms)
+✔ phase CAS cannot retarget the operation or swap owners outside a stale prepared rebind (16.32325ms)
+✔ committed envelopes require an attested inner aggregate (4.106042ms)
+✔ resume never creates a fresh envelope when the prior marker is absent (55.971083ms)
+✔ resume rejects a well-formed inner marker owned by another release (136.841875ms)
+✔ fresh release-envelope CLI creates and commits an outer envelope (4738.231125ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 5080.003708
+
+COMMAND: node --test test/r11e-release-envelope.test.js
+EXIT: 0

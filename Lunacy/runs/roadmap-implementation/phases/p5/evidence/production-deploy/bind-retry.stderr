@@ -1,0 +1,3 @@
+Error: release owner wait timed out
+    at waitOwner (file:///Users/mark/Documents/Codex/2026-08-26/continuously-pursue-major-local-lunacy-architecture/work/lunacy-postrelease-sol-routing/tools/bind-release-process-snapshot.mjs:59:9)
+    at async main (file:///Users/mark/Documents/Codex/2026-08-26/continuously-pursue-major-local-lunacy-architecture/work/lunacy-postrelease-sol-routing/tools/bind-release-process-snapshot.mjs:74:17)

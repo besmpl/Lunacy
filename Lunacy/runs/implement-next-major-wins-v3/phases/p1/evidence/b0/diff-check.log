@@ -1,0 +1,2 @@
+COMMAND: git diff --no-index --check /dev/null <owned B0 artifacts and S1 report>
+EXIT: 0

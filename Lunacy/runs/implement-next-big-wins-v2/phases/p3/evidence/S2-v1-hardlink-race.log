@@ -1,0 +1,13 @@
+{
+  "beforeBytes": 962,
+  "beforeDigest": "7af76bd5f202a13058b54f291b2b62412a8b584f6b0c02a611ccff4398bc8d36",
+  "sourceAfter": "tampered-v1\\n",
+  "commit": "ok",
+  "currentGeneration": 2,
+  "currentFormat": "segmented/v1",
+  "load": "reject:ManifestMismatch: segmented segment-00000001-00000002.ndjson byte count mismatch",
+  "g2DescriptorDigest": "7af76bd5f202a13058b54f291b2b62412a8b584f6b0c02a611ccff4398bc8d36",
+  "g2ActualDigest": "4c8fa7bffbda1857851af86142e7f311adc5d2f069b3d3f2945f78767b5dcc52",
+  "g2DescriptorBytes": 962,
+  "g2ActualBytes": 13
+}
