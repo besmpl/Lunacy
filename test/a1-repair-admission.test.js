@@ -6,7 +6,6 @@ import { join } from 'node:path';
 import { canonicalString, digest } from '../dist/canonical.js';
 import { transition } from '../dist/bridge.js';
 import { composeKernel } from '../dist/composition.js';
-import { GraphAcceleration } from '../dist/graph.js';
 import { createInitialState, reduce } from '../dist/reducer.js';
 import { FileArtifactStore } from '../dist/store.js';
 import { validatePlan, readySteps } from '../dist/validator.js';
@@ -74,12 +73,10 @@ async function persistRepair(rootDir, runId, { gate = 'NOT-DUE' } = {}) {
   return started.snapshot;
 }
 
-test('validator and graph admission expose REPAIR as executable readiness', () => {
+test('validator exposes REPAIR as executable readiness without mutating state', () => {
   const state = repairState();
   assert.deepEqual(readySteps(plan, { repair: 'REPAIR' }).map((step) => step.stepId), ['repair']);
-  const prepared = new GraphAcceleration('ON').prepare({ runId: state.runId, plan, state, maxInFlight: 1 });
-  assert.deepEqual(prepared.frontierIds, ['repair']);
-  assert.deepEqual(prepared.candidates.map((candidate) => candidate.nodeId), ['repair']);
+  assert.equal(state.steps.repair.status, 'REPAIR');
 });
 
 test('direct reducer admission promotes REPAIR to one current-frame command', () => {

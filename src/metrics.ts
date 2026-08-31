@@ -4,10 +4,6 @@
  * must never change an outcome.
  */
 export type AccelerationCounter =
-  | 'graphPrepare'
-  | 'graphFallback'
-  | 'graphCorrupt'
-  | 'graphCandidates'
   | 'managedDirectProposals'
   | 'managedFocusProposals'
   | 'managedExploreProposals'
@@ -36,7 +32,6 @@ export type AccelerationCounter =
 export type MetricsSnapshot = Readonly<Record<AccelerationCounter, number>>;
 
 const COUNTERS: readonly AccelerationCounter[] = [
-  'graphPrepare', 'graphFallback', 'graphCorrupt', 'graphCandidates',
   'managedDirectProposals', 'managedFocusProposals', 'managedExploreProposals',
   'managedWavesAdmitted', 'managedWavesRefused', 'managedWavesKilled',
   'managedParentOverride', 'managedAllRejected', 'managedFallback', 'managedAuthorityEscape',

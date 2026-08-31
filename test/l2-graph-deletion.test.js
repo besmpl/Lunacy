@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { canonicalString, digest } from '../dist/canonical.js';
@@ -30,16 +30,18 @@ function startInput() {
 }
 
 async function journey(rootDir, acceleration) {
-  const kernel = makeRunKernel({ plan, rootDir, maxInFlight: 2, acceleration });
+  const kernel = makeRunKernel({ plan, rootDir, maxInFlight: 2, admission: () => true, acceleration });
   const first = await kernel.advance(startInput());
   const replay = await kernel.advance(startInput());
-  const state = (await new FileArtifactStore(rootDir).load()).state;
+  const loaded = await new FileArtifactStore(rootDir).load();
+  const state = loaded.state;
   return {
     first: canonicalString(first),
     replay: canonicalString(replay),
-    stateBytes: await readFile(join(rootDir, '.kernel', 'generations', 'g1', 'state.json'), 'utf8'),
+    stateBytes: canonicalString(state),
     projection: Object.fromEntries(Object.entries(state.steps).map(([id, step]) => [id, step.status])),
-    outboxOrder: Object.values(state.outbox).map((command) => command.stepId),
+    stepOrder: Object.keys(state.steps),
+    admittedSteps: Object.values(state.outbox).map((command) => command.stepId).sort(),
     journalEvents: state.journal.map((row) => row.identity.eventId),
   };
 }
@@ -54,6 +56,7 @@ test('L2 wide plan dependencies conflicts order and replay remain reducer-author
   assert.deepEqual(first, second);
   assert.deepEqual(legacy, first);
   assert.deepEqual(first.projection, { a: 'ACTIVE', b: 'READY', c: 'ACTIVE', d: 'READY' });
-  assert.deepEqual(first.outboxOrder, ['a', 'c']);
+  assert.deepEqual(first.stepOrder, ['a', 'b', 'c', 'd']);
+  assert.deepEqual(first.admittedSteps, ['a', 'c']);
   assert.deepEqual(first.journalEvents, ['start']);
 });

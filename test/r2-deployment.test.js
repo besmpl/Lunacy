@@ -44,7 +44,7 @@ test('R2 complete-tree publication removes owned stale files but preserves unrel
     const report = JSON.parse(result.stdout);
     // The generated release owns 190 exact files; the complete verified tree
     // also contains the one explicitly preserved operator sentinel above.
-    assert.equal(report.managedFiles, 183);
+    assert.equal(report.managedFiles, 179);
     assert.match(report.managedAggregate, /^[0-9a-f]{64}$/);
   } finally {
     await rm(repo, { recursive: true, force: true });

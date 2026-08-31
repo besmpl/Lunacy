@@ -76,10 +76,9 @@ owner are validated before the one-shot token is consumed, and ambiguous
 topology falls back to the legacy reset. Finalized prior evidence remains
 immutable.
 
-`KernelOptions.acceleration` is composition-time configuration only. Graph and
-metrics are private optional accelerators; there is no public graph lifecycle.
-All modes preserve the direct validator/reducer/store path. The default graph
-accelerator mode is `OFF`.
+`KernelOptions.acceleration` retains only in-process managed diagnostics.
+Legacy graph-mode decorations are accepted as inert input and never alter the
+direct validator/reducer/store admission path or create a second lifecycle.
 
 The package-root `KernelOptions` intentionally has no journal-format switch.
 Long-lived local runs may select the private `FileArtifactStore` format through

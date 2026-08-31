@@ -5,7 +5,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { composeKernel } from '../dist/composition.js';
 import { canonicalString, digest } from '../dist/canonical.js';
-import { AccelerationMetrics } from '../dist/metrics.js';
 import { reduce } from '../dist/reducer.js';
 
 const plan = { phaseId: 'p', steps: [{ stepId: 'a' }, { stepId: 'b', dependencies: ['a'] }] };
@@ -18,11 +17,10 @@ const start = (runId, eventId = 'start', startPlan = plan) => input(runId, event
 const worker = (snapshot, launchToken, eventId = 'worker') => input('r', eventId, { kind: 'WORKER_ENVELOPE', ref: { id: 'worker', digest: digest({ status: 'DONE' }), bytes: canonicalString({ status: 'DONE' }) } }, snapshot, launchToken);
 const tokenFor = (runId, stepId) => `launch-${digest({ runId, phaseId: 'p', stepId, attemptEpoch: 0 }).slice(0, 32)}`;
 
-test('ON graph uses post-event frontier and preserves cold bytes', async () => {
+test('legacy graph decoration preserves direct post-event admission and cold bytes', async () => {
   const driver = { dispatch: (command, launchToken) => receipt(command, launchToken) };
-  const onMetrics = new AccelerationMetrics();
   const off = composeKernel({ plan, maxInFlight: 1, driver });
-  const on = composeKernel({ plan, maxInFlight: 1, driver, acceleration: { graph: 'ON', metrics: onMetrics } });
+  const on = composeKernel({ plan, maxInFlight: 1, driver, acceleration: { graph: 'ON' } });
   let cold = await off.advance(start('cold'));
   let graph = await on.advance(start('graph'));
   assert.deepEqual(graph, cold);
@@ -36,19 +34,12 @@ test('ON graph uses post-event frontier and preserves cold bytes', async () => {
   assert.equal(graph.snapshot.readyCount, 0);
   assert.equal(graph.snapshot.activeCount, 1, 'successor is admitted during the completion call');
   assert.equal(graph.snapshot.pendingDispatchCount, cold.snapshot.pendingDispatchCount);
-  assert.equal(onMetrics.snapshot().graphCandidates > 0, true);
 });
 
-test('reducer rejects a stale graph frame and uses the direct frontier', () => {
+test('reducer derives the complete frontier directly', () => {
   const event = { kind: 'START', intentRef: { id: 'plan', digest: digest({ phaseId: 'p', steps: [{ stepId: 'a' }] }) } };
   const identity = { runId: 'stale', phaseId: 'run', stepId: 'run', attemptEpoch: 0, authorityEpoch: 0, barrierEpoch: 0, eventId: 'start', payloadDigest: digest(event) };
-  const stale = {
-    candidateIds: ['not-a-node'], planDigest: digest({ phaseId: 'p', steps: [{ stepId: 'a' }] }), graphDigest: digest('graph'), generation: 0,
-    baseStateDigest: null, baseRevision: 0, baseJournalEnd: 0, baseJournalDigest: digest([]), postStateDigest: '0'.repeat(64), postRevision: 1,
-    postJournalEnd: 1, postJournalDigest: digest([]), frontierIds: ['not-a-node'], authorityEpoch: 0, attemptEpoch: 0, barrierEpoch: 0, modeEpoch: 0,
-    writerFence: 'none', completeFrontierDigest: digest(['not-a-node']),
-  };
-  const result = reduce(undefined, { phaseId: 'p', steps: [{ stepId: 'a' }] }, identity, event, 1, true, stale);
+  const result = reduce(undefined, { phaseId: 'p', steps: [{ stepId: 'a' }] }, identity, event, 1, true);
   assert.equal(result.state.steps.a.status, 'ACTIVE');
   assert.equal(Object.keys(result.state.outbox).length, 1);
 });

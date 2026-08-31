@@ -5,7 +5,6 @@ import { createManagedCapability, projectManagedRolloutPolicy, reserveManaged, v
 import { readySteps, validatePlan } from './validator.js';
 import { acknowledge, commandInCurrentFrame } from './outbox.js';
 import { JOURNAL_BYTE_CEILING, JOURNAL_EVENT_CEILING } from './limits.js';
-import { dependencyTerminal, isDispatchableStepStatus } from './dependency.js';
 import { deriveTopology, isManagedDissent, reconcileWave, settlementPrefixDigest, validateReport, validateWave, type AcceptedReport, type DeliberationPolicy, type DeliberationReport, type DeliberationWave, type ReconcileResult } from './deliberation.js';
 
 export type ReduceResult = { state: MachineState; outcome: 'WAITING' | 'PHASE_READY' | 'COMPLETE' | 'DECISION_REQUIRED' | 'BLOCKED'; reason?: string; token?: string; brief?: Ref; receipt?: Ref; deferAdmission?: boolean };
@@ -160,33 +159,6 @@ export function bindManagedProposal(state: MachineState, capability: ManagedCapa
   applyManagedReservations(next, capability);
   return next;
 }
-
-/**
- * A graph frame is deliberately a proposal.  The reducer accepts it only when
- * its post-event state/freshness proof still names the state being reduced;
- * otherwise it falls back to the mandatory direct evaluator.
- */
-export type PreparedAdmission = Readonly<{
-  candidateIds: readonly string[];
-  planDigest: Sha256;
-  graphDigest: Sha256;
-  generation: number;
-  baseStateDigest: Sha256 | null;
-  baseRevision: number;
-  baseJournalEnd: number;
-  baseJournalDigest: Sha256;
-  postStateDigest: Sha256;
-  postRevision: number;
-  postJournalEnd: number;
-  postJournalDigest: Sha256;
-  frontierIds: readonly string[];
-  authorityEpoch: number;
-  attemptEpoch: number;
-  barrierEpoch: number;
-  modeEpoch: number;
-  writerFence: string;
-  completeFrontierDigest: Sha256;
-}>;
 
 /** @deprecated Kept as a no-op for old private fixtures. Format authority is
  * now carried explicitly through reducer/store options; this marker never
@@ -421,37 +393,18 @@ function validateManagedRef(value: unknown): asserts value is Ref {
 function inFlight(state: MachineState): OutboxCommand[] {
   return Object.values(state.outbox).filter((x) => (x.state === 'PENDING' || x.state === 'CLAIMED' || (x.state === 'UNKNOWN' && commandInCurrentFrame(state, x))) || (x.state === 'ACKED' && commandInCurrentFrame(state, x) && state.steps[x.stepId]?.status === 'ACTIVE'));
 }
-function candidateSteps(plan: Plan, ids: readonly string[]): import('./model.js').PlanStep[] {
-  const byId = new Map(plan.steps.map((step) => [step.stepId, step]));
-  const seen = new Set<string>();
-  const result: import('./model.js').PlanStep[] = [];
-  for (const id of ids) {
-    if (seen.has(id)) continue;
-    seen.add(id);
-    const step = byId.get(id);
-    if (step) result.push(step);
-  }
-  return result;
-}
-
-function updateAdmission(state: MachineState, plan: Plan, maxInFlight: number, proposedIds?: readonly string[]): void {
+function updateAdmission(state: MachineState, plan: Plan, maxInFlight: number): void {
   if (state.status !== 'ACTIVE' || state.barrier !== 'OPEN' || state.gate === 'DUE' || state.gate === 'FINDINGS') return;
   const slots = Math.max(0, maxInFlight - inFlight(state).length);
   if (!slots) return;
   const status = Object.fromEntries(Object.entries(state.steps).map(([k, v]) => [k, v.status]));
-  // ON graph mode supplies an indexed, post-event frontier.  The reducer does
-  // not rescan every dependency in that mode; it still checks the complete
-  // candidate predicate below before creating any command.  An absent frame
-  // is the ordinary mandatory direct path.
-  const directClaims = proposedIds === undefined ? activeClaims(state) : undefined;
-  const selected = proposedIds
-    ? candidateSteps(plan, proposedIds).filter((step) => isDispatchableStepStatus(status[step.stepId]) && (step.dependencies ?? []).every((dependency) => dependencyTerminal(status[dependency])))
-    : readySteps(plan, status, directClaims!, slots);
+  const directClaims = activeClaims(state);
+  const selected = readySteps(plan, status, directClaims, slots);
   const accepted: typeof selected = [];
   for (const step of selected) {
     if (accepted.length >= slots) break;
     const claims = step.claims ?? [];
-    const heldClaims = proposedIds === undefined ? directClaims! : activeClaims(state);
+    const heldClaims = directClaims;
     if ([...heldClaims, ...accepted.flatMap((item) => item.claims ?? [])].some((held) => claims.some((claim) => {
       const names = new Set([claim.resource, ...(claim.aliases ?? [])]);
       const heldNames = new Set([held.resource, ...(held.aliases ?? [])]);
@@ -495,9 +448,9 @@ export function refreshAdmission(state: MachineState, plan: Plan, maxInFlight: n
   snapshotReason(state);
 }
 
-/** Apply only the pure event delta.  No ready scan, command, or finality is
- * performed, making the resulting state suitable for post-event graph build. */
-export function previewReduce(current: MachineState | undefined, plan: Plan, identity: EventIdentity, event: Event, admissionOk: boolean, allowUnbounded = false): ReduceResult {
+/** Apply only the pure event delta. Admission and finality follow from this
+ * exact journal-ordered state in the exported reducer. */
+function reduceEvent(current: MachineState | undefined, plan: Plan, identity: EventIdentity, event: Event, admissionOk: boolean, allowUnbounded = false): ReduceResult {
   if (event.kind === 'START') {
     if (current) return { state: current, outcome: 'BLOCKED', reason: 'run already started' };
     if (!admissionOk) return { state: current as never, outcome: 'BLOCKED', reason: 'CrossRunUnproven' };
@@ -646,30 +599,11 @@ export function createInitialState(runId: string, plan: Plan, planDigest: Return
   return { schema: 1, runId, phaseId: plan.phaseId, revision: 0, authorityEpoch: 0, attemptEpoch: 0, barrierEpoch: 0, modeEpoch: 0, writerFence, status: 'ACTIVE', gate: 'NOT-DUE', barrier: 'OPEN', steps, outbox: {}, processed: {}, decisionTokens: {}, planDigest, nextAction: 'start', journal: [] };
 }
 
-export function reduce(current: MachineState | undefined, plan: Plan, identity: EventIdentity, event: Event, maxInFlight: number, admissionOk: boolean, prepared?: PreparedAdmission, allowUnbounded = false): ReduceResult {
-  const preview = previewReduce(current, plan, identity, event, admissionOk, allowUnbounded);
+export function reduce(current: MachineState | undefined, plan: Plan, identity: EventIdentity, event: Event, maxInFlight: number, admissionOk: boolean, allowUnbounded = false): ReduceResult {
+  const preview = reduceEvent(current, plan, identity, event, admissionOk, allowUnbounded);
   if (preview.outcome === 'BLOCKED' || preview.outcome === 'DECISION_REQUIRED') return preview;
   const state = preview.state;
-  let proposedIds: readonly string[] | undefined;
-  const baseFresh = current
-    ? prepared?.baseStateDigest === digest(current) && prepared.baseRevision === current.revision && prepared.baseJournalEnd === current.journal.length && prepared.baseJournalDigest === digest(current.journal)
-    : prepared?.baseStateDigest === null && prepared?.baseRevision === 0 && prepared?.baseJournalEnd === 0;
-  if (prepared && baseFresh && prepared.planDigest === digest(plan) && state.status === 'ACTIVE' && state.barrier === 'OPEN' && prepared.graphDigest && digest([...prepared.frontierIds].sort()) === prepared.completeFrontierDigest && prepared.postStateDigest === digest(state) && prepared.postRevision === state.revision && prepared.postJournalEnd === state.journal.length && prepared.postJournalDigest === digest(state.journal) && prepared.authorityEpoch === state.authorityEpoch && prepared.attemptEpoch === state.attemptEpoch && prepared.barrierEpoch === state.barrierEpoch && prepared.modeEpoch === state.modeEpoch && prepared.writerFence === state.writerFence) {
-    const candidateSet = new Set(prepared.candidateIds);
-    const canonical = candidateSteps(plan, prepared.candidateIds);
-    const frontierSet = new Set(prepared.frontierIds);
-    const valid = candidateSet.size === prepared.candidateIds.length && canonical.length === prepared.candidateIds.length && prepared.frontierIds.every((id) => frontierSet.size === prepared.frontierIds.length && isDispatchableStepStatus(state.steps[id]?.status) && (plan.steps.find((step) => step.stepId === id)?.dependencies ?? []).every((dependency) => dependencyTerminal(state.steps[dependency]?.status))) && prepared.candidateIds.every((id) => frontierSet.has(id)) && canonical.every((step) => isDispatchableStepStatus(state.steps[step.stepId]?.status) && (step.dependencies ?? []).every((dependency) => dependencyTerminal(state.steps[dependency]?.status)));
-    // The graph is only an optional index.  Even a self-consistent but
-    // incomplete candidate list must not silently change admission semantics
-    // (for example by under-admitting a ready sibling).  Compare its ordered
-    // maximal selection with the mandatory direct evaluator and discard the
-    // frame on any discrepancy.
-    const slots = Math.max(0, maxInFlight - inFlight(state).length);
-    const directIds = readySteps(plan, Object.fromEntries(Object.entries(state.steps).map(([key, value]) => [key, value.status])), activeClaims(state), slots).map((step) => step.stepId);
-    const maximal = directIds.length === prepared.candidateIds.length && directIds.every((id, index) => id === prepared.candidateIds[index]);
-    if (valid && maximal) proposedIds = prepared.candidateIds;
-  }
-  updateAdmission(state, plan, maxInFlight, proposedIds); snapshotReason(state);
+  updateAdmission(state, plan, maxInFlight); snapshotReason(state);
   if (allDone(state) && inFlight(state).length === 0 && state.status === 'ACTIVE') {
     const acceptedPrefix = state.schema === 2 && state.managed?.proposal ? managedAcceptedReportRefs(state) : undefined;
     const orderedReportRefs = acceptedPrefix?.result.refs ?? [];

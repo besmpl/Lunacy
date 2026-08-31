@@ -5,7 +5,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { makeRunKernel } from '../dist/index.js';
 import { digest, canonicalString } from '../dist/canonical.js';
-import { AccelerationMetrics } from '../dist/metrics.js';
 
 const plan = { phaseId: 'p6-previewreduce', steps: [{ stepId: 'a' }] };
 const payload = { observed: true };
@@ -37,8 +36,8 @@ function hostEvent(id = 'host-1') {
   return { kind: 'OBSERVATION', category: 'HOST', ref: { id, scope: 'p6', digest: digest(payload), bytes: canonicalString(payload) } };
 }
 
-async function runGrowing(mode, metrics) {
-  const kernel = makeRunKernel({ plan, maxInFlight: 0, acceleration: { graph: mode, metrics } });
+async function runGrowing(mode) {
+  const kernel = makeRunKernel({ plan, maxInFlight: 0, acceleration: { graph: mode } });
   const yields = [];
   let previous;
   for (const [eventId, event] of [['start', startEvent()], ['host-1', hostEvent()], ['host-2', hostEvent('host-2')]]) {
@@ -48,34 +47,28 @@ async function runGrowing(mode, metrics) {
   return { final: previous, yieldBytes: yields.join('\n') };
 }
 
-test('OFF bypasses preview while SHADOW and ON retain graph preparation and identical yields', async () => {
+test('legacy graph decorations preserve exact growing-journal bytes', async () => {
   const results = {};
   for (const mode of ['OFF', 'SHADOW', 'ON']) {
-    const metrics = new AccelerationMetrics();
-    results[mode] = { run: await runGrowing(mode, metrics), metrics: metrics.snapshot() };
+    results[mode] = await runGrowing(mode);
   }
-  assert.equal(results.OFF.metrics.graphPrepare, 0);
-  assert.ok(results.SHADOW.metrics.graphPrepare > 0);
-  assert.ok(results.ON.metrics.graphPrepare > 0);
-  assert.equal(results.OFF.run.yieldBytes, results.SHADOW.run.yieldBytes);
-  assert.equal(results.OFF.run.yieldBytes, results.ON.run.yieldBytes);
+  assert.equal(results.OFF.yieldBytes, results.SHADOW.yieldBytes);
+  assert.equal(results.OFF.yieldBytes, results.ON.yieldBytes);
 });
 
-test('graph mode is a construction snapshot shared by bypass and preparation gates', async () => {
-  const metrics = new AccelerationMetrics();
-  const acceleration = { graph: 'ON', metrics };
+test('legacy graph decoration mutation has no runtime effect', async () => {
+  const acceleration = { graph: 'ON' };
   const kernel = makeRunKernel({ plan, maxInFlight: 0, acceleration });
   acceleration.graph = 'OFF';
   let value = await kernel.advance(input('snapshot', 'start', startEvent()));
   value = await kernel.advance(input('snapshot', 'host', hostEvent(), value));
-  assert.ok(metrics.snapshot().graphPrepare > 0);
+  assert.equal(value.snapshot.revision, 2);
 });
 
-test('malformed live plan recovery suppresses graph preparation', async () => {
+test('malformed live plan recovery retains the committed direct plan', async () => {
   const rootDir = await mkdtemp(join(tmpdir(), 'lunacy-p6-previewreduce-'));
   try {
-    const metrics = new AccelerationMetrics();
-    let kernel = makeRunKernel({ plan, rootDir, maxInFlight: 1, acceleration: { graph: 'ON', metrics } });
+    let kernel = makeRunKernel({ plan, rootDir, maxInFlight: 1, acceleration: { graph: 'ON' } });
     let value = await kernel.advance(input('recovery', 'start', startEvent()));
     value = await kernel.advance(input('recovery', 'resume', { kind: 'RESUME' }, value));
     assert.equal(value.kind, 'BLOCKED');
@@ -86,11 +79,9 @@ test('malformed live plan recovery suppresses graph preparation', async () => {
     value = await kernel.advance(input('recovery', 'receipt', receipt, value, launchToken));
 
     const malformedPlan = { phaseId: plan.phaseId, steps: 'not-an-array' };
-    kernel = makeRunKernel({ plan: malformedPlan, rootDir, maxInFlight: 9, acceleration: { graph: 'ON', metrics } });
-    metrics.reset();
+    kernel = makeRunKernel({ plan: malformedPlan, rootDir, maxInFlight: 9, acceleration: { graph: 'ON' } });
     const worker = { kind: 'WORKER_ENVELOPE', ref: { id: 'worker', digest: digest({ status: 'DONE' }), bytes: canonicalString({ status: 'DONE' }) } };
     const final = await kernel.advance(input('recovery', 'worker', worker, value, launchToken));
-    assert.equal(metrics.snapshot().graphPrepare, 0);
     assert.equal(final.kind, 'FINAL');
     assert.equal(final.status, 'phase-ready');
   } finally {

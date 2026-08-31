@@ -1,6 +1,6 @@
 import { digest, canonicalString, identityKey, parseCanonical } from './canonical.js';
 import { canonicalClaims, proveAdmission } from './admission.js';
-import { appendJournal, applyAuthorityAdoption, applyDispatchReceipt, applyParentDecision, applyManagedReservations, applyManagedRolloutPolicy, bindManagedProposal, commandForToken, migrateMachineState, nextWriterFence, previewReduce, reduce, refreshAdmission, retireManagedAttempt, validateManagedDecisionBinding, type PreparedAdmission, type PreparedDecisionPublication } from './reducer.js';
+import { appendJournal, applyAuthorityAdoption, applyDispatchReceipt, applyParentDecision, applyManagedReservations, applyManagedRolloutPolicy, bindManagedProposal, commandForToken, migrateMachineState, nextWriterFence, reduce, refreshAdmission, retireManagedAttempt, validateManagedDecisionBinding, type PreparedDecisionPublication } from './reducer.js';
 import { claim, commandInCurrentFrame, unknown, type DriverReceipt } from './outbox.js';
 import { ProseDriver, type EffectDriver } from './driver.js';
 import { isStoreGenerationConflict, storeForRoot, type ArtifactStore, type StoreLinearizedDispatchRequest } from './store.js';
@@ -10,7 +10,6 @@ import { isDispatchableStepStatus } from './dependency.js';
 import { compileWavePlan, deriveTopology, shadowPolicy, validateRef as validateDeliberationRef, validateWave, verifyWavePlan, type DeliberationPolicy, type DeliberationWave } from './deliberation.js';
 import { verifyReadSet } from './authority.js';
 import { DispatchCoordinator, type DispatchDriverSnapshot, type ActiveDispatchTask } from './dispatch-coordinator.js';
-import { GraphAcceleration, type GraphMode } from './graph.js';
 import { AccelerationMetrics, defaultMetrics } from './metrics.js';
 import { JOURNAL_BYTE_CEILING, JOURNAL_EVENT_CEILING } from './limits.js';
 import { assertManagedGraph, createManagedCapability, createManagedRolloutPolicy, managedAdmissionAllowed, managedRolloutDecision, verifyManagedCapability, verifyManagedRolloutPolicy, type ManagedCapability, type ManagedCapabilityInput, type ManagedRolloutDecision, type ManagedRolloutPolicy, type ManagedRolloutPolicyInput } from './managed-capability.js';
@@ -40,9 +39,9 @@ export type KernelOptions = {
   workspace?: string;
   ownership?: string;
   admission?: (input: { runId: string; claims: import('./model.js').Claim[]; workspace?: string; ownership?: string }) => boolean | Promise<boolean>;
-  /** Composition-time acceleration switches. They never add lifecycle methods or authority. */
+  /** Composition-time diagnostics. Legacy acceleration decorations are inert. */
   acceleration?: {
-    graph?: GraphMode;
+    graph?: unknown;
     metrics?: AccelerationMetrics;
   };
   /** Private Stage-C opt-in. Omitted keeps the ordinary schema-1 path. */
@@ -108,9 +107,6 @@ function validateKernelOptions(options: KernelOptions): number {
   const acceleration = options.acceleration;
   if (!acceleration) return configuredMaxInFlight;
   if (acceleration.metrics !== undefined && (!acceleration.metrics || typeof acceleration.metrics !== 'object' || typeof acceleration.metrics.increment !== 'function' || typeof acceleration.metrics.snapshot !== 'function')) throw new InvalidPlan('acceleration metrics are invalid');
-  for (const [name, mode] of Object.entries({ graph: acceleration.graph })) {
-    if (mode !== undefined && mode !== 'OFF' && mode !== 'SHADOW' && mode !== 'ON') throw new InvalidPlan(`${name} acceleration mode is invalid`);
-  }
   return configuredMaxInFlight;
 }
 
@@ -429,8 +425,6 @@ class KernelImpl implements RunKernel {
   readonly #managedKillSwitch: boolean;
   readonly #managedRolloutPolicy?: ManagedRolloutPolicy;
   readonly #managedRolloutDecision?: ManagedRolloutDecision;
-  readonly #graphMode: GraphMode;
-  readonly #graph: GraphAcceleration;
   /** In-process dispatch state is owned by the private coordinator.  These
    * compatibility views are intentionally non-authoritative diagnostics. */
   private readonly coordinator: DispatchCoordinator;
@@ -451,8 +445,6 @@ class KernelImpl implements RunKernel {
         if (gear) this.safeMetric(gear === 'FOCUS' ? 'managedFocusProposals' : 'managedExploreProposals');
       }
     }
-    this.#graphMode = options.acceleration?.graph ?? 'OFF';
-    this.#graph = new GraphAcceleration(this.#graphMode, this.metrics);
     const timeoutMs = dispatcher.timeoutMs ?? 30_000;
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 0) throw new InvalidPlan('dispatcher timeoutMs must be a non-negative safe integer');
     if (dispatcher.signal !== undefined && (typeof dispatcher.signal !== 'object' || typeof dispatcher.signal.addEventListener !== 'function' || typeof dispatcher.signal.removeEventListener !== 'function' || typeof dispatcher.signal.aborted !== 'boolean')) throw new InvalidPlan('dispatcher signal is invalid');
@@ -580,33 +572,6 @@ class KernelImpl implements RunKernel {
   }
 
 
-
-  #prepareGraph(plan: Plan, current: MachineState | undefined, postState: MachineState, input: AdvanceInput, generation: number): PreparedAdmission | undefined {
-    if (this.#graphMode === 'OFF') return undefined;
-    try {
-      const prepared = this.#graph.prepare({
-        runId: String(input.runId), plan, state: postState, generation,
-        journalEnd: postState.journal.length, journalDigest: digest(postState.journal), authorityDigest: digest(plan), authorityEpoch: postState.authorityEpoch,
-        maxInFlight: this.configuredMaxInFlight,
-        postEvent: { baseState: current, baseGeneration: generation, baseJournalEnd: current?.journal.length ?? 0, baseJournalDigest: digest(current?.journal ?? []), identity: input.identity },
-      });
-      // SHADOW must never alter admission; it is intentionally a diagnostic
-      // compile/verify pass only.
-      if (this.#graphMode !== 'ON') return undefined;
-      if (prepared.diagnostics.fallback || !prepared.candidates.length) return prepared.diagnostics.fallback ? undefined : {
-        candidateIds: [], planDigest: prepared.boundGraph.planDigest, graphDigest: prepared.freshness.graphDigest, generation: prepared.freshness.generation,
-        baseStateDigest: prepared.freshness.baseStateDigest, baseRevision: prepared.freshness.baseRevision, baseJournalEnd: prepared.freshness.baseJournalEnd, baseJournalDigest: prepared.freshness.baseJournalDigest,
-        postStateDigest: prepared.freshness.stateDigest ?? digest(postState), postRevision: prepared.freshness.revision, postJournalEnd: prepared.freshness.postJournalEnd, postJournalDigest: prepared.freshness.postJournalDigest,
-        frontierIds: prepared.frontierIds, authorityEpoch: prepared.freshness.authorityEpoch, attemptEpoch: prepared.freshness.attemptEpoch, barrierEpoch: prepared.freshness.barrierEpoch, modeEpoch: prepared.freshness.modeEpoch, writerFence: prepared.freshness.writerFence, completeFrontierDigest: prepared.freshness.completeFrontierDigest,
-      };
-      return {
-        candidateIds: prepared.candidates.map((candidate) => candidate.nodeId), planDigest: prepared.boundGraph.planDigest, graphDigest: prepared.freshness.graphDigest, generation: prepared.freshness.generation,
-        baseStateDigest: prepared.freshness.baseStateDigest, baseRevision: prepared.freshness.baseRevision, baseJournalEnd: prepared.freshness.baseJournalEnd, baseJournalDigest: prepared.freshness.baseJournalDigest,
-        postStateDigest: prepared.freshness.stateDigest ?? digest(postState), postRevision: prepared.freshness.revision, postJournalEnd: prepared.freshness.postJournalEnd, postJournalDigest: prepared.freshness.postJournalDigest,
-        frontierIds: prepared.frontierIds, authorityEpoch: prepared.freshness.authorityEpoch, attemptEpoch: prepared.freshness.attemptEpoch, barrierEpoch: prepared.freshness.barrierEpoch, modeEpoch: prepared.freshness.modeEpoch, writerFence: prepared.freshness.writerFence, completeFrontierDigest: prepared.freshness.completeFrontierDigest,
-      };
-    } catch { /* direct mandatory evaluator remains authoritative */ return undefined; }
-  }
 
   async advance(input: AdvanceInput): Promise<Yield> {
     validateIdentity(input);
@@ -899,18 +864,8 @@ class KernelImpl implements RunKernel {
     }
 
     let reduced;
-    let preparedAdmission: PreparedAdmission | undefined;
     try {
-      if (recoveryAgainstCommittedPlan || this.#graphMode === 'OFF') {
-        reduced = reduce(current, plan, input.identity, input.event, recoveryCapacity, admissionOk, undefined, segmentedJournalEnabled(this.store));
-      } else {
-        const preview = previewReduce(current, plan, input.identity, input.event, admissionOk, segmentedJournalEnabled(this.store));
-        if (preview.outcome === 'BLOCKED' || preview.outcome === 'DECISION_REQUIRED') reduced = preview;
-        else {
-          preparedAdmission = this.#prepareGraph(plan, current, preview.state, input, loaded.generation);
-          reduced = reduce(current, plan, input.identity, input.event, recoveryCapacity, admissionOk, preparedAdmission, segmentedJournalEnabled(this.store));
-        }
-      }
+      reduced = reduce(current, plan, input.identity, input.event, recoveryCapacity, admissionOk, segmentedJournalEnabled(this.store));
     }
     catch (error) {
       if ((error as Error).message === 'JournalCeiling') return asYield(current ?? emptyState(String(input.runId), plan.phaseId), { outcome: 'BLOCKED', reason: 'JournalCeiling' });
@@ -922,7 +877,7 @@ class KernelImpl implements RunKernel {
     }
     if (reduced.outcome === 'BLOCKED' && !reduced.state) return asYield(emptyState(String(input.runId), plan.phaseId), reduced);
     if (reduced.outcome === 'BLOCKED' && reduced.state === current && (input.event.kind === 'DISPATCH_RECEIPT' || input.event.kind === 'PARENT_DECISION')) throw new Conflict(reduced.reason ?? 'event rejected');
-    return this.commitYield(loaded.generation, reduced.state, key, input.identity, asYield(reduced.state, reduced), preparedAdmission);
+    return this.commitYield(loaded.generation, reduced.state, key, input.identity, asYield(reduced.state, reduced));
   }
 
   /** Persist a durable CLAIMED transition before the coordinator invokes a
@@ -1145,18 +1100,12 @@ class KernelImpl implements RunKernel {
     }
   }
 
-  private async commitYield(generation: number, state: MachineState, key: string, identity: EventIdentity, y: Yield, preparedAdmission?: PreparedAdmission): Promise<Yield> {
+  private async commitYield(generation: number, state: MachineState, key: string, identity: EventIdentity, y: Yield): Promise<Yield> {
     const next = state === undefined ? state : clone(state);
     if (!next) return y;
     this.assertManagedCas(next, generation);
     // Every durable event gets a unique writer fence.  It is private state,
     next.writerFence = nextWriterFence(state.writerFence, generation + 1, identity);
-    if (preparedAdmission) {
-      // Admission itself mutates statuses/outbox after the post-event proof;
-      // recheck the immutable event/journal/epoch fence here, while the
-      // reducer already checked postStateDigest before creating commands.
-      if (preparedAdmission.generation !== generation || preparedAdmission.postRevision !== state.revision || preparedAdmission.postJournalEnd !== state.journal.length || preparedAdmission.postJournalDigest !== digest(state.journal) || preparedAdmission.planDigest !== state.planDigest) throw new Conflict('graph freshness proof mismatch');
-    }
     next.processed[key] = { digest: identity.payloadDigest, yieldBytes: canonicalString(y), revision: next.revision, identity: clone(identity) };
     try { await this.store.commit(generation, next); }
     catch (error) {

@@ -1,7 +1,7 @@
 import { canonicalString, digest } from './canonical.js';
 import { claim, commandInCurrentFrame, unknown, type DriverReceipt } from './outbox.js';
 import { ProseDriver, type EffectDriver } from './driver.js';
-import { appendJournal, commandForToken, reduce, refreshAdmission, type PreparedAdmission } from './reducer.js';
+import { appendJournal, commandForToken, reduce, refreshAdmission } from './reducer.js';
 import { normalizeDriverResult, storeLinearizedDispatch, type ArtifactStore, type StoreLinearizedDispatchRequest } from './store.js';
 import type { AdvanceInput, CompactSnapshot, Event, EventIdentity, MachineState, OutboxCommand, OutboxState, Plan, Ref, Yield } from './model.js';
 
@@ -75,7 +75,7 @@ export type DispatchCoordinatorOptions = {
 };
 
 type CommitEventOnly = (generation: number, current: MachineState, input: AdvanceInput, key: string, plan: Plan, capacity: number, y: Yield) => Promise<Yield>;
-type CommitYield = (generation: number, state: MachineState, key: string, identity: EventIdentity, y: Yield, preparedAdmission?: PreparedAdmission) => Promise<Yield>;
+type CommitYield = (generation: number, state: MachineState, key: string, identity: EventIdentity, y: Yield) => Promise<Yield>;
 type CommitDispatcherOutcome = (token: string, expectedDigest: string, plan: Plan, capacity: number, receipt?: DriverReceipt, expectedLeaseId?: string, receiptLeaseId?: string, teardownEvidence?: Ref) => Promise<Yield | undefined>;
 type RetireManagedAttempt = (generation: number, current: MachineState, token: string, input: AdvanceInput, plan: Plan, capacity: number, status?: 'TIMED_OUT' | 'CANCELLED' | 'FAILED') => Promise<Yield>;
 type FinalizeImmediateYield = (key: string, identity: EventIdentity, value: Yield) => Promise<Yield | undefined>;
@@ -149,7 +149,7 @@ export class DispatchCoordinator {
 
     if (command.state === 'UNKNOWN') {
       if (!admissionOk) {
-        const reduced = reduce(current, plan, input.identity, input.event, maxInFlight, admissionOk, undefined, this.host.segmentedJournalEnabled());
+        const reduced = reduce(current, plan, input.identity, input.event, maxInFlight, admissionOk, this.host.segmentedJournalEnabled());
         return this.host.commitYield(generation, reduced.state, key, input.identity, this.host.asYield(reduced.state, reduced));
       }
       if (!this.host.driver?.observe || this.options.signal?.aborted) {
@@ -232,7 +232,7 @@ export class DispatchCoordinator {
     // available for a later non-cancelled RESUME.
     if (this.options.signal?.aborted || !admissionOk) {
       if (!admissionOk) {
-        const reduced = reduce(current, plan, input.identity, input.event, maxInFlight, admissionOk, undefined, this.host.segmentedJournalEnabled());
+        const reduced = reduce(current, plan, input.identity, input.event, maxInFlight, admissionOk, this.host.segmentedJournalEnabled());
         return this.host.commitYield(generation, reduced.state, key, input.identity, this.host.asYield(reduced.state, reduced));
       }
       return this.host.commitEventOnly(generation, current, input, key, plan, maxInFlight, this.host.asYield(current, { outcome: 'WAITING' }));

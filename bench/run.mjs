@@ -12,7 +12,6 @@ import { fileURLToPath } from 'node:url';
 import { dirname } from 'node:path';
 import { makeRunKernel } from '../dist/index.js';
 import { digest, canonicalString, parseCanonical } from '../dist/canonical.js';
-import { AccelerationMetrics } from '../dist/metrics.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const manifestPath = join(here, 'manifest.json');
@@ -33,9 +32,7 @@ async function bytesUnder(path) {
 }
 async function run(mode) {
   const rootDir = await mkdtemp(join(tmpdir(), 'lunacy-s4-bench-'));
-  const metrics = new AccelerationMetrics();
-  const acceleration = mode === 'OFF' ? { metrics } : { graph: mode, context: mode, reuse: mode, metrics };
-  const kernel = makeRunKernel({ plan: fixture.plan, rootDir, acceleration });
+  const kernel = makeRunKernel({ plan: fixture.plan, rootDir });
   const yields = [];
   let previous;
   const started = process.hrtime.bigint();
@@ -63,7 +60,7 @@ async function run(mode) {
   return {
     mode, eventCount: yields.length, yieldDigest: sha(yieldBytes),
     yieldBytes: yieldBytes.reduce((sum, value) => sum + Buffer.byteLength(value), 0),
-    committedBytes: bytes, wallNs, counters: metrics.snapshot(),
+    committedBytes: bytes, wallNs, counters: {},
     final: previous?.kind ?? 'NONE',
   };
 }
