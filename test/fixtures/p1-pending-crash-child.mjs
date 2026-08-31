@@ -35,7 +35,7 @@ if (mode === 'race') {
     return loaded;
   };
   const result = await submitParentDecision({ ...input, driver });
-  process.stdout.write(`${JSON.stringify({ status: result.status, consumed: result.consumed, revision: result.revision })}\n`);
+  process.stdout.write(`${JSON.stringify({ status: result.status, code: result.code ?? null, consumed: result.consumed, revision: result.revision })}\n`);
   process.exit(0);
 }
 

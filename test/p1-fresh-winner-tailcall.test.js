@@ -106,19 +106,23 @@ test('P1 replay does not tailcall', async (t) => {
 
 test('P1 losing CAS does not tailcall', async (t) => {
   const prepared = await freshDecision(t, 'lunacy-p1-race-');
-  const config = join(prepared.root, 'input.json');
+  const configA = join(prepared.root, 'input-a.json'); const configB = join(prepared.root, 'input-b.json');
   const marker = join(prepared.root, 'dispatches.log');
   const readyA = join(prepared.root, 'ready-a'); const readyB = join(prepared.root, 'ready-b');
   const release = join(prepared.root, 'release');
-  await writeFile(config, JSON.stringify(prepared.input));
-  const a = runChild(['race', config, marker, readyA, release]);
-  const b = runChild(['race', config, marker, readyB, release]);
+  await writeFile(configA, JSON.stringify({ ...prepared.input, eventId: 'race-a' }));
+  await writeFile(configB, JSON.stringify({ ...prepared.input, eventId: 'race-b' }));
+  const a = runChild(['race', configA, marker, readyA, release]);
+  const b = runChild(['race', configB, marker, readyB, release]);
   await waitFor([readyA, readyB]);
   await writeFile(release, 'go\n');
   const results = await Promise.all([a, b]);
   for (const result of results) assert.equal(result.code, 0, result.stderr || `child signal ${result.signal}`);
-  const statuses = results.map((result) => JSON.parse(result.stdout).status).sort();
-  assert.deepEqual(statuses, ['committed', 'replayed']);
+  const outcomes = results.map((result) => JSON.parse(result.stdout)).sort((a, b) => a.status.localeCompare(b.status));
+  assert.deepEqual(outcomes.map(({ status, code }) => ({ status, code })), [
+    { status: 'attention', code: 'KernelConflict' },
+    { status: 'committed', code: null },
+  ]);
   const dispatchPids = (await readFile(marker, 'utf8')).trim().split('\n').filter(Boolean);
   assert.equal(dispatchPids.length, 1);
 });
@@ -165,12 +169,16 @@ test('P1 rollback reader smoke', async (t) => {
   assert.equal(committed.status, 'committed');
   const archiveRoot = await mkdtemp(join(tmpdir(), 'lunacy-p1-predecessor-reader-'));
   t.after(() => rm(archiveRoot, { recursive: true, force: true }));
-  const archive = spawnSync('git', ['archive', '--format=tar', predecessor, 'dist'], { cwd: repo, maxBuffer: 64 * 1024 * 1024 });
+  const archive = spawnSync('git', ['archive', '--format=tar', predecessor], { cwd: repo, maxBuffer: 64 * 1024 * 1024 });
   assert.equal(archive.status, 0, archive.stderr?.toString('utf8'));
   const tarPath = join(archiveRoot, 'dist.tar');
   await writeFile(tarPath, archive.stdout);
   const extracted = spawnSync('tar', ['-xf', tarPath, '-C', archiveRoot], { encoding: 'utf8' });
   assert.equal(extracted.status, 0, extracted.stderr);
+  const linked = spawnSync('ln', ['-s', join(repo, 'node_modules'), join(archiveRoot, 'node_modules')], { encoding: 'utf8' });
+  assert.equal(linked.status, 0, linked.stderr);
+  const built = spawnSync('npm', ['run', 'build'], { cwd: archiveRoot, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
+  assert.equal(built.status, 0, built.stderr || built.stdout);
   const predecessorStore = await import(`${pathToFileURL(join(archiveRoot, 'dist', 'store.js')).href}?receipt=${sha256(archive.stdout)}`);
   const loaded = await new predecessorStore.FileArtifactStore(prepared.root).loadReadOnly(prepared.runId);
   assert.ok(loaded.state.journal.some((row) => row.event.kind === 'PARENT_DECISION'));

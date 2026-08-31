@@ -45,6 +45,13 @@ epochs, decision tokens, publication leases, and authority CAS. Wave v2 and
 Report v2 are the only deliberation artifacts. Topology and progress are
 derived rather than stored in a second manifest or service.
 
+The private decision-inbox convenience path does not add an authority or
+scheduler. Only its fresh successful decision CAS may carry a volatile
+process-local winner witness into one call of the existing `resumeRun` pump;
+replay, conflict, and driverless handling stop at the durable result. A crash
+with `PENDING` work therefore uses ordinary restart/resume rather than a
+decision-specific recovery protocol.
+
 ## Rollout corridor and eligibility
 
 The existing closed rollout policy has one monotonic generation and one mode:

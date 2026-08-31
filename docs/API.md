@@ -136,6 +136,14 @@ identity before delegating one `PARENT_DECISION` to `RunKernel.advance`.
 Invalid bindings do not consume a token; retries use the same event identity
 and return the kernel's committed replay.
 
+When that call wins a fresh decision CAS and supplies a live driver, the
+private boundary retains one process-local symbol only until the durable
+commit returns, consumes it, and tail-calls the existing `resumeRun` pump.
+The returned decision result and every durable byte keep their established
+shape. Replays, CAS losers, and driverless submissions never tail-call; a
+driverless or crashed process may leave ordinary `PENDING` work, which a fresh
+process recovers through the normal `resume` lifecycle.
+
 `promotePhase` accepts one `lunacy-phase-handoff/v1` envelope containing exact
 predecessor proof, successor plan/phase identity, and a parent authorization
 digest. It requires predecessor `COMPLETE`/`PASS` with no live old work before
