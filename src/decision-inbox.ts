@@ -1,6 +1,6 @@
 import { canonicalString, digest, identityKey, parseCanonical } from './canonical.js';
 import { canonicalizeDeclaration } from './bridge.js';
-import { initRun, type LifecycleResult, type TerminalEffectDriver } from './orchestration.js';
+import { initRun, resumeRun, type LifecycleResult, type TerminalEffectDriver } from './orchestration.js';
 import { FileArtifactStore, isCanonicalRootPath } from './store.js';
 import { validateCodexHostPolicy, codexHostPolicyDigest, type CodexHostPolicy } from './codex-host-policy.js';
 import type { DecisionToken, EventIdentity, MachineState, Plan, Yield } from './model.js';
@@ -15,6 +15,7 @@ const MAX_ENTRIES = 64;
 const MAX_ID = 256;
 const MAX_OUTPUT_BYTES = 16 * 1024;
 const SHA256 = /^[0-9a-f]{64}$/;
+const FRESH_DECISION_WINNER = Symbol('fresh-decision-winner');
 
 export type DecisionInboxSelection = Readonly<{
   runRoot: string;
@@ -262,6 +263,8 @@ function validateInbox(value: unknown): asserts value is DecisionInboxEntry {
 export async function submitParentDecision(input: SubmitDecisionInput): Promise<SubmitDecisionResult> {
   if (!plainObject(input)) fail('submit input is malformed');
   if (input.eventId !== undefined) id(input.eventId, 'eventId');
+  const driver = input.driver;
+  const policy = input.policy;
   const selection = validateSelection(input.selection);
   const inbox = canonicalSnapshot<DecisionInboxEntry>(input.inbox, 'inbox');
   validateInbox(inbox);
@@ -279,7 +282,7 @@ export async function submitParentDecision(input: SubmitDecisionInput): Promise<
   try { planSnapshot = canonicalSnapshot<Plan>(input.plan, 'plan'); }
   catch { return { schema: DECISION_INBOX_SCHEMA, version: DECISION_INBOX_VERSION, status: 'attention', code: 'Malformed', consumed: false, revision: inbox.run.revision, eventId: input.eventId ?? '' }; }
   const selectedToken = token(selection.token, 'selection.token');
-  const policyDigest = policyDigestFor(input.policy, selection);
+  const policyDigest = policyDigestFor(policy, selection);
   const loaded = await new FileArtifactStore(selection.runRoot).loadReadOnly(selection.runId);
   const state = loaded.state; if (!state) fail('committed state is absent');
   const current = state.decisionTokens[selectedToken];
@@ -329,8 +332,12 @@ export async function submitParentDecision(input: SubmitDecisionInput): Promise<
   if (acceptedPlanDigest === undefined || digest(submittedPlan) !== acceptedPlanDigest) return { schema: DECISION_INBOX_SCHEMA, version: DECISION_INBOX_VERSION, status: 'attention', code: 'BindingMismatch', consumed: false, revision: state.revision, eventId };
   if (current.consumed && !replayed) return { schema: DECISION_INBOX_SCHEMA, version: DECISION_INBOX_VERSION, status: 'attention', code: 'Consumed', consumed: true, revision: state.revision, eventId };
   let yielded: Yield;
+  let winnerWitness: typeof FRESH_DECISION_WINNER | undefined;
   const kernelPlan = current.kind === 'AUTHORITY_ADOPTION' ? rawPlan : submittedPlan;
-  try { yielded = await (await import('./public.js')).makeRunKernel({ plan: kernelPlan, rootDir: selection.runRoot }).advance({ runId: selection.runId, expectedRevision: state.revision, identity, event }); }
+  try {
+    yielded = await (await import('./public.js')).makeRunKernel({ plan: kernelPlan, rootDir: selection.runRoot }).advance({ runId: selection.runId, expectedRevision: state.revision, identity, event });
+    if (!replayed && driver !== undefined) winnerWitness = FRESH_DECISION_WINNER;
+  }
   catch (error) {
     // Two identical submitters may both pass the read-only fence before one
     // commits. Rebind to the committed generation and read the kernel's exact
@@ -351,6 +358,13 @@ export async function submitParentDecision(input: SubmitDecisionInput): Promise<
   // snapshot (for example, authority adoption while old work is still live)
   // without consuming the token. Only a revision-advancing yield is a commit.
   if (!replayed && yielded.snapshot.revision === state.revision) return { schema: DECISION_INBOX_SCHEMA, version: DECISION_INBOX_VERSION, status: 'attention', code: 'KernelConflict', consumed: false, revision: yielded.snapshot.revision, eventId, yield: yielded };
+  if (winnerWitness === FRESH_DECISION_WINNER) {
+    // The symbol is process-local and never enters the durable/public result.
+    // Clear it before the tail-call so an error cannot make this submission
+    // consume the witness a second time.
+    winnerWitness = undefined;
+    await resumeRun({ command: 'resume', runDir: selection.runRoot, runId: selection.runId, plan: kernelPlan, driver, ...(policy === undefined ? {} : { policy }) });
+  }
   return { schema: DECISION_INBOX_SCHEMA, version: DECISION_INBOX_VERSION, status: replayed ? 'replayed' : 'committed', consumed: !replayed, revision: yielded.snapshot.revision, eventId, yield: yielded };
 }
 
