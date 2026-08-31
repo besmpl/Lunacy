@@ -152,7 +152,7 @@ test('C1 recovered CLAIMED same-drive observation', async (t) => {
 
 test('C1 deployment inventory', async () => {
   const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
-  assert.ok(pkg.files.includes('dist'));
+  assert.ok(pkg.files.some((entry) => entry.startsWith('dist/')));
   assert.equal(pkg.files.some((entry) => entry.startsWith('test')), false);
   assert.ok(await readFile(new URL('../dist/dispatch-coordinator.js', import.meta.url), 'utf8'));
 });
@@ -249,7 +249,7 @@ test('C1 maxInternalRecords reserves recovery rows', { concurrency: false }, asy
     if (!inflated && Object.values(loaded.state?.outbox ?? {}).some((command) => command.state === 'CLAIMED')) {
       inflated = true;
       const state = structuredClone(loaded.state);
-      state.journal = Array.from({ length: JOURNAL_EVENT_CEILING - 2 }, () => ({}));
+      state.journal = Array.from({ length: JOURNAL_EVENT_CEILING - 2 }, (_, index) => ({ identity: { eventId: `padding-${index}` } }));
       return { ...loaded, state };
     }
     return loaded;
