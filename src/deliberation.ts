@@ -1,4 +1,4 @@
-import { canonicalString, digest, parseCanonical } from './canonical.js';
+import { canonicalString, digest, digestBytes, parseCanonical } from './canonical.js';
 import { compareStable } from './dependency.js';
 import { validatePlan } from './validator.js';
 import type { Plan, PlanStep, Ref, Sha256 } from './model.js';
@@ -194,6 +194,28 @@ export function authorPlan(input: PlanAuthorshipInput, predicates: GearPredicate
   const bytes = canonicalString(wave); const d = digest(wave); const ref: Ref = { id: `wave:${d.slice(0, 16)}`, digest: d, scope: 'deliberation/wave', bytes }; return { kind: 'DELIBERATION_REQUIRED', wave: ref };
 }
 
+type ParsedInput = { value: unknown; originalBytes: Uint8Array };
+
+function parseWaveInput(valueOrBytes: unknown): Validation<ParsedInput> {
+  if (isObj(valueOrBytes) && 'id' in valueOrBytes && 'digest' in valueOrBytes && 'bytes' in valueOrBytes) {
+    const keys = exact(valueOrBytes, ['id', 'digest', 'scope', 'bytes'].filter((key) => valueOrBytes[key] !== undefined), 'wave.ref');
+    if (!keys.ok) return keys as Validation<ParsedInput>;
+    if (typeof valueOrBytes.id !== 'string' || valueOrBytes.id.length === 0 || typeof valueOrBytes.digest !== 'string' || !/^[0-9a-f]{64}$/.test(valueOrBytes.digest) || typeof valueOrBytes.bytes !== 'string' || (valueOrBytes.scope !== undefined && (typeof valueOrBytes.scope !== 'string' || valueOrBytes.scope.length === 0))) return fail('INVALID_REF', 'wave.ref', 'wave ref is malformed');
+    const originalBytes = new TextEncoder().encode(valueOrBytes.bytes);
+    if (digestBytes(originalBytes) !== valueOrBytes.digest) return fail('INVALID_REF', 'wave.ref.digest', 'wave bytes digest mismatch');
+    try { return ok({ value: parseCanonical<unknown>(originalBytes), originalBytes }); } catch { return fail('NON_CANONICAL', 'wave.ref.bytes', 'non-canonical JSON'); }
+  }
+  if (typeof valueOrBytes === 'string') {
+    const originalBytes = new TextEncoder().encode(valueOrBytes);
+    try { return ok({ value: parseCanonical<unknown>(originalBytes), originalBytes }); } catch { return fail('NON_CANONICAL', '', 'non-canonical JSON'); }
+  }
+  if (valueOrBytes instanceof Uint8Array) {
+    const originalBytes = valueOrBytes.slice();
+    try { return ok({ value: parseCanonical<unknown>(originalBytes), originalBytes }); } catch { return fail('NON_CANONICAL', '', 'non-canonical JSON'); }
+  }
+  try { const originalBytes = new TextEncoder().encode(canonicalString(valueOrBytes)); return ok({ value: valueOrBytes, originalBytes }); } catch { return fail('NON_CANONICAL', '', 'value is not canonical JSON'); }
+}
+
 function parseInput(valueOrBytes: unknown): Validation<unknown> {
   if (typeof valueOrBytes === 'string') { try { return ok(parseCanonical<unknown>(valueOrBytes)); } catch { return fail('NON_CANONICAL', '', 'non-canonical JSON'); } }
   if (valueOrBytes instanceof Uint8Array) { try { return ok(parseCanonical<unknown>(valueOrBytes)); } catch { return fail('NON_CANONICAL', '', 'non-canonical JSON'); } }
@@ -222,7 +244,7 @@ function policyBinding(policy: DeliberationPolicy, wavePolicyVersion: unknown): 
 }
 
 export function validateWave(valueOrBytes: unknown, ctx: { runId: string; phaseId: string; policy: DeliberationPolicy; committedEvidence: ReadonlySet<string>; reachableConstraints: ReadonlySet<string> }): Validation<DeliberationWave> {
-  const parsed = parseInput(valueOrBytes); if (!parsed.ok) return parsed as Validation<DeliberationWave>; if (!isObj(parsed.value)) return fail('INVALID_FRAME', '', 'wave must be an object'); const value = parsed.value;
+  const parsed = parseWaveInput(valueOrBytes); if (!parsed.ok) return parsed as Validation<DeliberationWave>; if (!isObj(parsed.value.value)) return fail('INVALID_FRAME', '', 'wave must be an object'); const value = parsed.value.value;
   const keys = exact(value, ['schema', 'authorship', 'question', 'limits', 'gear', 'generatorLenses'], 'wave'); if (!keys.ok) return keys as Validation<DeliberationWave>;
   if (value.schema !== 'lunacy-deliberation-wave/v2') return fail('INVALID_FRAME', 'wave.schema', 'schema mismatch'); if (value.gear !== 'FOCUS' && value.gear !== 'EXPLORE') return fail('INVALID_GEAR', 'wave.gear', 'invalid gear');
   if (!isObj(value.authorship) || !isObj(value.question) || !isObj(value.limits) || !Array.isArray(value.generatorLenses)) return fail('INVALID_FRAME', 'wave', 'wave sections malformed');
@@ -234,7 +256,12 @@ export function validateWave(valueOrBytes: unknown, ctx: { runId: string; phaseI
   const qk = exact(value.question, ['text', 'decisionImpact', 'evidence', 'constraints', ...(value.question.discriminator === undefined ? [] : ['discriminator'])], 'wave.question'); if (!qk.ok) return qk as Validation<DeliberationWave>;
   if (typeof value.question.text !== 'string' || typeof value.question.decisionImpact !== 'string' || (value.question.discriminator !== undefined && typeof value.question.discriminator !== 'string') || !Array.isArray(value.question.evidence) || !Array.isArray(value.question.constraints)) return fail('INVALID_FRAME', 'wave.question', 'question malformed');
   for (const [kind, refs] of [['evidence', value.question.evidence], ['constraints', value.question.constraints]] as const) { const seen = new Set<string>(); for (let i = 0; i < refs.length; i += 1) { const r = validateRef(refs[i]); if (!r.ok) return fail('INVALID_REF', `wave.question.${kind}[${i}]`, r.message); if (kind === 'evidence' && !hasRef(ctx.committedEvidence, r.value)) return fail('FOREIGN_REF', `wave.question.evidence[${i}]`, 'evidence not committed'); if (kind === 'constraints' && !hasRef(ctx.reachableConstraints, r.value)) return fail('FOREIGN_REF', `wave.question.constraints[${i}]`, 'constraint not reachable'); if (seen.has(refKey(r.value))) return fail('INVALID_REF', `wave.question.${kind}[${i}]`, 'duplicate ref'); seen.add(refKey(r.value)); } }
-  const lk = exact(value.limits, ['maxModelCalls', 'maxInputTokens', 'maxOutputTokens', 'maxWallClockMs', 'maxWaveBytes', 'maxRefs', 'maxResolvedRoleInputBytes', 'maxReportBytes', 'maxTotalReportBytes'], 'wave.limits'); if (!lk.ok) return lk as Validation<DeliberationWave>;
+  const retainedLimitKeys = ['maxModelCalls', 'maxWaveBytes', 'maxRefs', 'maxResolvedRoleInputBytes', 'maxReportBytes', 'maxTotalReportBytes'];
+  const legacyLimitKeys = ['maxInputTokens', 'maxOutputTokens', 'maxWallClockMs'];
+  const actualLimitKeys = Object.keys(value.limits); const admittedLimitKeys = [...retainedLimitKeys, ...legacyLimitKeys];
+  const extraLimitKeys = actualLimitKeys.filter((key) => !admittedLimitKeys.includes(key)); const missingLimitKeys = retainedLimitKeys.filter((key) => !actualLimitKeys.includes(key));
+  if (extraLimitKeys.length) return fail('EXTRA_KEY', 'wave.limits', `unknown key ${extraLimitKeys[0]}`);
+  if (missingLimitKeys.length) return fail('MISSING_KEY', 'wave.limits', `missing key ${missingLimitKeys[0]}`);
   for (const key of Object.keys(value.limits)) if (!safeInt(value.limits[key])) return fail('INVALID_LIMIT', `wave.limits.${key}`, 'must be a finite safe integer');
   if (value.gear === 'FOCUS') {
     for (const lens of value.generatorLenses) if (!isObj(lens) || Object.keys(lens).some((k) => k !== 'text') || typeof lens.text !== 'string' || lens.text.length === 0) return fail('INVALID_LENS', 'wave.generatorLenses', 'invalid Focus lens');
@@ -258,8 +285,9 @@ export function validateWave(valueOrBytes: unknown, ctx: { runId: string; phaseI
   const locatorOccurrences = ideaCount * 2;
   const criticEvidenceCeiling = ideaCount;
   const nominalRefs = 3 + refs.length + topologySlots + locatorOccurrences + criticEvidenceCeiling;
-  const bytes = canonicalString(value); if (Buffer.byteLength(bytes, 'utf8') > maxWaveBytes || maxWaveBytes > ctx.policy.maxSettlementBytes || maxResolved > ctx.policy.maxResolvedRoleInputBytes || maxReport > ctx.policy.maxSettlementBytes || maxTotal > ctx.policy.maxSettlementBytes || maxTotal < maxReport * topologySlots || (value.limits.maxRefs as number) < nominalRefs) return fail('LIMIT_EXCEEDED', 'wave.limits', 'policy or cumulative quota exceeded');
-  return ok(value as unknown as DeliberationWave);
+  if (parsed.value.originalBytes.byteLength > maxWaveBytes || maxWaveBytes > ctx.policy.maxSettlementBytes || maxResolved > ctx.policy.maxResolvedRoleInputBytes || maxReport > ctx.policy.maxSettlementBytes || maxTotal > ctx.policy.maxSettlementBytes || maxTotal < maxReport * topologySlots || (value.limits.maxRefs as number) < nominalRefs) return fail('LIMIT_EXCEEDED', 'wave.limits', 'policy or cumulative quota exceeded');
+  const normalizedLimits = Object.fromEntries(retainedLimitKeys.map((key) => [key, (value.limits as Record<string, unknown>)[key]]));
+  return ok({ ...value, limits: normalizedLimits } as unknown as DeliberationWave);
 }
 
 function slotId(role: SlotRole, ordinal: number, waveRef: Ref): string { return `dw2-${role.toLowerCase()}-${ordinal}-${waveRef.digest.slice(0, 16)}`; }
