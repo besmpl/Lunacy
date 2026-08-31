@@ -1,5 +1,5 @@
 import { canonicalString } from './canonical.js';
-import { compareStable, dependencyTerminal } from './dependency.js';
+import { compareStable, dependencyTerminal, isDispatchableStepStatus } from './dependency.js';
 import { FileArtifactStore, isCanonicalRootPath } from './store.js';
 import type { MachineState, OutboxCommand, OutboxState } from './model.js';
 
@@ -102,9 +102,9 @@ function deriveLists(state: MachineState, focusStepId?: string): {
   // and again while rendering the same blocked row.
   for (const step of Object.values(state.steps)) {
     if (step.status === 'ACTIVE') active.push({ stepId: step.stepId, attempt: step.attempt, dispatch: commandForStep(state, commandsByStep, step.stepId) });
-    if (!['READY', 'BLOCKED', 'NEEDS-DECISION'].includes(step.status)) continue;
+    if (!isDispatchableStepStatus(step.status) && !['BLOCKED', 'NEEDS-DECISION'].includes(step.status)) continue;
     const waitsFor = waitingFor(state, step.stepId);
-    if (step.status === 'READY' && waitsFor.length === 0) eligible.push({ stepId: step.stepId });
+    if (isDispatchableStepStatus(step.status) && waitsFor.length === 0) eligible.push({ stepId: step.stepId });
     else if (waitsFor.length > 0 && (!neighborhood || neighborhood.has(step.stepId))) blocked.push({ stepId: step.stepId, reason: 'WAITING_DEPENDENCY', waitsFor });
   }
   stableSort(active, (item) => item.stepId);

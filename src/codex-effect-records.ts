@@ -2,7 +2,7 @@ import { constants as fsConstants } from 'node:fs';
 import { promises as fs } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import type { Ref, Sha256 } from './model.js';
+import type { OutboxCommand, Ref, Sha256 } from './model.js';
 import { canonicalString, digest, parseCanonical } from './canonical.js';
 import { ensurePrivateDirectory, inspectTrustedPath, sameFilesystemIdentity, syncDirectory, syncDirectoryChain, type FilesystemIdentity } from './filesystem.js';
 import { buildCodexArguments, buildWorkerHandoff, codexHostPolicyDigest, expectedReportPath, launchAuthorityDescriptorPaths, launchAuthoritySnapshotPaths, launchDirectoryPath, launchWritableRoots, parseWorkerResultText, reasoningEffortFor, type CodexCommandFrame, type CodexHostPolicy } from './codex-host-policy.js';
@@ -86,6 +86,31 @@ export type EffectPaths = Readonly<{
   terminal: string;
   output: string;
   events: string;
+}>;
+
+export type HistoricalCodexEffectFacts = Readonly<{
+  launchRecord: LaunchRecord;
+  launchRef: Ref;
+  terminalRecord?: TerminalRecord;
+  terminalRef?: Ref;
+  resultDigest?: Sha256 | null;
+  reportDigest?: Sha256 | null;
+}>;
+
+export type HistoricalCodexEffectInput = Readonly<{
+  command: OutboxCommand;
+  runRoot: string;
+  requiredStage: 'launch' | 'terminal';
+  intent: LaunchIntentRecord;
+  launch: LaunchRecord;
+  terminal?: TerminalRecord;
+  output?: BoundedUtf8File;
+  report?: BoundedUtf8File;
+  /** Accepted for existing forensic callers only. Historical transport facts
+   * deliberately do not bind against a newly constructed live policy. */
+  policy?: CodexHostPolicy;
+  expectedPolicyDigest?: string;
+  expectedAuthorityDigest?: string;
 }>;
 
 function fail(message: string): never { throw new Error(`CodexEffectRecords: ${message}`); }
@@ -255,6 +280,73 @@ export function launchIntentRecordRef(record: LaunchIntentRecord): Ref {
 export function terminalRecordRef(record: TerminalRecord): Ref {
   const bytes = canonicalString(record);
   return { id: `codex-terminal:${record.launchToken}`, scope: 'codex/effect/terminal', digest: digest(record), bytes };
+}
+
+/**
+ * Validate immutable effect history from the exact retained durable command.
+ * This deliberately returns transport facts only: it never loads CURRENT,
+ * compares against a live epoch/Plan, selects work, or authorizes a retry.
+ * Callers that can affect the run must separately reselect the command from a
+ * committed generation and apply their existing lease/revision CAS.
+ */
+export function validateHistoricalCodexEffect(input: HistoricalCodexEffectInput): HistoricalCodexEffectFacts {
+  if (!input || typeof input !== 'object') fail('historical effect input is malformed');
+  const command = input.command;
+  if (!command || typeof command !== 'object') fail('retained command is absent');
+  if (command.modeEpoch !== 0) fail('retained command modeEpoch is unsupported');
+  const canonicalCommandDigest = digest({ commandId: command.commandId, runId: command.runId, phaseId: command.phaseId, stepId: command.stepId, attemptEpoch: command.attemptEpoch, launchToken: command.launchToken });
+  if (canonicalCommandDigest !== command.commandDigest) fail('retained command digest is not canonical');
+  const runRoot = assertCanonicalPath(input.runRoot, 'historical runRoot');
+  const intent = validateLaunchIntentRecord(input.intent);
+  const launch = validateLaunchRecord(input.launch);
+  const retainedFields = ['launchToken', 'commandDigest', 'commandId', 'runId', 'phaseId', 'stepId', 'attemptEpoch', 'authorityEpoch', 'barrierEpoch'] as const;
+  for (const record of [intent, launch]) {
+    for (const field of retainedFields) if (record[field] !== command[field]) fail(`effect ${field} does not match retained command`);
+    if (record.attempt !== record.attemptEpoch) fail('effect attempt is not bound to attemptEpoch');
+    if (input.expectedPolicyDigest !== undefined && record.policyDigest !== input.expectedPolicyDigest) fail('effect policy digest mismatch');
+    if (input.expectedAuthorityDigest !== undefined && record.authorityDigest !== input.expectedAuthorityDigest) fail('effect authority digest mismatch');
+  }
+  const { schema: _intentSchema, ...intentBody } = intent;
+  const { schema: _launchSchema, child: _child, ...launchBody } = launch;
+  if (canonicalString(intentBody) !== canonicalString(launchBody)) fail('launch intent and launch disagree');
+  const launchFacts: HistoricalCodexEffectFacts = Object.freeze({ launchRecord: launch, launchRef: launchRecordRef(launch) });
+  if (input.requiredStage === 'launch') return launchFacts;
+  if (input.requiredStage !== 'terminal') fail('historical effect stage is invalid');
+  if (!input.terminal) fail('terminal record is absent');
+  const terminal = validateTerminalRecord(input.terminal);
+  if (terminal.launchToken !== command.launchToken || terminal.commandDigest !== command.commandDigest) fail('terminal does not match retained command');
+  if (Date.parse(terminal.finishedAt) < Date.parse(launch.startedAt)) fail('terminal predates launch');
+  const output = input.output;
+  if (!output) fail('terminal result observation is absent');
+  if (terminal.resultDigest === null) {
+    if (output.kind !== 'absent') fail('terminal has unbound result evidence');
+  } else if ((output.kind !== 'ok' && output.kind !== 'invalid-utf8') || output.digest !== terminal.resultDigest) {
+    fail('terminal result evidence is unresolved');
+  }
+  const result = output.kind === 'ok' ? parseWorkerResultText(output.text) : undefined;
+  if (terminal.outcome === 'normal-completion') {
+    if (terminal.exitCode !== 0 || terminal.signal !== null || terminal.status === 'UNKNOWN') fail('normal terminal process shape is invalid');
+    const expected = join(runRoot, 'phases', command.phaseId, 'reports', `${command.stepId}-worker-${command.attemptEpoch}.md`);
+    if (!result || result.status !== terminal.status || result.reportPath !== expected || terminal.reportPath !== expected || result.reportDigest !== terminal.reportDigest) fail('terminal result/report binding is invalid');
+    if (!pathWithin(runRoot, expected)) fail('terminal report path escapes runRoot');
+    const report = input.report;
+    if (!report || report.kind !== 'ok' || report.digest !== terminal.reportDigest || reportControlStatus(report.text) !== terminal.status) fail('terminal report evidence is unresolved');
+  } else {
+    if (terminal.reportPath !== null || terminal.reportDigest !== null) fail('non-normal terminal has unbound report evidence');
+    if (terminal.outcome === 'approval-required') {
+      if (terminal.status !== 'NEEDS-DECISION') fail('approval terminal status is invalid');
+    } else if (terminal.outcome === 'unresolved-termination') {
+      if (terminal.status !== 'UNKNOWN' || terminal.exitCode !== null || terminal.signal !== null || terminal.resultDigest !== null) fail('unresolved terminal shape is invalid');
+    } else if (terminal.status !== 'BLOCKED') fail('non-normal terminal status is invalid');
+  }
+  return Object.freeze({
+    launchRecord: launch,
+    launchRef: launchRecordRef(launch),
+    terminalRecord: terminal,
+    terminalRef: terminalRecordRef(terminal),
+    resultDigest: terminal.resultDigest as Sha256 | null,
+    reportDigest: terminal.reportDigest as Sha256 | null,
+  });
 }
 
 async function immutableWrite(path: string, value: unknown, label: string): Promise<void> {

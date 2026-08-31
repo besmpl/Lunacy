@@ -15,19 +15,22 @@ Prefer modifying, reusing, deleting, or extending sound existing mechanisms over
 - Use OOP/polymorphism for real current variation behind stable contracts; prefer composition unless inheritance expresses genuine substitutability.
 - Do not force OOP where a simpler functional/data-oriented design is clearer.
 - Do not redesign healthy architecture merely because another design is theoretically cleaner.
-- Make each step the largest coherent worker-owned unit; make each phase earn a real integration/gate boundary.
+- Put only work required to reach the authority-owned accepted outcome in the current Plan. Required documentation, accessibility, quality/polish, and similar completion work remain required when authority includes them; exclude only genuinely optional work. Optional polish is not an executable node; after the parent gate accepts the outcome, it may be proposed as a separately authorized follow-up.
+- Default to one largest-coherent end-to-end worker owner for the accepted outcome. Split only at a real authority, ownership, safety, or external-dependency boundary, or, as a fifth exception, when evidence shows that one worker would exceed a measured context, time, or tool-capacity boundary. For that capacity exception, use the fewest acceptance-required vertical slices; never create planning, reporting, proof, test-count, or milestone slices. Make each phase earn a real integration/gate boundary.
+- Before the first implementation dispatch, the parent seals the existing user/project requirements, accepted observable/result, and chosen architecture spine in the existing Plan/run authority. A material authority change requires new Plan/run authority; never drip-feed a live implementation Plan.
+- Acceptance occurs only at the parent gate, never at dispatch `ACK` or worker `PASS`. Already-claimed or `UNKNOWN` effects retain custody until they are reconciled; replanning does not abandon or duplicate them.
 
 ## Worker route and effort selection
 
-Plan work with the closed route table in `SKILL.md`. Route omission preserves the Luna default (`gpt-5.6-luna` + `xhigh`); `sol-high` is an explicit choice of exactly `gpt-5.6-sol` + `high`. Do not plan another Luna effort, an open model/effort cross-product, or a fallback route.
+Plan work with the closed route table in `SKILL.md`. Route omission preserves the Luna default (`gpt-5.6-luna` + `max`); `sol-high` is an explicit choice of exactly `gpt-5.6-sol` + `high`. Do not plan another Luna effort, an open model/effort cross-product, or a fallback route.
 
-Keep Luna on `xhigh` for read-only surveys/scouts, bounded implementation, migrations after the design decision, focused repairs, tests, documentation, and other repository execution. Do not create a Luna `max` intermediate tier. A named consequential judgment boundary, including one left unresolved by a materially failed Luna/xhigh attempt, requires a fresh authorized `sol-high` attempt rather than an effort switch inside the Luna route.
+Keep Luna on `max` for read-only surveys/scouts, bounded implementation, migrations after the design decision, focused repairs, tests, documentation, and other repository execution. Luna/max is the fixed route, not an intermediate tier. A named consequential judgment boundary, including one left unresolved by a materially failed Luna/max attempt, requires a fresh authorized `sol-high` attempt rather than an effort switch inside the Luna route.
 
 The orchestrator resolves the route before spawn and passes the exact model and effort explicitly. Before each `sol-high` launch it records the canonical phase/step/attempt binding required by `SKILL.md`; resume must preserve it or block. No permanent route/effort column is required unless the project benefits from one.
 
 ## Default role policy
 
-Use this simple flow when assigning work: **parent judgment/gate → Luna/xhigh repository execution/self-verification → optional Sol/high bounded judgment → Luna implementation of decisions → parent acceptance**. Route repository-heavy implementation, tests, ordinary repairs, documentation, read-only scouts, and ordinary adversarial reviews to Luna/xhigh by default. Sol/high is opt-in only for bounded consequential judgment—an architecture/contract choice, conflicting-evidence adjudication, or a narrow named acceptance question. Sol/high is not an automatic independent verifier or a generic escalation tier; independent verification is conditional on a named risk, not automatic. When Sol advice changes code, implementation returns to Luna unless the user or project explicitly assigns Sol implementation; the parent owns acceptance.
+Use this simple flow when assigning work: **parent judgment/gate → Luna/max repository execution/self-verification → optional Sol/high bounded judgment → Luna implementation of decisions → parent acceptance**. Route repository-heavy implementation, tests, ordinary repairs, documentation, read-only scouts, and ordinary adversarial reviews to Luna/max by default. Sol/high is opt-in only for bounded consequential judgment—an architecture/contract choice, conflicting-evidence adjudication, or a narrow named acceptance question. Sol/high is not an automatic independent verifier or a generic escalation tier; independent verification is conditional on a named risk, not automatic. When Sol advice changes code, implementation returns to Luna unless the user or project explicitly assigns Sol implementation; the parent owns acceptance.
 
 Host parent selection: GPT-5.6 Sol at `high` is the preferred parent/orchestrator when the host lets the user select it, because the parent owns consequential judgment. A current allowed non-Sol parent remains valid; never spawn a shadow/duplicate parent to simulate the preference. This host-level preference is separate from the explicit worker `sol-high` route and its attempt binding, and it does not create a Sol attempt binding.
 
@@ -104,7 +107,7 @@ Before approving the plan, ask:
 7. Is verification owned once per layer while still satisfying every authoritative acceptance requirement?
 8. Does each planned scout/adversary/decision artifact actually earn its cost?
 9. Is this run safely independent of other ACTIVE run ownership?
-10. Is each explicit route valid and durable, with Luna fixed at `xhigh` and every `sol-high` attempt bound to a named consequential judgment boundary?
+10. Is each explicit route valid and durable, with Luna fixed at `max` and every `sol-high` attempt bound to a named consequential judgment boundary?
 
 If #6 is yes, choose the simpler design.
 

@@ -1,8 +1,12 @@
 import { makeComposedKernel, type DispatcherOptions, type KernelOptions, type RunKernel } from './public.js';
 import type { EffectDriver } from './driver.js';
+import { validateCodexDeliberationHostPolicy, type CodexDeliberationHostPolicy } from './codex-host-policy.js';
+import { CodexDeliberationDriver } from './codex-deliberation-driver.js';
 
 export type CompositionOptions = KernelOptions & DispatcherOptions & {
   driver?: EffectDriver;
+  /** Closed real Codex host configuration for admitted managed Waves. */
+  managedDeliberationPolicy?: CodexDeliberationHostPolicy;
   /** Backward/host-friendly aliases for the private controls. */
   dispatchTimeoutMs?: number;
   abortSignal?: AbortSignal;
@@ -34,7 +38,7 @@ function projectDispatcher(dispatcher: DispatcherOptions | undefined): Dispatche
 }
 
 const COMPOSITION_CONTROL_KEYS = new Set([
-  'driver', 'dispatcher', 'timeoutMs', 'dispatchTimeoutMs',
+  'driver', 'managedDeliberationPolicy', 'dispatcher', 'timeoutMs', 'dispatchTimeoutMs',
   'signal', 'abortSignal', 'onYield', 'maxInFlight',
 ]);
 
@@ -70,7 +74,8 @@ function projectKernelOptions(options: CompositionOptions, maxInFlight: number |
 
 /** Private host composition hook; callers still receive only the RunKernel seam. */
 export function composeKernel(options: CompositionOptions): RunKernel {
-  const driver = options.driver;
+  const legacyDriver = options.driver;
+  const managedPolicy = options.managedDeliberationPolicy;
   const dispatcher = options.dispatcher;
   const timeoutMs = options.timeoutMs;
   const dispatchTimeoutMs = options.dispatchTimeoutMs;
@@ -79,6 +84,16 @@ export function composeKernel(options: CompositionOptions): RunKernel {
   const onYield = options.onYield;
   const maxInFlight = options.maxInFlight;
   const kernelOptions = projectKernelOptions(options, maxInFlight);
+  let driver = legacyDriver;
+  const managedWave = options.managedRollout?.wave !== undefined && options.managedRollout.policy.mode !== 'disabled';
+  if (managedWave) {
+    if (!managedPolicy) throw new Error('managed deliberation host policy is unavailable');
+    if (!options.managedRollout?.deliberationPolicy) throw new Error('managed deliberation role policy is unavailable');
+    const policy = validateCodexDeliberationHostPolicy(managedPolicy);
+    if (options.workspace === undefined) throw new Error('managed deliberation target workspace is required');
+    if (policy.targetWorkspace !== options.workspace) throw new Error('managed deliberation target workspace mismatch');
+    driver = new CodexDeliberationDriver({ policy, wave: options.managedRollout.wave!, deliberationPolicy: options.managedRollout.deliberationPolicy });
+  }
   const merged: DispatcherOptions = {
     ...projectDispatcher(dispatcher),
     ...(timeoutMs === undefined && dispatchTimeoutMs === undefined ? {} : { timeoutMs: timeoutMs ?? dispatchTimeoutMs }),

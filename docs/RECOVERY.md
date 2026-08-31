@@ -48,3 +48,24 @@ bounded effects namespace before returning. Any pointer, generation, effect,
 or report mutation during inspection fails closed without cleanup or repair.
 The existing one-event, drive, and Workfront routes and package-root exports are
 unchanged.
+
+## Adaptive deliberation boundary
+
+Managed Focus/Explore uses the same recovery owner. A provider timeout,
+cancellation, crash, or ambiguous entry is not durably `UNKNOWN` until the
+owned process tree has exited, per-attempt scratch is removed, and teardown is
+bound. Recovery never re-enters that epoch: the full reservation stays charged,
+and late output is inert. Installed automatic D3 Focus does not retry or
+replace that Wave: after valid teardown it returns the single parent decision
+boundary. A separately user-explicit ADHD/Explore Wave remains available under
+its own authority; it is never inferred as an automatic replacement. Missing
+receipt, final transport, authority anchor, role/predecessor binding, or native
+isolation proof blocks rather than promoting a partial Report set or falling
+back to another route.
+
+The capsule remains diagnostic and cannot repair or promote managed state.
+Keep rollout disabled (or publish a strictly newer disabled generation) while
+investigating and preserve the Wave, Reports, receipts, transport/teardown,
+anchors, settlements, leases, and journal. See the [adaptive operator
+contract](../orchestrator/DELIBERATION.md) for kill/revocation and the bounded
+diagnostic counters.

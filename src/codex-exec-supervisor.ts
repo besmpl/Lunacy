@@ -705,6 +705,7 @@ export class CodexExecSupervisor {
     await assertReleaseAdmissionOpen(this.policy.runRoot);
     if (spec.policy !== this.policy) fail('launch policy is not the composed policy');
     const command = spec.command;
+    if (command.modeEpoch !== 0) fail('command modeEpoch is unsupported');
     if (command.runId !== this.policy.runId || command.planDigest !== this.policy.planDigest) fail('command is outside policy authority');
     if (command.commandDigest !== digest({ commandId: command.commandId, runId: command.runId, phaseId: command.phaseId, stepId: command.stepId, attemptEpoch: command.attemptEpoch, launchToken: command.launchToken })) fail('command digest is not canonical');
     if (spec.signal?.aborted) fail('launch was cancelled before spawn');
@@ -1049,13 +1050,11 @@ export class CodexExecSupervisor {
     if (!this.token) return undefined;
     const record = await readTerminalRecord(this.policy, this.token);
     if (!record) return undefined;
-    try { await this.verifyBoundary(); } catch { return undefined; }
     return record;
   }
 
-  /** Re-attest the immutable launch's authority before exposing terminal
-   * evidence.  This is also used by the live driver path; restart callers use
-   * verifyCodexHostBoundary directly against the persisted launch record. */
+  /** Explicit live-boundary diagnostic. Terminal/restart acceptance does not
+   * call this after commit; it validates the retained historical chain. */
   async verifyBoundary(): Promise<void> {
     if (!this.launch) fail('supervisor has not started');
     await verifyCodexHostBoundary(this.policy, this.launch, this.attest);

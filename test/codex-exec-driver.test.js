@@ -41,9 +41,10 @@ test('driver rejects dispatch for wrong token or command digest before spawning'
   const driver = new CodexExecDriver({ policy, supervisor: { spawnProcess: () => { spawned = true; return new Child(); }, attestExecutable: async () => ({ requestedPath: policy.codexPath, physicalPath: policy.codexPath, requestedPathIsSymlink: false, uid: 1, gid: 1, mode: '755', digest: policy.codexBinaryDigest, version: policy.codexVersion }) } });
   await assert.rejects(() => driver.dispatch(command, 'wrong-token'), /token mismatch/); assert.equal(spawned, false);
   await assert.rejects(() => driver.dispatch({ ...command, commandDigest: 'd'.repeat(64) }, command.launchToken), /digest mismatch/); assert.equal(spawned, false);
+  await assert.rejects(() => driver.dispatch({ ...command, modeEpoch: 1 }, command.launchToken), /modeEpoch.*unsupported/); assert.equal(spawned, false);
 });
 
-test('restart terminal reconciliation rejects authority and executable drift', async () => {
+test('restart terminal reconciliation retains historical authority across live drift', async () => {
   const { policy, command } = await fixture(); let child; let executableDigest = policy.codexBinaryDigest;
   const supervisorOptions = {
     spawnProcess: () => { child = new Child(); return child; },
@@ -57,13 +58,26 @@ test('restart terminal reconciliation rejects authority and executable drift', a
 
   const restarted = new CodexExecDriver({ policy, supervisor: supervisorOptions });
   await writeFile(join(policy.skillRoot, 'worker', 'ENGINEERING.md'), '# changed after launch\n');
-  assert.equal(await restarted.terminal(command.launchToken), undefined);
+  assert.equal((await restarted.terminal(command.launchToken, undefined, command))?.status, 'BLOCKED');
 
-  // Restore the authority bytes and prove the executable attestation is also
-  // required, rather than relying only on the persisted policy literals.
+  // Live executable identity is likewise irrelevant after the immutable
+  // intent/launch chain has committed for this exact retained command.
   await writeFile(join(policy.skillRoot, 'worker', 'ENGINEERING.md'), '# test engineering\n');
   executableDigest = 'f'.repeat(64);
-  assert.equal(await restarted.terminal(command.launchToken), undefined);
+  assert.equal((await restarted.terminal(command.launchToken, undefined, command))?.status, 'BLOCKED');
+
+  // A restarted host is constructed from the newly accepted live Plan. The
+  // retained token remains bound to its immutable old intent/launch chain,
+  // never to this newly constructed policy digest.
+  const driftedPolicy = Object.freeze({ ...policy, planDigest: 'c'.repeat(64) });
+  let driftedSpawns = 0;
+  const drifted = new CodexExecDriver({
+    policy: driftedPolicy,
+    supervisor: { ...supervisorOptions, spawnProcess: () => { driftedSpawns += 1; return new Child(); } },
+  });
+  assert.equal((await drifted.terminal(command.launchToken, undefined, command))?.status, 'BLOCKED');
+  await assert.rejects(() => drifted.dispatch(command, command.launchToken), /launch (?:intent|record) already exists/);
+  assert.equal(driftedSpawns, 0);
 });
 
 test('restart terminal reconciliation binds exact result and report bytes', async () => {

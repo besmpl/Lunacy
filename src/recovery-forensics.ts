@@ -2,12 +2,12 @@ import { promises as fs } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join, relative, resolve, sep } from 'node:path';
 import type { CodexHostPolicy } from './codex-host-policy.js';
-import { codexHostPolicyDigest, parseWorkerResultText, validateCodexHostPolicy } from './codex-host-policy.js';
+import { codexHostPolicyDigest, validateCodexHostPolicy } from './codex-host-policy.js';
 import { canonicalString, digest, parseCanonical } from './canonical.js';
 import { FileArtifactStore, isCanonicalRootPath } from './store.js';
 import { inspectTrustedPath, sameFilesystemIdentity, trustedIdentity, type FilesystemIdentity } from './filesystem.js';
 import { JOURNAL_BYTE_CEILING, JOURNAL_EVENT_CEILING, CURRENT_BYTE_CEILING } from './limits.js';
-import { MAX_EFFECT_RECORD_BYTES, readBoundedUtf8File, reportControlStatus, validateLaunchIntentRecord, validateLaunchRecord, validateTerminalRecord, type BoundedUtf8File, type LaunchIntentRecord, type LaunchRecord, type TerminalRecord } from './codex-effect-records.js';
+import { MAX_EFFECT_RECORD_BYTES, readBoundedUtf8File, validateHistoricalCodexEffect, validateLaunchIntentRecord, validateLaunchRecord, validateTerminalRecord, type BoundedUtf8File, type TerminalRecord } from './codex-effect-records.js';
 import type { MachineState, OutboxCommand } from './model.js';
 
 /** Private diagnostic schema.  It deliberately contains only identities,
@@ -188,9 +188,9 @@ function recordFromFile<T>(file: BoundedUtf8File, validate: (value: unknown) => 
     return { evidence: withStatus(evidence, 'MALFORMED', false) };
   }
 }
-function commandBinding(command: OutboxCommand | undefined, runId: string, state: MachineState, requestedDigest?: string): 'MATCH' | 'MISMATCH' | 'ABSENT' {
+function commandBinding(command: OutboxCommand | undefined, runId: string, requestedDigest?: string): 'MATCH' | 'MISMATCH' | 'ABSENT' {
   if (!command) return 'ABSENT';
-  if (command.runId !== runId || command.phaseId !== state.phaseId || command.attemptEpoch > state.attemptEpoch || command.authorityEpoch > state.authorityEpoch || command.barrierEpoch > state.barrierEpoch || command.modeEpoch > state.modeEpoch) return 'MISMATCH';
+  if (command.runId !== runId || command.modeEpoch !== 0) return 'MISMATCH';
   if (requestedDigest !== undefined && command.commandDigest !== requestedDigest) return 'MISMATCH';
   return 'MATCH';
 }
@@ -209,41 +209,7 @@ function leaseStatus(command: OutboxCommand | undefined, state: MachineState): R
   const valid = mode === String(state.modeEpoch) && writer === state.writerFence;
   return { present: true, status: valid ? 'VALID' : (value.includes(':') ? 'STALE' : 'MALFORMED'), digest: sha256(value) };
 }
-function bindCommon(record: LaunchIntentRecord | LaunchRecord, command: OutboxCommand | undefined, state: MachineState, runId: string, policy: CodexHostPolicy | undefined, expectedPolicyDigest: string | undefined, expectedAuthorityDigest: string | undefined, requestedDigest?: string): boolean {
-  if (!command) return false;
-  if (requestedDigest !== undefined && command.commandDigest !== requestedDigest) return false;
-  if (record.launchToken !== command.launchToken || record.commandDigest !== command.commandDigest || record.commandId !== command.commandId || record.runId !== runId || record.phaseId !== state.phaseId || record.stepId !== command.stepId) return false;
-  if (record.attemptEpoch !== command.attemptEpoch || record.authorityEpoch !== command.authorityEpoch || record.barrierEpoch !== command.barrierEpoch || command.modeEpoch > state.modeEpoch || record.attempt !== record.attemptEpoch) return false;
-  if (expectedPolicyDigest !== undefined && record.policyDigest !== expectedPolicyDigest) return false;
-  if (expectedAuthorityDigest !== undefined && record.authorityDigest !== expectedAuthorityDigest) return false;
-  if (policy && (record.policyDigest !== codexHostPolicyDigest(policy) || policy.planDigest !== state.planDigest)) return false;
-  return true;
-}
-function bindTerminal(record: TerminalRecord, command: OutboxCommand | undefined, runId: string, state: MachineState, requestedDigest?: string): boolean {
-  return Boolean(command && (requestedDigest === undefined || command.commandDigest === requestedDigest) && record.launchToken === command.launchToken && record.commandDigest === command.commandDigest && command.runId === runId && command.phaseId === state.phaseId && command.modeEpoch <= state.modeEpoch);
-}
 function reportPathSafe(path: string, root: string): boolean { return typeof path === 'string' && path.length > 0 && resolve(path) === path && pathWithin(root, path); }
-function expectedReportPathForRoot(root: string, command: Pick<OutboxCommand, 'phaseId' | 'stepId' | 'attemptEpoch'>): string {
-  // Keep the internal command binding exact, but never derive a path from an
-  // attacker-controlled separator-bearing step key. Safe IDs retain the
-  // production filename; unsafe IDs use the same bounded capsule digest form
-  // exposed by outbox.stepId.
-  const pathStep = capsuleStepId(command.stepId) ?? 'unknown-step';
-  return join(root, 'phases', command.phaseId, 'reports', `${pathStep}-worker-${command.attemptEpoch}.md`);
-}
-
-/** Mirror the supervisor's terminal outcome/status contract without invoking
- * any effect or provider code.  A terminal record is authoritative only when
- * its metadata is internally coherent and its normal-completion bytes below
- * also verify. */
-function terminalSemanticsValid(record: TerminalRecord): boolean {
-  if (record.outcome === 'normal-completion') {
-    return record.exitCode === 0 && record.signal === null && record.status !== 'UNKNOWN' && record.resultDigest !== null && record.reportPath !== null && record.reportDigest !== null;
-  }
-  if (record.outcome === 'approval-required') return record.status === 'NEEDS-DECISION' && record.reportPath === null && record.reportDigest === null;
-  if (record.outcome === 'unresolved-termination') return record.status === 'UNKNOWN' && record.exitCode === null && record.signal === null && record.resultDigest === null && record.reportPath === null && record.reportDigest === null;
-  return record.status === 'BLOCKED' && record.reportPath === null && record.reportDigest === null;
-}
 
 async function readCurrent(root: string): Promise<{ value: Record<string, unknown>; identity: FilesystemIdentity }> {
   const identity = await trustedIdentity(join(root, '.kernel', 'CURRENT'), 'CURRENT', { surface: true, kind: 'file' });
@@ -377,15 +343,17 @@ export async function inspectRecovery(input: RecoveryInspectionInput): Promise<R
   const loaded = await store.loadReadOnly(runId);
   if (!loaded.state) fail('committed state is absent');
   const state = loaded.state;
+  if (state.modeEpoch !== 0) fail('committed state modeEpoch is unsupported');
   boundedCapsuleIdentity(state.runId, 'committed runId');
   boundedCapsuleIdentity(state.phaseId, 'committed phaseId');
   const currentRead = await readCurrent(root); const current = currentRead.value;
+  if (current.modeEpoch !== 0) fail('CURRENT modeEpoch is unsupported');
   if (current.generation !== loaded.generation || current.writerFence !== state.writerFence || current.revision !== state.revision || current.attemptEpoch !== state.attemptEpoch || current.authorityEpoch !== state.authorityEpoch || current.barrierEpoch !== state.barrierEpoch || current.modeEpoch !== state.modeEpoch) fail('CURRENT disagrees with committed state');
   const paths = { intent: join(tokenDir, 'launch-intent.json'), launch: join(tokenDir, 'launch.json'), terminal: join(tokenDir, 'terminal.json'), output: join(tokenDir, 'result.json') };
   const toleratedPaths = new Set([paths.intent, paths.launch, paths.terminal, paths.output]);
   const beforeNamespace = await namespaceDigest(effectsRoot, toleratedPaths);
   const command = Object.values(state.outbox).find((candidate) => candidate.launchToken === launchToken);
-  const binding = commandBinding(command, runId, state, commandDigestRequested);
+  const binding = commandBinding(command, runId, commandDigestRequested);
   const lease = leaseStatus(command, state);
   const expectedPolicyDigest = policyDigestRequested ?? (policy ? codexHostPolicyDigest(policy) : undefined);
   const [intentFile, launchFile, terminalFile] = await Promise.all([
@@ -397,32 +365,30 @@ export async function inspectRecovery(input: RecoveryInspectionInput): Promise<R
   const launchParsed = recordFromFile(launchFile, validateLaunchRecord);
   const terminalParsed = recordFromFile(terminalFile, validateTerminalRecord);
   let intentEvidence = intentParsed.evidence; let launchEvidence = launchParsed.evidence; let terminalEvidence = terminalParsed.evidence;
-  if (intentParsed.record && !bindCommon(intentParsed.record, command, state, runId, policy, expectedPolicyDigest, authorityDigest, commandDigestRequested)) intentEvidence = withStatus(intentEvidence, 'MISMATCH', false);
-  if (launchParsed.record && !bindCommon(launchParsed.record, command, state, runId, policy, expectedPolicyDigest, authorityDigest, commandDigestRequested)) launchEvidence = withStatus(launchEvidence, 'MISMATCH', false);
-  if (terminalParsed.record && !bindTerminal(terminalParsed.record, command, runId, state, commandDigestRequested)) terminalEvidence = withStatus(terminalEvidence, 'MISMATCH', false);
-  if (intentParsed.record && launchParsed.record && (intentParsed.record.launchToken !== launchParsed.record.launchToken || intentParsed.record.commandDigest !== launchParsed.record.commandDigest || intentParsed.record.handoffDigest !== launchParsed.record.handoffDigest || intentParsed.record.argvDigest !== launchParsed.record.argvDigest || intentParsed.record.policyDigest !== launchParsed.record.policyDigest || intentParsed.record.authorityDigest !== launchParsed.record.authorityDigest || intentParsed.record.runId !== launchParsed.record.runId || intentParsed.record.phaseId !== launchParsed.record.phaseId || intentParsed.record.stepId !== launchParsed.record.stepId || intentParsed.record.attemptEpoch !== launchParsed.record.attemptEpoch || intentParsed.record.authorityEpoch !== launchParsed.record.authorityEpoch || intentParsed.record.barrierEpoch !== launchParsed.record.barrierEpoch)) {
-    intentEvidence = withStatus(intentEvidence, 'MISMATCH', false); launchEvidence = withStatus(launchEvidence, 'MISMATCH', false);
-  }
-  if (terminalParsed.record?.reportPath !== null && terminalParsed.record?.reportPath !== undefined) {
-    const expectedReport = command ? expectedReportPathForRoot(root, command) : undefined;
-    if (!reportPathSafe(terminalParsed.record.reportPath, root) || (expectedReport !== undefined && terminalParsed.record.outcome === 'normal-completion' && terminalParsed.record.reportPath !== expectedReport)) terminalEvidence = withStatus(terminalEvidence, 'MISMATCH', false);
-  }
-  if (terminalParsed.record && !terminalSemanticsValid(terminalParsed.record)) terminalEvidence = withStatus(terminalEvidence, 'MISMATCH', false);
-  // Validate result/report bytes without exposing either payload or path. The
-  // launch/terminal readers above remain the only effect-record authority.
-  if (terminalParsed.record && terminalEvidence.verified) {
-    const output = await readBoundedUtf8File(paths.output, 'Codex final output', policy?.maxOutputBytes ?? MAX_EFFECT_RECORD_BYTES);
-    if (terminalParsed.record.resultDigest === null ? output.kind !== 'absent' : output.kind !== 'ok' || output.digest !== terminalParsed.record.resultDigest) terminalEvidence = withStatus(terminalEvidence, 'MISMATCH', false);
-    if (terminalEvidence.verified && terminalParsed.record.outcome === 'normal-completion') {
-      const parsed = output.kind === 'ok' ? parseWorkerResultText(output.text) : undefined;
-      const expectedReport = command ? expectedReportPathForRoot(root, command) : undefined;
-      if (!parsed || parsed.status !== terminalParsed.record.status || parsed.reportDigest !== terminalParsed.record.reportDigest || parsed.reportPath !== expectedReport || !reportPathSafe(parsed.reportPath, root)) terminalEvidence = withStatus(terminalEvidence, 'MISMATCH', false);
-      else {
-        const report = await readBoundedUtf8File(parsed.reportPath, 'worker report', policy?.maxReportBytes ?? MAX_EFFECT_RECORD_BYTES);
-        if (report.kind !== 'ok' || report.digest !== parsed.reportDigest || reportControlStatus(report.text) !== parsed.status) terminalEvidence = withStatus(terminalEvidence, 'MISMATCH', false);
-      }
+  let launchChainValid = false;
+  if (binding === 'MATCH' && command && intentParsed.record && launchParsed.record) {
+    try {
+      validateHistoricalCodexEffect({ command, runRoot: root, requiredStage: 'launch', intent: intentParsed.record, launch: launchParsed.record, policy, expectedPolicyDigest, expectedAuthorityDigest: authorityDigest });
+      launchChainValid = true;
+    } catch {
+      intentEvidence = withStatus(intentEvidence, 'MISMATCH', false);
+      launchEvidence = withStatus(launchEvidence, 'MISMATCH', false);
     }
+  } else if (binding === 'MISMATCH') {
+    if (intentParsed.record) intentEvidence = withStatus(intentEvidence, 'MISMATCH', false);
+    if (launchParsed.record) launchEvidence = withStatus(launchEvidence, 'MISMATCH', false);
+    if (terminalParsed.record) terminalEvidence = withStatus(terminalEvidence, 'MISMATCH', false);
   }
+  if (terminalParsed.record && launchChainValid && command) {
+    const output = await readBoundedUtf8File(paths.output, 'Codex final output', policy?.maxOutputBytes ?? MAX_EFFECT_RECORD_BYTES);
+    let report: BoundedUtf8File | undefined;
+    if (terminalParsed.record.outcome === 'normal-completion' && terminalParsed.record.reportPath && reportPathSafe(terminalParsed.record.reportPath, root)) {
+      report = await readBoundedUtf8File(terminalParsed.record.reportPath, 'worker report', policy?.maxReportBytes ?? MAX_EFFECT_RECORD_BYTES);
+    }
+    try {
+      validateHistoricalCodexEffect({ command, runRoot: root, requiredStage: 'terminal', intent: intentParsed.record!, launch: launchParsed.record!, terminal: terminalParsed.record, output, report, policy, expectedPolicyDigest, expectedAuthorityDigest: authorityDigest });
+    } catch { terminalEvidence = withStatus(terminalEvidence, 'MISMATCH', false); }
+  } else if (terminalParsed.record && !launchChainValid) terminalEvidence = withStatus(terminalEvidence, 'MISMATCH', false);
   const afterNamespace = await namespaceDigest(effectsRoot, toleratedPaths);
   if (beforeNamespace !== afterNamespace) {
     fail('effect namespace changed during read');

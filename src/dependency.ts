@@ -10,6 +10,11 @@ export function dependencyTerminal(status: string | undefined): boolean {
   return status === 'DONE';
 }
 
+/** READY and REPAIR are both executable work awaiting admission. */
+export function isDispatchableStepStatus(status: string | undefined): boolean {
+  return status === 'READY' || status === 'REPAIR';
+}
+
 /** Digest-relevant identifier ordering must not depend on host locale. */
 export function compareStable(a: string, b: string): number {
   return Buffer.compare(Buffer.from(a, 'utf8'), Buffer.from(b, 'utf8'));

@@ -34,6 +34,23 @@ test('CLI reads canonical plan/event and prints a Yield through advance', async 
   assert.equal(value.snapshot.revision, 1);
 });
 
+test('canonical fixture is one required accepted-outcome node with a bound event digest', () => {
+  const fixturePlan = parseCanonical(readFileSync(join(root, 'examples/canonical-plan.json'), 'utf8'));
+  const fixtureEvent = parseCanonical(readFileSync(join(root, 'examples/canonical-event.json'), 'utf8'));
+  const fixtureDocs = readFileSync(join(root, 'examples/README.md'), 'utf8');
+
+  assert.deepEqual(fixturePlan, {
+    phaseId: 'example',
+    steps: [{ goal: 'Deliver the authority-owned accepted outcome end to end', stepId: 'accepted-outcome' }],
+  });
+  assert.deepEqual(fixtureEvent, {
+    intentRef: { digest: digest(fixturePlan), id: 'plan' },
+    kind: 'START',
+  });
+  assert.match(fixtureDocs, /Optional polish is absent/);
+  assert.match(fixtureDocs, /separately authorized follow-up only after the parent gate accepts/);
+});
+
 test('CLI help is available and malformed canonical input is rejected', async () => {
   const help = await capture(['--help']);
   assert.equal(help.code, 0); assert.match(help.stdout, /RunKernel\.advance/);
@@ -59,6 +76,6 @@ test('published package excludes private bridge/Beads/Workfront executable surfa
   const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
   assert.equal(packageJson.bin['lunacy-bridge'], undefined);
   const packed = JSON.parse(execFileSync('npm', ['pack', '--dry-run', '--json'], { cwd: root, encoding: 'utf8' }))[0];
-  const privateFiles = packed.files.map((item) => item.path).filter((path) => /^dist\/(?:bridge|beads|workfront)/.test(path) || /^bench\/(?:bridge|workfront)-/.test(path));
+  const privateFiles = packed.files.map((item) => item.path).filter((path) => /^dist\/(?:bridge|beads|evidence-copy|workfront)/.test(path) || /^bench\/(?:bridge|workfront)-/.test(path));
   assert.deepEqual(privateFiles, []);
 });

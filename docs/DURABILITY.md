@@ -145,6 +145,8 @@ creates a durable digest-bound adoption token. Recovery may reconcile old work
 while that token is pending; adoption is refused until every old `ACTIVE`,
 `PENDING`, `CLAIMED`, and `UNKNOWN` identity is reconciled, then one CAS
 advances authority/attempt/barrier epochs and rebuilds the acknowledged plan.
+Never downgrade a run below the A1 release while its persisted state contains
+any `REPAIR` step; older runtimes do not admit that status as executable work.
 
 Deletion of graph/context/reuse sidecars, or a corrupt/missing accelerator,
 falls back to direct evaluation. It must not alter yields, revisions, journal,

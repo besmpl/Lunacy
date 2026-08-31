@@ -7,6 +7,8 @@ import { composeKernel } from '../dist/composition.js';
 import { canonicalString, digest } from '../dist/canonical.js';
 import { Conflict, KernelError, makeRunKernel } from '../dist/index.js';
 import { FileArtifactStore } from '../dist/store.js';
+import { applyParentDecision, createInitialState } from '../dist/reducer.js';
+import { validatePlan } from '../dist/validator.js';
 
 const plan = { phaseId: 'p', steps: [{ stepId: 'a' }] };
 const commandToken = (runId = 'r', phaseId = 'p', stepId = 'a', attemptEpoch = 0) => `launch-${digest({ runId, phaseId, stepId, attemptEpoch }).slice(0, 32)}`;
@@ -22,6 +24,87 @@ function input(runId, eventId, event, cursor, launchToken) {
 function jsonRef(id, value, scope = 'test') { return { id, scope, digest: digest(value), bytes: canonicalString(value) }; }
 function startInput(runId = 'r', eventId = 'start') { return input(runId, eventId, { kind: 'START', intentRef: { id: 'plan', digest: digest(plan) } }, { revision: undefined, authorityEpoch: 0, attemptEpoch: 0, barrierEpoch: 0 }); }
 function deferred() { let resolve; const promise = new Promise((done) => { resolve = done; }); return { promise, resolve }; }
+
+test('targeted FINDINGS validates before consumption and resets only the committed downstream closure', () => {
+  const repairPlan = {
+    phaseId: 'p',
+    steps: [
+      { stepId: 'foundation' },
+      { stepId: 'journey', dependencies: ['foundation'] },
+      { stepId: 'polish', dependencies: ['journey'] },
+      { stepId: 'verification', dependencies: ['journey'] },
+      { stepId: 'delivery', dependencies: ['polish', 'verification'] },
+      { stepId: 'sibling', dependencies: ['foundation'] },
+    ],
+  };
+  const state = createInitialState('targeted', repairPlan, digest(repairPlan), 'writer');
+  state.gate = 'DUE'; state.barrier = 'CLOSED'; state.barrierEpoch = 1;
+  state.decisionTokens.gate = { kind: 'GATE', consumed: false, identity: digest('gate') };
+  state.decisionTokens.adopted = { kind: 'AUTHORITY_ADOPTION', consumed: true, identity: digest('adopted'), targetDigest: digest('target') };
+  state.processed.proof = { digest: digest('proof'), yieldBytes: canonicalString({ kind: 'WAITING' }), revision: 0, identity: { runId: 'targeted', phaseId: 'p', stepId: 'run', attemptEpoch: 0, authorityEpoch: 0, barrierEpoch: 0, eventId: 'proof', payloadDigest: digest('proof') } };
+  for (const [index, step] of Object.values(state.steps).entries()) {
+    step.status = 'DONE'; step.attempt = index; step.lastEvent = `done-${step.stepId}`;
+  }
+  state.outbox.historical = { commandId: 'historical', runId: 'targeted', phaseId: 'p', stepId: 'foundation', attemptEpoch: 0, authorityEpoch: 0, barrierEpoch: 0, modeEpoch: 0, launchToken: 'old', commandDigest: digest('old'), state: 'ACKED', receipt: jsonRef('old-receipt', { accepted: true }) };
+  const original = structuredClone(state);
+  const eventValue = { ownerStepId: 'journey', decision: 'FINDINGS' };
+  const identity = { runId: 'targeted', phaseId: 'p', stepId: 'run', attemptEpoch: 0, authorityEpoch: 0, barrierEpoch: 1, eventId: 'findings', payloadDigest: digest({ kind: 'PARENT_DECISION', token: 'gate', value: eventValue }) };
+
+  for (const value of [
+    { decision: 'FINDINGS' },
+    { decision: 'FINDINGS', ownerStepId: 'missing' },
+    { decision: 'FINDINGS', ownerStepId: 'journey', extra: true },
+  ]) {
+    const rejected = applyParentDecision(state, identity, 'gate', value, repairPlan);
+    assert.equal(rejected.state, state);
+    assert.equal(rejected.outcome, 'BLOCKED');
+    assert.equal(canonicalString(state), canonicalString(original));
+  }
+
+  const result = applyParentDecision(state, identity, 'gate', eventValue, repairPlan);
+  assert.equal(result.outcome, 'WAITING');
+  assert.equal(result.deferAdmission, true);
+  assert.equal(result.state.steps.journey.status, 'REPAIR');
+  assert.equal(result.state.steps.polish.status, 'READY');
+  assert.equal(result.state.steps.verification.status, 'READY');
+  assert.equal(result.state.steps.delivery.status, 'READY');
+  assert.equal(result.state.steps.journey.attempt, 1);
+  assert.equal(result.state.steps.polish.attempt, 1);
+  assert.equal(result.state.steps.verification.attempt, 1);
+  assert.equal(result.state.steps.delivery.attempt, 1);
+  assert.deepEqual(result.state.steps.foundation, original.steps.foundation);
+  assert.deepEqual(result.state.steps.sibling, original.steps.sibling);
+  assert.deepEqual(result.state.outbox, original.outbox);
+  assert.deepEqual(result.state.processed, original.processed);
+  assert.deepEqual(result.state.decisionTokens.adopted, original.decisionTokens.adopted);
+  assert.equal(result.state.decisionTokens.gate.consumed, true);
+  assert.deepEqual(result.state.journal.at(-1).event.value, eventValue);
+
+  const ambiguousPlan = structuredClone(repairPlan);
+  ambiguousPlan.steps.find((step) => step.stepId === 'polish').dependencies = ['foundation'];
+  const fallback = applyParentDecision(state, { ...identity, eventId: 'fallback' }, 'gate', eventValue, ambiguousPlan);
+  assert.equal(fallback.deferAdmission, undefined);
+  assert.deepEqual(Object.values(fallback.state.steps).map((step) => step.status), ['READY', 'READY', 'READY', 'READY', 'READY', 'READY']);
+
+  // Recovery may reconstruct a valid-looking Plan from CURRENT itself. If the
+  // projection drifted without the committed planDigest changing, that source
+  // is ambiguous too and must not preserve proof outside a guessed closure.
+  const committedPlan = validatePlan(repairPlan).plan;
+  const drifted = createInitialState('targeted-drift', committedPlan, digest(committedPlan), 'writer');
+  drifted.gate = 'DUE'; drifted.barrier = 'CLOSED'; drifted.barrierEpoch = 1;
+  drifted.decisionTokens.gate = { kind: 'GATE', consumed: false, identity: digest('drift-gate') };
+  for (const step of Object.values(drifted.steps)) step.status = 'DONE';
+  drifted.steps.delivery.dependencies = ['foundation'];
+  const projectedPlan = validatePlan({
+    schema: 'lunacy-plan-v1', phaseId: drifted.phaseId,
+    steps: Object.values(drifted.steps).map(({ status, attempt, lastEvent, ...step }) => step),
+  }).plan;
+  const driftedIdentity = { ...identity, runId: drifted.runId, eventId: 'projection-fallback' };
+  const projectionFallback = applyParentDecision(drifted, driftedIdentity, 'gate', eventValue, projectedPlan);
+  assert.equal(projectionFallback.deferAdmission, undefined);
+  assert.deepEqual(Object.values(projectionFallback.state.steps).map((step) => step.status), ['READY', 'READY', 'READY', 'READY', 'READY', 'READY']);
+});
+
 
  test('private composition driver receipt-to-completion reaches gate and finality', async () => {
   const seen = [];

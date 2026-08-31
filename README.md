@@ -14,22 +14,43 @@ Lunacy uses one closed route choice:
 
 | Route | Model | Reasoning effort | Selection |
 |---|---|---|---|
-| `luna` | `gpt-5.6-luna` | `xhigh` | Default when omitted |
+| `luna` | `gpt-5.6-luna` | `max` | Default when omitted |
 | `sol-high` | `gpt-5.6-sol` | `high` | Explicit only |
 
 Only those exact case-sensitive pairs are valid. The parent resolves one route, passes both `model` and `reasoning_effort` explicitly to `agents.spawn_agent`, and uses `fork_turns:"none"` by default. It never infers from the parent model, catalog, availability, or an earlier attempt. An invalid or unavailable selection blocks with no alternate call, fallback, or downgrade.
 
 Before every explicit Sol launch, the parent records `workerRoute: sol-high; phaseId: <id>; stepId: <id>; attemptEpoch: <n>` in the run's `DECISIONS.md`. Resume preserves that exact binding or blocks; changing routes requires a fresh attempt and new authority.
 
-Normal routing has no Luna `max` tier. Bounded, testable repository execution stays on Luna/xhigh; consequential judgment or a named unresolved reasoning boundary after a failed Luna/xhigh attempt uses a fresh authorized Sol/high attempt. Keeping Luna on one fixed effort avoids deliberately fragmenting that route by reasoning setting; it does not guarantee a cache hit.
+Luna is fixed at `max`; it is not an escalation tier. Consequential judgment or a named unresolved reasoning boundary after a failed Luna/max attempt uses a fresh authorized Sol/high attempt. Keeping Luna on one fixed effort avoids deliberately fragmenting that route by reasoning setting; it does not guarantee a cache hit.
 
 ### Default role policy
 
-The simple default flow is **parent judgment/gate → Luna/xhigh repository execution/self-verification → optional Sol/high bounded judgment → Luna implementation of decisions → parent acceptance**. Luna/xhigh is the default for repository-heavy implementation, tests, ordinary repairs, documentation, read-only scouts, and ordinary adversarial reviews. Sol/high is opt-in only for bounded consequential judgment—an architecture/contract choice, conflicting-evidence adjudication, or a narrow named acceptance question. Sol/high is not an automatic independent verifier or a generic escalation tier; independent verification is conditional on a named risk, not automatic. When Sol advice changes code, implementation returns to Luna unless the user or project explicitly assigns Sol implementation; the parent remains the acceptance owner.
+The simple default flow is **parent judgment/gate → Luna/max repository execution/self-verification → optional Sol/high bounded judgment → Luna implementation of decisions → parent acceptance**. Luna/max is the default for repository-heavy implementation, tests, ordinary repairs, documentation, read-only scouts, and ordinary adversarial reviews. Sol/high is opt-in only for bounded consequential judgment—an architecture/contract choice, conflicting-evidence adjudication, or a narrow named acceptance question. Sol/high is not an automatic independent verifier or a generic escalation tier; independent verification is conditional on a named risk, not automatic. When Sol advice changes code, implementation returns to Luna unless the user or project explicitly assigns Sol implementation; the parent remains the acceptance owner.
 
 Host parent selection: GPT-5.6 Sol at `high` is the preferred parent/orchestrator when the host lets the user select it, because the parent owns consequential judgment. A current allowed non-Sol parent remains valid; never spawn a shadow/duplicate parent to simulate the preference. This host-level preference is separate from the explicit worker `sol-high` route and its attempt binding, and it does not create a Sol attempt binding.
 
-The direct/manual worker route is separate from the private managed runtime drive. Managed drive remains its independently attested, closed Sol `codex exec` policy; the new direct choice does not change runtime schemas, policy digests, or driver behavior.
+Direct/manual workers and private managed routes are independently closed. Writable managed action remains its attested Sol/high `codex exec` policy; effect-denied adaptive Focus/Explore deliberation uses a separately attested Luna/max capability. Neither is a fallback for the other, and a direct route choice alone does not change runtime schemas, policy digests, or driver behavior.
+
+## Adaptive deliberation
+
+Lunacy can deterministically keep a settled decision on zero-fan-out Direct,
+compare two or three isolated candidates with Focus, or run exact ADHD Explore
+(five generators × six ideas, one critic, and exactly three deepeners). Reports
+remain effect- and authority-free; the parent alone settles the decision and
+authors/adopts a complete Plan through the same RunKernel and store.
+
+The package/runtime has no ambient rollout and remains fail-safe disabled when
+managed host composition is omitted or nonconforming. The installed operator
+profile may select reviewed D3 `automatic-focus` only as one generation-1,
+effect-denied Focus Wave before the acceptance pointer/Plan is sealed and
+before the first implementation spawn. Automatic Focus never WIDENs or
+re-enters from a gate, repair, worker completion, resume, rollout, or an
+existing rollout-bearing run. An unsettled Wave returns exactly one parent
+decision boundary. Direct is still zero-fan-out, user-explicit ADHD/Explore is
+still available and explicit-only, and missing native isolation, transport,
+route, role policy, or eligibility refuses with no fallback. See the concise [adaptive
+operator contract](orchestrator/DELIBERATION.md) for the rollout corridor,
+kill/revocation procedure, diagnostics, recovery, and disposable validation.
 
 ## Mechanical context controls
 
@@ -78,7 +99,9 @@ optional read-only gate scout if integration earns it
 orchestrator hard gate
 ```
 
-A phase is an integrated milestone. A step is the **largest coherent unit** one worker can safely own end-to-end. Lunacy avoids micro-decomposition merely to create more agents.
+A phase is an integrated milestone. A step defaults to the **largest coherent end-to-end unit** one worker can safely own. Alongside real authority, ownership, safety, and external-dependency boundaries, Lunacy permits a fifth split exception only when evidence shows a measured worker context, time, or tool-capacity boundary. It then uses the fewest acceptance-required vertical slices—never planning, reporting, proof, test-count, or milestone slices.
+
+Before first implementation dispatch, the parent seals the existing user/project requirements, accepted observable/result, and chosen architecture spine in the existing Plan/run authority. Materially changed authority requires new Plan/run authority rather than drip-feeding a live implementation Plan. Required documentation, accessibility, quality/polish, and similar completion work stay in scope when authority includes them; only genuinely optional work is excluded.
 
 If deeper inspection discovers material work outside the durable step contract, the worker stops before the out-of-contract edit and sends one consolidated decision brief. The parent updates the durable scope or creates a repair/new step before implementation continues. Lunacy does not accumulate chains of ad-hoc “overlap” amendments while one worker keeps expanding its write set.
 
@@ -159,7 +182,7 @@ Default Luna:
 
 ```text
 model: gpt-5.6-luna
-reasoning_effort: xhigh
+reasoning_effort: max
 fork_turns: "none"
 ```
 
@@ -204,6 +227,7 @@ SPDX-License-Identifier: `Apache-2.0`
 LICENSE                          Apache License 2.0 terms.
 SKILL.md                         Always-loaded orchestration protocol.
 orchestrator/PLANNING.md        Parent planning/reuse/OOP/YAGNI/effort/verification doctrine.
+orchestrator/DELIBERATION.md    Adaptive Direct/Focus/Explore operator contract and rollback.
 WORKSPACE.md                     Multi-run state, immutable evidence, report/gate/decision limits.
 worker/ENGINEERING.md            Worker engineering + bounded output/terminal evidence doctrine.
 references/CODEX_LUNA_COMPAT.md Narrow Luna-only catalog compatibility procedure.
@@ -220,6 +244,10 @@ packed artifact's `lunacy-runtime` executable with the canonical fixtures in
 implicit provider, token, or native-host calls. See the [installation](docs/INSTALL.md),
 [API](docs/API.md), [durability](docs/DURABILITY.md), [migration](docs/MIGRATION.md),
 and [benchmark](docs/BENCHMARK.md) contracts.
+Package install and managed runtime deployment do not create an ambient
+adaptive rollout. The installed operator profile's private D3 composition,
+eligibility, validation, kill, and recovery procedure is the
+[adaptive operator contract](orchestrator/DELIBERATION.md).
 
 The private managed skill deployment also carries the event-driven Codex drive
 adapter, its one-token supervisor, closed schemas, and capability probe. Run

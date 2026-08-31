@@ -162,7 +162,7 @@ fork_turns: "none"
 
 Any inheritance exception must have a specific reason recorded in run `DECISIONS.md`. It may change only `fork_turns`; the selected model and reasoning effort remain explicit and unchanged. If the host cannot preserve that pair with limited inheritance, block.
 
-The parent resolves the exact closed worker route per `SKILL.md`. Omission means `luna` (`gpt-5.6-luna` + `xhigh`); explicit `sol-high` is exactly `gpt-5.6-sol` + `high`. No other pair, Luna effort, normalization, ambient inference, fallback, or downgrade is allowed. Always pass `model` and `reasoning_effort` explicitly to `agents.spawn_agent`.
+The parent resolves the exact closed worker route per `SKILL.md`. Omission means `luna` (`gpt-5.6-luna` + `max`); explicit `sol-high` is exactly `gpt-5.6-sol` + `high`. No other pair, Luna effort, normalization, ambient inference, fallback, or downgrade is allowed. Always pass `model` and `reasoning_effort` explicitly to `agents.spawn_agent`.
 
 Before every explicit Sol launch, append this canonical attempt binding to the run's `DECISIONS.md`:
 
@@ -170,7 +170,7 @@ Before every explicit Sol launch, append this canonical attempt binding to the r
 workerRoute: sol-high; phaseId: <id>; stepId: <id>; attemptEpoch: <n>
 ```
 
-Resume the exact binding or block. A route change requires a fresh attempt and new authority. Luna remains fixed at `xhigh`; a permanent effort column is unnecessary.
+Resume the exact binding or block. A route change requires a fresh attempt and new authority. Luna remains fixed at `max`; a permanent effort column is unnecessary.
 
 Default handoff:
 

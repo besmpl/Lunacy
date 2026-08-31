@@ -1,4 +1,4 @@
-import type { OutboxCommand, Ref } from './model.js';
+import type { MachineState, OutboxCommand, Ref } from './model.js';
 import { canonicalString, digest } from './canonical.js';
 import type { DriverReceipt } from './outbox.js';
 
@@ -17,8 +17,15 @@ export type HumanReceiptRequest = { kind: 'HUMAN_RECEIPT_REQUIRED'; launchToken:
  * authoritative.
  */
 export type EffectDriver = {
+  /** Trusted private managed-host hook. The coordinator invokes it only for
+   * schema-2 managed work, on its detached candidate immediately before the
+   * claim CAS. Legacy/direct drivers never receive authoritative state. */
+  prepare?(command: OutboxCommand, state: MachineState): void;
   dispatch(command: OutboxCommand, launchToken: string, signal?: AbortSignal): Promise<DriverReceipt> | DriverReceipt;
-  observe?(launchToken: string, signal?: AbortSignal): Promise<DriverReceipt | undefined> | DriverReceipt | undefined;
+  observe?(launchToken: string, signal?: AbortSignal, authorityAnchor?: Ref, retainedCommand?: OutboxCommand): Promise<DriverReceipt | undefined> | DriverReceipt | undefined;
+  /** Managed drivers expose durable proof that the owned provider exited and
+   * its private scratch was removed before UNKNOWN recovery is admissible. */
+  observeTeardown?(launchToken: string, commandDigest: string, signal?: AbortSignal): Promise<Ref | undefined> | Ref | undefined;
 };
 
 /** Truthful fallback: it never claims that a native launch happened. */

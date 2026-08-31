@@ -1,5 +1,5 @@
 import type { Claim, ClaimMode, Plan, PlanStep } from './model.js';
-import { compareStable, dependencyTerminal, validateDependencyTopology } from './dependency.js';
+import { compareStable, dependencyTerminal, isDispatchableStepStatus, validateDependencyTopology } from './dependency.js';
 
 export type ValidationResult = { plan: Plan; order: string[]; depths: Record<string, number> };
 
@@ -56,7 +56,7 @@ export function validatePlan(input: Plan): ValidationResult {
 }
 
 export function readySteps(plan: Plan, status: Record<string, string>, activeClaims: Claim[] = [], maxInFlight = Number.POSITIVE_INFINITY): PlanStep[] {
-  const candidates = plan.steps.filter((s) => status[s.stepId] === 'READY' && (s.dependencies ?? []).every((d) => dependencyTerminal(status[d])));
+  const candidates = plan.steps.filter((s) => isDispatchableStepStatus(status[s.stepId]) && (s.dependencies ?? []).every((d) => dependencyTerminal(status[d])));
   const selected: PlanStep[] = [];
   const planOrder = new Map(plan.steps.map((step, index) => [step.stepId, index]));
   for (const step of candidates.sort((a, b) => {

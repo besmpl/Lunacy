@@ -1,6 +1,6 @@
 # Codex Luna subagent compatibility
 
-Read this file **only** when Codex cannot natively spawn the intended `gpt-5.6-luna` worker at Lunacy's selected `xhigh` reasoning effort.
+Read this file **only** when Codex cannot natively spawn the intended `gpt-5.6-luna` worker at Lunacy's selected `max` reasoning effort.
 
 This is a narrow compatibility override for the known catalog mismatch where Luna is otherwise valid but advertises `multi_agent_version = "v1"` while Sol and Terra use `v2`. It changes Luna's multi-agent eligibility metadata only.
 
@@ -8,7 +8,7 @@ This procedure belongs only to Lunacy's selected direct `luna` route. It does no
 
 ## First: prove the override is needed
 
-Attempt the intended real Luna/xhigh worker first. If native spawning works, do nothing here.
+Attempt the intended real Luna/max worker first. If native spawning works, do nothing here.
 
 Do not apply this procedure when the catalog shape or failure is materially different. Retry only the unchanged selected Luna model/effort after the required restart; do not downgrade or substitute another worker route.
 
@@ -17,7 +17,7 @@ Do not apply this procedure when the catalog shape or failure is materially diff
 - Preserve the current Codex catalog snapshot as-is except for Luna's `multi_agent_version`.
 - Change **only** Luna from `"v1"` to `"v2"`.
 - Do not change Luna's slug, model identifier, tool mode, context metadata, reasoning levels, or any other property.
-- Do not change Luna's reasoning-level catalog metadata; preserve every level from the source snapshot even though Lunacy routes Luna only at `xhigh`.
+- Do not change Luna's reasoning-level catalog metadata; preserve every level from the source snapshot even though Lunacy routes Luna only at `max`.
 - **Do not add `ultra` to Luna.**
 - Do not change the user's primary `model` or primary `model_reasoning_effort`.
 - Use an absolute path in `model_catalog_json`; TOML does not expand `~` or `$HOME` inside a quoted value.
@@ -73,7 +73,7 @@ Perform all of these checks:
 4. From a **fresh Codex process/catalog load**, inspect the current rows for exactly Sol, Terra, and Luna and verify the compatibility assumptions:
    - Sol: multi-agent version `v2`.
    - Terra: multi-agent version `v2`.
-   - Luna: multi-agent version `v2`; reasoning levels remain exactly as in the source snapshot and include Lunacy's required `xhigh`.
+   - Luna: multi-agent version `v2`; reasoning levels remain exactly as in the source snapshot and include Lunacy's required `max`.
    - Luna does **not** gain `ultra` from this override.
 5. Reconfirm that no catalog property other than Luna's multi-agent version changed from the source snapshot.
 
@@ -95,7 +95,7 @@ In the new task, bind back to the same Lunacy run and retry the intended real wo
 
 ```text
 model: gpt-5.6-luna
-reasoning_effort: xhigh
+reasoning_effort: max
 fork_turns: "none"   # when exposed by the current spawn API
 ```
 

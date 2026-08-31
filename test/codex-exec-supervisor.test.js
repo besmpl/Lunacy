@@ -53,6 +53,8 @@ test('supervisor publishes launch evidence before returning and terminal binds r
 
 test('one supervisor cannot launch a successor token', async () => {
   const { policy, command } = await fixture(); const child = new FakeChild(() => undefined);
+  const rejected = new CodexExecSupervisor({ policy, spawnProcess: () => child, attestExecutable: async () => ({ requestedPath: policy.codexPath, physicalPath: policy.codexPath, requestedPathIsSymlink: false, uid: 1, gid: 1, mode: '755', digest: policy.codexBinaryDigest, version: policy.codexVersion }) });
+  await assert.rejects(() => rejected.start({ command: { ...command, modeEpoch: 1 }, policy }), /modeEpoch.*unsupported/);
   const supervisor = new CodexExecSupervisor({ policy, spawnProcess: () => child, attestExecutable: async () => ({ requestedPath: policy.codexPath, physicalPath: policy.codexPath, requestedPathIsSymlink: false, uid: 1, gid: 1, mode: '755', digest: policy.codexBinaryDigest, version: policy.codexVersion }) });
   await supervisor.start({ command, policy });
   await assert.rejects(() => supervisor.start({ command: { ...command, launchToken: 'launch-b' }, policy }), /already owns/);

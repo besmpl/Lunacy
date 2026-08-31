@@ -56,7 +56,7 @@ function noDispatchDriver(policy, counters, extra = {}) {
   return { hostPolicy: policy, dispatch() { counters.dispatch += 1; throw new Error('must not dispatch'); }, observe() { counters.observe += 1; return undefined; }, ...extra };
 }
 
-test('managed drive rejects run-root, run-id, input-plan, committed-plan, and restart-policy mismatches before effects', async () => {
+test('managed drive rejects live composition mismatches but routes committed Plan drift to adoption without effects', async () => {
   // Literal root and run-id mismatches.
   for (const mismatch of ['run-root', 'run-id']) {
     const fixture = await policyFixture(); const counters = { dispatch: 0, observe: 0 };
@@ -75,28 +75,34 @@ test('managed drive rejects run-root, run-id, input-plan, committed-plan, and re
     assert.deepEqual(counters, { dispatch: 0, observe: 0 });
   }
 
-  // A restart cannot join a different committed normalized plan even if its
-  // fresh input and policy agree with each other.
+  // A valid new input/policy pair may inspect the old committed frame only to
+  // route it through the existing authority-adoption fence. It does not
+  // dispatch the old pending command on the first drift observation.
   {
     const fixture = await policyFixture();
     await transition({ runDir: fixture.root, runId: fixture.policy.runId, mode: 'runtime', plan: fixture.plan }, { event: { kind: 'START', intentRef: ref('plan', fixture.plan) }, eventId: 'start' });
     const otherPlan = { phaseId: 'phase-a', steps: [{ stepId: 'different' }] };
     const other = createCodexHostPolicy({ ...fixture.policy, planDigest: digest(canonicalizeDeclaration(otherPlan)) });
     const counters = { dispatch: 0, observe: 0 };
-    await assert.rejects(() => drive({ runDir: fixture.root, runId: fixture.policy.runId, plan: otherPlan, driver: noDispatchDriver(other, counters) }), /committed run\/plan/);
+    const result = await drive({ runDir: fixture.root, runId: fixture.policy.runId, plan: otherPlan, driver: noDispatchDriver(other, counters) });
+    assert.equal(result.yield.kind, 'DECISION_REQUIRED');
     assert.deepEqual(counters, { dispatch: 0, observe: 0 });
   }
 
-  // A policy getter swapped after composition is rejected before restart
-  // observation; the captured policy cannot be exchanged between checks.
+  // The live policy is captured and validated once at composition. Historical
+  // recovery never re-reads a caller getter as post-commit authority.
   {
     const fixture = await policyFixture();
     await transition({ runDir: fixture.root, runId: fixture.policy.runId, mode: 'runtime', plan: fixture.plan }, { event: { kind: 'START', intentRef: ref('plan', fixture.plan) }, eventId: 'start' });
-    const changed = createCodexHostPolicy({ ...fixture.policy, timeoutMs: fixture.policy.timeoutMs + 1 });
+    const otherPlan = { phaseId: 'phase-a', steps: [{ stepId: 'different' }] };
+    const live = createCodexHostPolicy({ ...fixture.policy, planDigest: digest(canonicalizeDeclaration(otherPlan)) });
+    const changed = createCodexHostPolicy({ ...live, timeoutMs: live.timeoutMs + 1 });
     let reads = 0; const counters = { dispatch: 0, observe: 0 };
-    const driver = noDispatchDriver(fixture.policy, counters);
-    Object.defineProperty(driver, 'hostPolicy', { get() { reads += 1; return reads <= 2 ? fixture.policy : changed; } });
-    await assert.rejects(() => drive({ runDir: fixture.root, runId: fixture.policy.runId, plan: fixture.plan, driver }), /managed policy changed/);
+    const driver = noDispatchDriver(live, counters);
+    Object.defineProperty(driver, 'hostPolicy', { get() { reads += 1; return reads === 1 ? live : changed; } });
+    const result = await drive({ runDir: fixture.root, runId: fixture.policy.runId, plan: otherPlan, driver });
+    assert.equal(result.yield.kind, 'DECISION_REQUIRED');
+    assert.equal(reads, 1);
     assert.deepEqual(counters, { dispatch: 0, observe: 0 });
   }
 });
@@ -217,7 +223,7 @@ test('malformed/truncated JSONL fails closed and reports require exactly one Sta
   }
   const duplicate = await runSupervisorCase({ stdout: '{"type":"turn.completed"}\n', report: 'Status: PASS\nStatus: PASS\n' });
   assert.equal(duplicate.terminal.status, 'BLOCKED'); assert.equal(duplicate.terminal.outcome, 'malformed-final-output');
-  assert.equal((await new CodexExecDriver({ policy: duplicate.policy, supervisor: { attestExecutable: attestation(duplicate.policy) } }).terminal(duplicate.command.launchToken))?.status, 'BLOCKED');
+  assert.equal((await new CodexExecDriver({ policy: duplicate.policy, supervisor: { attestExecutable: attestation(duplicate.policy) } }).terminal(duplicate.command.launchToken, undefined, duplicate.command))?.status, 'BLOCKED');
 
   // Property order remains irrelevant; the exact raw report/result bytes are
   // still the values whose digests bind live and restart acceptance.
@@ -225,7 +231,7 @@ test('malformed/truncated JSONL fails closed and reports require exactly one Sta
   assert.equal(reordered.terminal.status, 'PASS');
   const paths = effectPaths(reordered.policy, reordered.command.launchToken);
   await writeFile(paths.output, JSON.stringify({ status: 'PASS', reportPath: expectedReportPath(reordered.policy, reordered.command), reportDigest: reordered.terminal.reportDigest, extra: true }));
-  assert.equal(await new CodexExecDriver({ policy: reordered.policy, supervisor: { attestExecutable: attestation(reordered.policy) } }).terminal(reordered.command.launchToken), undefined);
+  assert.equal(await new CodexExecDriver({ policy: reordered.policy, supervisor: { attestExecutable: attestation(reordered.policy) } }).terminal(reordered.command.launchToken, undefined, reordered.command), undefined);
 });
 
 test('managed CLI owns and removes SIGINT/SIGTERM/external AbortSignal listeners while cancelling the exact drive', async () => {

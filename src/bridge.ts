@@ -7,7 +7,8 @@ import type { EffectDriver } from './driver.js';
 import { FileArtifactStore, isFileArtifactStoreAbort, type StoreSnapshot } from './store.js';
 import { assertStableIdentity, ensurePrivateDirectory, filesystemIdentity, inspectTrustedPath, sameFilesystemIdentity, trustedIdentity, type FilesystemIdentity } from './filesystem.js';
 import { validatePlan } from './validator.js';
-import { BEADS_BUILD, BEADS_COMMIT, BEADS_SCHEMA_VERSION, BEADS_SNAPSHOT_SCHEMA, BEADS_VERSION, BeadsPlanSource, BeadsUnavailable, validateBeadsAcknowledgement, beadsPlanDigest, beadsSnapshotDigest, type BeadsAcknowledgement, type BeadsCapture } from './beads.js';
+import { BEADS_BUILD, BEADS_COMMIT, BEADS_SCHEMA_VERSION, BEADS_SNAPSHOT_SCHEMA, BEADS_VERSION, BeadsPlanSource, BeadsUnavailable, validateBeadsAcknowledgement, beadsPlanDigest, beadsSnapshotDigest, type BeadsAcknowledgement, type BeadsCapture, type BeadsEvidenceCopyReceipt } from './beads.js';
+import { isDispatchableStepStatus } from './dependency.js';
 import type { AdvanceInput, Event, EventIdentity, MachineState, Plan, Yield } from './model.js';
 import { assertReleaseAdmissionOpen } from './release-admission.js';
 
@@ -667,6 +668,7 @@ type PersistedBeadsInput = {
   snapshot: BeadsCapture['snapshot'];
   plan: BeadsCapture['plan'];
   sourceIds: BeadsCapture['sourceIds'];
+  evidenceCopy?: BeadsEvidenceCopyReceipt;
   /** Legacy single binding retained for reading pre-S15 candidates only. */
   replayIdentity?: EventIdentity;
 };
@@ -681,6 +683,34 @@ const BEADS_SNAPSHOT_KEYS = ['bdBuild', 'bdCommit', 'bdSchemaVersion', 'bdVersio
 const BEADS_ISSUE_KEYS = ['description', 'issueType', 'priority', 'sourceId', 'status', 'title'] as const;
 const BEADS_EDGE_KEYS = ['from', 'to', 'type'] as const;
 const SHA256_HEX = /^[0-9a-f]{64}$/;
+const EVIDENCE_COPY_REASONS = new Set(['unsupported-platform', 'unsupported-filesystem', 'cross-volume', 'clone-unavailable', 'clone-failed', 'clone-verification-failed']);
+
+function validateEvidenceCopyReceipt(value: unknown): Readonly<BeadsEvidenceCopyReceipt> {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null)) throw new Error('Beads evidence copy receipt must be a plain object');
+  const receipt = value as Record<string, unknown>;
+  exactKeys(receipt, ['schema', 'policy', 'eligibleFiles', 'clonedFiles', 'ineligibleFiles', 'fallbackFullCopyFiles', 'fallbackReasons'], 'Beads evidence copy receipt');
+  if (receipt.schema !== 'lunacy-evidence-copy-v1' || (receipt.policy !== 'prefer' && receipt.policy !== 'require')) throw new Error('Beads evidence copy receipt policy is invalid');
+  for (const field of ['eligibleFiles', 'clonedFiles', 'ineligibleFiles', 'fallbackFullCopyFiles']) if (!Number.isSafeInteger(receipt[field]) || (receipt[field] as number) < 0) throw new Error(`Beads evidence copy receipt ${field} is invalid`);
+  if ((receipt.eligibleFiles as number) !== (receipt.clonedFiles as number) + (receipt.fallbackFullCopyFiles as number)) throw new Error('Beads evidence copy receipt eligible count is inconsistent');
+  if (receipt.policy === 'require' && receipt.fallbackFullCopyFiles !== 0) throw new Error('required Beads evidence copy receipt contains a fallback');
+  if (!Array.isArray(receipt.fallbackReasons)) throw new Error('Beads evidence copy receipt fallback reasons are invalid');
+  const seen = new Set<string>(); let fallbackCount = 0; let prior = '';
+  const reasons = receipt.fallbackReasons.map((value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Beads evidence copy fallback reason is invalid');
+    const row = value as Record<string, unknown>;
+    exactKeys(row, ['reason', 'count'], 'Beads evidence copy fallback reason');
+    if (typeof row.reason !== 'string' || !EVIDENCE_COPY_REASONS.has(row.reason) || seen.has(row.reason) || (prior && stableCompare(prior, row.reason) >= 0) || !Number.isSafeInteger(row.count) || (row.count as number) <= 0) throw new Error('Beads evidence copy fallback reason is invalid');
+    seen.add(row.reason); prior = row.reason; fallbackCount += row.count as number;
+    return Object.freeze({ reason: row.reason, count: row.count as number });
+  });
+  if (fallbackCount !== receipt.fallbackFullCopyFiles) throw new Error('Beads evidence copy fallback reason count is inconsistent');
+  return Object.freeze({
+    schema: 'lunacy-evidence-copy-v1', policy: receipt.policy,
+    eligibleFiles: receipt.eligibleFiles as number, clonedFiles: receipt.clonedFiles as number,
+    ineligibleFiles: receipt.ineligibleFiles as number, fallbackFullCopyFiles: receipt.fallbackFullCopyFiles as number,
+    fallbackReasons: Object.freeze(reasons),
+  }) as Readonly<BeadsEvidenceCopyReceipt>;
+}
 
 function validateCapturedSnapshot(value: unknown): BeadsCapture['snapshot'] {
   if (!value || typeof value !== 'object' || Array.isArray(value) || (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null)) throw new Error('Beads snapshot must be a plain object');
@@ -749,6 +779,7 @@ async function saveBeadsInput(rootDir: string, capture: BeadsCapture, replayIden
   }
   const value: PersistedBeadsInput = {
     schema: 'lunacy-beads-input-v1', snapshot: capture.snapshot, plan: capture.plan, sourceIds: capture.sourceIds,
+    ...(capture.evidenceCopy === undefined ? {} : { evidenceCopy: capture.evidenceCopy }),
   };
   // Candidate captures are immutable and digest-addressed.  They never
   // replace the artifact selected by CURRENT while an adoption is pending.
@@ -765,14 +796,15 @@ async function loadBeadsInput(rootDir: string, expectedPlanDigest?: string): Pro
     const value = parseCanonical<PersistedBeadsInput>(bytes);
     if (!value || value.schema !== 'lunacy-beads-input-v1' || !value.snapshot || !value.plan || !value.sourceIds) throw new Error('Beads acknowledged input fields are invalid');
     const fields = Object.keys(value).sort().join(',');
-    if (fields !== 'plan,schema,snapshot,sourceIds' && fields !== 'plan,replayIdentity,schema,snapshot,sourceIds') throw new Error('Beads acknowledged input fields are invalid');
+    if (!['evidenceCopy,plan,schema,snapshot,sourceIds', 'evidenceCopy,plan,replayIdentity,schema,snapshot,sourceIds', 'plan,schema,snapshot,sourceIds', 'plan,replayIdentity,schema,snapshot,sourceIds'].includes(fields)) throw new Error('Beads acknowledged input fields are invalid');
     if (value.replayIdentity !== undefined) validateReplayIdentity(value.replayIdentity);
     const plan = validatePlan(value.plan).plan;
     if (Object.getPrototypeOf(value.sourceIds) !== Object.prototype || Object.keys(value.sourceIds).length !== plan.steps.length || Object.keys(value.sourceIds).some((key) => typeof value.sourceIds[key] !== 'string' || value.sourceIds[key] !== key || !plan.steps.some((step) => step.stepId === key))) throw new Error('Beads acknowledged input sourceIds are invalid');
     if (expectedPlanDigest !== undefined && digest(plan) !== expectedPlanDigest) throw new Error('Beads acknowledged input plan differs from CURRENT');
     const snapshot = validateCapturedSnapshot(value.snapshot);
     if (plan.authorityDigest !== snapshot.contentDigest) throw new Error('Beads acknowledged input authority binding is invalid');
-    return { snapshot: Object.freeze(snapshot), plan: Object.freeze(plan), sourceIds: Object.freeze({ ...value.sourceIds }) };
+    const evidenceCopy = value.evidenceCopy === undefined ? undefined : validateEvidenceCopyReceipt(value.evidenceCopy);
+    return { snapshot: Object.freeze(snapshot), plan: Object.freeze(plan), sourceIds: Object.freeze({ ...value.sourceIds }), ...(evidenceCopy === undefined ? {} : { evidenceCopy }) };
   } catch (error) {
     throw new BridgeError('ManifestMismatch', `Beads acknowledged input is invalid: ${(error as Error).message}`);
   }
@@ -891,7 +923,7 @@ function projectionPayload(state: MachineState): Record<string, unknown> {
     schema: 'lunacy-runtime-projection-v1', mode: 'runtime', runId: state.runId, phaseId: state.phaseId,
     revision: state.revision, authorityEpoch: state.authorityEpoch, attemptEpoch: state.attemptEpoch, barrierEpoch: state.barrierEpoch,
     status: state.status, gate: state.gate, barrier: state.barrier, nextAction: state.nextAction,
-    readyCount: Object.values(state.steps).filter((step) => step.status === 'READY').length,
+    readyCount: Object.values(state.steps).filter((step) => isDispatchableStepStatus(step.status)).length,
     activeCount: Object.values(state.steps).filter((step) => step.status === 'ACTIVE').length,
     pendingDispatchCount: Object.values(state.outbox).filter((command) => command.state === 'PENDING' || command.state === 'CLAIMED').length,
     unknownDispatchCount: Object.values(state.outbox).filter((command) => command.state === 'UNKNOWN').length,
@@ -1060,13 +1092,14 @@ function validateCapturedBeads(value: unknown): BeadsCapture {
   try {
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('capture must be an object');
     const input = value as Record<string, unknown>;
-    if (!input.snapshot || !input.plan || !input.sourceIds || Object.keys(input).sort().join(',') !== 'plan,snapshot,sourceIds') throw new Error('capture fields are invalid');
+    if (!input.snapshot || !input.plan || !input.sourceIds || !['evidenceCopy,plan,snapshot,sourceIds', 'plan,snapshot,sourceIds'].includes(Object.keys(input).sort().join(','))) throw new Error('capture fields are invalid');
     const snapshot = validateCapturedSnapshot(parseCanonical<BeadsCapture['snapshot']>(canonicalString(input.snapshot)));
     const plan = canonicalizeDeclaration(parseCanonical<Plan>(canonicalString(input.plan)));
     const sourceIds = parseCanonical<Record<string, string>>(canonicalString(input.sourceIds));
     if (Object.getPrototypeOf(sourceIds) !== Object.prototype || Object.keys(sourceIds).length !== plan.steps.length || Object.keys(sourceIds).some((key) => sourceIds[key] !== key || !plan.steps.some((step) => step.stepId === key))) throw new Error('capture sourceIds are invalid');
     if (plan.authorityDigest !== snapshot.contentDigest) throw new Error('capture authority binding is invalid');
-    return { snapshot: Object.freeze(snapshot), plan: Object.freeze(plan), sourceIds: Object.freeze(sourceIds) };
+    const evidenceCopy = input.evidenceCopy === undefined ? undefined : validateEvidenceCopyReceipt(parseCanonical<BeadsEvidenceCopyReceipt>(canonicalString(input.evidenceCopy)));
+    return { snapshot: Object.freeze(snapshot), plan: Object.freeze(plan), sourceIds: Object.freeze(sourceIds), ...(evidenceCopy === undefined ? {} : { evidenceCopy }) };
   } catch (error) {
     throw new BridgeError('Unavailable', `Beads capture is invalid: ${(error as Error).message}`);
   }

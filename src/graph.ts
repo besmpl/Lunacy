@@ -2,7 +2,7 @@ import { canonicalString, digest } from './canonical.js';
 import type { Claim, EventIdentity, MachineState, Plan, PlanStep, Sha256 } from './model.js';
 import { relationConflict, validatePlan } from './validator.js';
 import { AccelerationMetrics, defaultMetrics } from './metrics.js';
-import { compareStable, dependencyTerminal } from './dependency.js';
+import { compareStable, dependencyTerminal, isDispatchableStepStatus } from './dependency.js';
 
 export type GraphMode = 'OFF' | 'SHADOW' | 'ON';
 export type GraphNode = Readonly<{ id: string; phaseOrder: number; dependencies: readonly string[]; claims: readonly Claim[]; depth: number }>;
@@ -93,7 +93,7 @@ function activeClaims(state: MachineState | undefined): Claim[] {
 }
 function frontier(graph: StaticGraph, state: MachineState | undefined): GraphNode[] {
   if (!state) return [];
-  return graph.nodes.filter((node) => state.steps[node.id]?.status === 'READY' && node.dependencies.every((dependency) => dependencyTerminal(state.steps[dependency]?.status)));
+  return graph.nodes.filter((node) => isDispatchableStepStatus(state.steps[node.id]?.status) && node.dependencies.every((dependency) => dependencyTerminal(state.steps[dependency]?.status)));
 }
 function selected(nodes: GraphNode[], active: Claim[], max: number): GraphNode[] {
   const picked: GraphNode[] = [];

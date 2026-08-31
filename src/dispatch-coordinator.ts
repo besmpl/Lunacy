@@ -1,18 +1,72 @@
 import { canonicalString, digest } from './canonical.js';
-import { claim, unknown, type DriverReceipt } from './outbox.js';
+import { claim, commandInCurrentFrame, unknown, type DriverReceipt } from './outbox.js';
 import { ProseDriver, type EffectDriver } from './driver.js';
 import { appendJournal, commandForToken, reduce, refreshAdmission, type PreparedAdmission } from './reducer.js';
 import { normalizeDriverResult, storeLinearizedDispatch, type ArtifactStore, type StoreLinearizedDispatchRequest } from './store.js';
 import type { PreparedContext } from './compiler.js';
-import type { AdvanceInput, CompactSnapshot, Event, EventIdentity, MachineState, OutboxCommand, Plan, Ref, Yield } from './model.js';
+import type { AdvanceInput, CompactSnapshot, Event, EventIdentity, MachineState, OutboxCommand, OutboxState, Plan, Ref, Yield } from './model.js';
+
+export type CurrentCommandSelection = Readonly<{ command: OutboxCommand; authorityAnchor?: Ref }>;
+
+export { commandInCurrentFrame } from './outbox.js';
+
+function selection(state: MachineState, command: OutboxCommand): CurrentCommandSelection | undefined {
+  const authorityAnchor = command.roleView ? state.managed?.attempts?.[command.commandId]?.authorityAnchor : undefined;
+  if (command.roleView && command.state === 'ACKED' && !authorityAnchor) return undefined;
+  return authorityAnchor ? { command, authorityAnchor } : { command };
+}
+
+function eligible(state: MachineState, command: OutboxCommand, allowed: ReadonlySet<OutboxState>): boolean {
+  return allowed.has(command.state)
+    && commandInCurrentFrame(state, command)
+    && state.steps[command.stepId]?.status === 'ACTIVE'
+    && state.steps[command.stepId]?.attempt === command.attemptEpoch
+    && ((command.state !== 'CLAIMED' && command.state !== 'UNKNOWN') || (typeof command.leaseId === 'string' && command.leaseId.length > 0));
+}
+
+/** Select the next eligible command from the exact current execution frame. */
+export function selectEligibleCommand(
+  state: MachineState | undefined,
+  dispositions: readonly OutboxState[],
+): CurrentCommandSelection | undefined {
+  if (!state || state.modeEpoch !== 0) return undefined;
+  const allowed = new Set(dispositions);
+  for (const command of Object.values(state.outbox)) {
+    if (!eligible(state, command, allowed)) continue;
+    const selected = selection(state, command);
+    if (selected) return selected;
+  }
+  return undefined;
+}
+
+/** Reselect one already-retained token/digest/lease from a fresh generation. */
+export function selectCurrentTokenCommand(
+  state: MachineState | undefined,
+  dispositions: readonly OutboxState[],
+  expected: Pick<OutboxCommand, 'launchToken' | 'commandDigest' | 'leaseId'>,
+): CurrentCommandSelection | undefined {
+  if (!state || state.modeEpoch !== 0) return undefined;
+  const allowed = new Set(dispositions);
+  const command = Object.values(state.outbox).find((candidate) => candidate.launchToken === expected.launchToken
+    && candidate.commandDigest === expected.commandDigest
+    && (candidate.leaseId ?? null) === (expected.leaseId ?? null));
+  return command && eligible(state, command, allowed) ? selection(state, command) : undefined;
+}
+
+/** Compatibility alias for private diagnostics/tests. */
+export function selectCurrentCommand(state: MachineState | undefined, dispositions: readonly OutboxState[], expected?: Pick<OutboxCommand, 'launchToken' | 'commandDigest' | 'leaseId'>): CurrentCommandSelection | undefined {
+  return expected ? selectCurrentTokenCommand(state, dispositions, expected) : selectEligibleCommand(state, dispositions);
+}
 
 /** Snapshot of the host driver methods.  The receiver and methods are bound
  * once by the composition facade; no caller-owned object is read after an
  * await or while a store fence is held. */
 export type DispatchDriverSnapshot = {
   receiver: EffectDriver;
+  prepare?: NonNullable<EffectDriver['prepare']>;
   dispatch: EffectDriver['dispatch'];
   observe?: NonNullable<EffectDriver['observe']>;
+  observeTeardown?: NonNullable<EffectDriver['observeTeardown']>;
 };
 
 export type DispatchCoordinatorOptions = {
@@ -23,7 +77,8 @@ export type DispatchCoordinatorOptions = {
 
 type CommitEventOnly = (generation: number, current: MachineState, input: AdvanceInput, key: string, plan: Plan, capacity: number, y: Yield, preparedContext?: PreparedContext) => Promise<Yield>;
 type CommitYield = (generation: number, state: MachineState, key: string, identity: EventIdentity, y: Yield, preparedContext?: PreparedContext, preparedAdmission?: PreparedAdmission) => Promise<Yield>;
-type CommitDispatcherOutcome = (token: string, expectedDigest: string, plan: Plan, capacity: number, receipt?: DriverReceipt, expectedLeaseId?: string, receiptLeaseId?: string) => Promise<Yield | undefined>;
+type CommitDispatcherOutcome = (token: string, expectedDigest: string, plan: Plan, capacity: number, receipt?: DriverReceipt, expectedLeaseId?: string, receiptLeaseId?: string, teardownEvidence?: Ref) => Promise<Yield | undefined>;
+type RetireManagedAttempt = (generation: number, current: MachineState, token: string, input: AdvanceInput, plan: Plan, capacity: number, status?: 'TIMED_OUT' | 'CANCELLED' | 'FAILED', preparedContext?: PreparedContext) => Promise<Yield>;
 type FinalizeImmediateYield = (key: string, identity: EventIdentity, value: Yield) => Promise<Yield | undefined>;
 type CommitClaim = (generation: number, claimed: MachineState, claimedCommand: OutboxCommand, key: string, input: AdvanceInput, waiting: Yield) => Promise<{ generation: number; authority: StoreLinearizedDispatchRequest['authority'] } | { replay: Yield }>;
 
@@ -34,6 +89,7 @@ type DispatchCoordinatorHost = {
   commitEventOnly: CommitEventOnly;
   commitYield: CommitYield;
   commitDispatcherOutcome: CommitDispatcherOutcome;
+  retireManagedAttempt?: RetireManagedAttempt;
   finalizeImmediateYield: FinalizeImmediateYield;
   commitClaim: CommitClaim;
   asYield: (state: MachineState, result: { outcome: string; reason?: string; token?: string; brief?: Ref; receipt?: Ref; launchToken?: string }) => Yield;
@@ -77,7 +133,10 @@ export class DispatchCoordinator {
 
   async resume(args: DispatchResumeArgs): Promise<Yield> {
     const { generation, current, input, key, plan, admissionOk, maxInFlight, preparedContext } = args;
-    const command = Object.values(current.outbox).find((candidate) => candidate.state === 'PENDING' || candidate.state === 'CLAIMED' || candidate.state === 'UNKNOWN');
+    // Historical rows remain durable recovery evidence but are inert after an
+    // epoch/frame transition. Select only the exact current frame so a retired
+    // UNKNOWN attempt cannot shadow its fresh reservation.
+    const command = selectEligibleCommand(current, ['PENDING', 'CLAIMED', 'UNKNOWN'])?.command;
     if (!command) return this.host.commitYield(generation, current, key, input.identity, this.host.asYield(current, { outcome: 'WAITING' }), preparedContext);
     // The deadline starts when this RESUME claims ownership, not after a slow
     // durable claim commit.  The post-CAS launch fence rechecks it.
@@ -96,30 +155,52 @@ export class DispatchCoordinator {
         return this.host.commitYield(generation, reduced.state, key, input.identity, this.host.asYield(reduced.state, reduced), preparedContext);
       }
       if (!this.host.driver?.observe || this.options.signal?.aborted) {
+        if (current.schema === 2 && current.managed && this.host.retireManagedAttempt) {
+          return this.host.retireManagedAttempt(generation, current, command.launchToken, input, plan, maxInFlight, this.options.signal?.aborted ? 'CANCELLED' : 'TIMED_OUT', preparedContext);
+        }
         const y: Yield = { kind: 'BLOCKED', code: 'UnknownDispatch', reason: 'UnknownDispatch', retryable: false, launchToken: command.launchToken, snapshot: this.host.snapshot(current) };
         return this.host.commitEventOnly(generation, current, input, key, plan, maxInFlight, y, preparedContext);
       }
       const waiting = await this.host.commitEventOnly(generation, current, input, key, plan, maxInFlight, { kind: 'BLOCKED', code: 'UnknownDispatch', reason: 'UnknownDispatch', retryable: false, launchToken: command.launchToken, snapshot: this.host.snapshot(current) }, preparedContext);
       const committed = await this.host.store.load();
-      const committedCommand = committed.state ? commandForToken(committed.state, command.launchToken) : undefined;
-      const sameUnknownCommand = Boolean(committedCommand
-        && committedCommand.state === 'UNKNOWN'
-        && committedCommand.launchToken === command.launchToken
-        && committedCommand.commandDigest === command.commandDigest
-        && committedCommand.leaseId === command.leaseId
-        && canonicalString(committedCommand) === canonicalString(command));
-      if (!sameUnknownCommand || !committedCommand) return waiting;
-      const observed = this.launchObserve(committed.generation, committedCommand, plan, maxInFlight, key, input.identity);
+      const selection = selectCurrentTokenCommand(committed.state, ['UNKNOWN'], command);
+      const committedCommand = selection?.command;
+      if (!committedCommand || canonicalString(committedCommand) !== canonicalString(command)) return waiting;
+      const observed = this.launchObserve(committed.generation, committedCommand, plan, maxInFlight, key, input, selection.authorityAnchor);
       if (observed) return (await observed) ?? waiting;
       return waiting;
     }
 
     if (command.state === 'CLAIMED') {
+      // A managed provider lease cannot become UNKNOWN merely because this
+      // process lost its in-memory task.  Only the driver's durable teardown
+      // proof (written after provider exit and scratch removal) opens that
+      // transition; otherwise retain CLAIMED so no fresh epoch can overlap.
+      let managedTeardown: Ref | undefined;
+      if (command.roleView) {
+        const observeTeardown = this.host.driver?.observeTeardown;
+        if (observeTeardown) {
+          try { managedTeardown = await Reflect.apply(observeTeardown, this.host.driver!.receiver, [command.launchToken, command.commandDigest, this.options.signal]); }
+          catch { managedTeardown = undefined; }
+        }
+        if (!managedTeardown) {
+          const y: Yield = { kind: 'BLOCKED', code: 'UnknownDispatch', reason: 'managed provider teardown is unproven', retryable: false, launchToken: command.launchToken, snapshot: this.host.snapshot(current) };
+          return this.host.commitEventOnly(generation, current, input, key, plan, maxInFlight, y, preparedContext);
+        }
+        try { this.host.validateRef(managedTeardown); } catch { managedTeardown = undefined; }
+        if (!managedTeardown || managedTeardown.scope !== 'outbox/teardown') {
+          const y: Yield = { kind: 'BLOCKED', code: 'UnknownDispatch', reason: 'managed provider teardown is invalid', retryable: false, launchToken: command.launchToken, snapshot: this.host.snapshot(current) };
+          return this.host.commitEventOnly(generation, current, input, key, plan, maxInFlight, y, preparedContext);
+        }
+      }
       // No in-process owner exists (for example after restart). Recovery is
       // conservative: mark the old lease UNKNOWN and never relaunch it.
       const uncertain = JSON.parse(JSON.stringify(current)) as MachineState;
       const uncertainCommand = commandForToken(uncertain, command.launchToken)!;
+      if (managedTeardown) uncertainCommand.noEffectEvidence = [...(uncertainCommand.noEffectEvidence ?? []), managedTeardown];
       unknown(uncertainCommand);
+      const uncertainAttempt = uncertain.managed?.attempts?.[uncertainCommand.commandId];
+      if (uncertainAttempt && (uncertainAttempt.status === 'LIVE' || uncertainAttempt.status === 'UNKNOWN')) uncertainAttempt.status = 'UNKNOWN';
       const evidence = this.host.ref(`unknown:${command.launchToken}`, { launchToken: command.launchToken, commandDigest: command.commandDigest, status: 'UNKNOWN' }, 'outbox/recovery');
       const recovery: Event = { kind: 'OBSERVATION', category: 'RECOVERY', ref: evidence };
       appendJournal(uncertain, this.host.internalIdentity(uncertain, uncertainCommand, `dispatcher-recover:${command.launchToken}:${uncertain.revision + 1}`, recovery), recovery, this.host.segmentedJournalEnabled());
@@ -146,19 +227,24 @@ export class DispatchCoordinator {
     }
 
     const claimed = JSON.parse(JSON.stringify(current)) as MachineState;
-    const claimedCommand = commandForToken(claimed, command.launchToken)!;
+    let claimedCommand = commandForToken(claimed, command.launchToken)!;
+    if (claimed.schema === 2 && claimed.managed?.proposal && this.host.driver.prepare) {
+      Reflect.apply(this.host.driver.prepare, this.host.driver.receiver, [claimedCommand, claimed]);
+      claimedCommand = claimed.outbox[claimedCommand.commandId]!;
+    }
     claim(claimedCommand, `lease-${process.pid}-${claimed.revision + 1}`, claimed.modeEpoch, claimed.writerFence);
-    const claimEvent: Event = { kind: 'OBSERVATION', category: 'HOST', ref: this.host.ref(`claim:${command.launchToken}`, { launchToken: command.launchToken, commandDigest: command.commandDigest }, 'outbox') };
-    const claimIdentity = this.host.internalIdentity(claimed, claimedCommand, `dispatcher-claim:${command.launchToken}:${claimed.revision + 1}`, claimEvent);
+    const preparedToken = claimedCommand.launchToken;
+    const claimEvent: Event = { kind: 'OBSERVATION', category: 'HOST', ref: this.host.ref(`claim:${preparedToken}`, { launchToken: preparedToken, commandDigest: claimedCommand.commandDigest }, 'outbox') };
+    const claimIdentity = this.host.internalIdentity(claimed, claimedCommand, `dispatcher-claim:${preparedToken}:${claimed.revision + 1}`, claimEvent);
     // Reserve claim -> UNKNOWN recovery shape before invoking external effect.
     try {
       const probe = JSON.parse(JSON.stringify(claimed)) as MachineState;
       appendJournal(probe, claimIdentity, claimEvent, this.host.segmentedJournalEnabled());
-      const probeCommand = commandForToken(probe, command.launchToken)!;
+      const probeCommand = commandForToken(probe, preparedToken)!;
       unknown(probeCommand);
-      const probeEvidence = this.host.ref(`unknown:${command.launchToken}`, { launchToken: command.launchToken, commandDigest: command.commandDigest, status: 'UNKNOWN' }, 'outbox/recovery');
+      const probeEvidence = this.host.ref(`unknown:${preparedToken}`, { launchToken: preparedToken, commandDigest: claimedCommand.commandDigest, status: 'UNKNOWN' }, 'outbox/recovery');
       const probeRecovery: Event = { kind: 'OBSERVATION', category: 'RECOVERY', ref: probeEvidence };
-      appendJournal(probe, this.host.internalIdentity(probe, probeCommand, `dispatcher-unknown:${command.launchToken}:${probe.revision + 1}`, probeRecovery), probeRecovery, this.host.segmentedJournalEnabled());
+      appendJournal(probe, this.host.internalIdentity(probe, probeCommand, `dispatcher-unknown:${preparedToken}:${probe.revision + 1}`, probeRecovery), probeRecovery, this.host.segmentedJournalEnabled());
       appendJournal(probe, input.identity, input.event, this.host.segmentedJournalEnabled());
     } catch (error) {
       if ((error as Error).message === 'JournalCeiling') return this.host.asYield(current, { outcome: 'BLOCKED', reason: 'JournalCeiling' });
@@ -193,6 +279,7 @@ export class DispatchCoordinator {
     if (existing && existing.commandDigest === command.commandDigest && existing.leaseId === leaseId) return undefined;
     if (existing && existing.generation >= authority.generation) return undefined;
     const task: ActiveDispatchTask = { generation: authority.generation, commandDigest: command.commandDigest, leaseId, timedOut: false, settled: false, outcomeCommitted: false };
+    const managedRole = Boolean(command.roleView);
     this.activeDispatches.set(token, task);
     const controller = new AbortController();
     const externalSignal = this.options.signal;
@@ -215,7 +302,10 @@ export class DispatchCoordinator {
         if (task.outcomeCommitted) return Promise.resolve(undefined);
         stopCancellationWatch();
         task.outcomeCommitted = true;
-        task.noReceiptOutcome = this.host.commitDispatcherOutcome(token, task.commandDigest, plan, capacity, undefined, leaseId).catch(() => undefined);
+        const teardown = managedRole && this.host.driver?.observeTeardown
+          ? Promise.resolve(Reflect.apply(this.host.driver.observeTeardown, this.host.driver.receiver, [token, task.commandDigest])).catch(() => undefined)
+          : Promise.resolve(undefined);
+        task.noReceiptOutcome = teardown.then((evidence) => this.host.commitDispatcherOutcome(token, task.commandDigest, plan, capacity, undefined, leaseId, undefined, evidence)).catch(() => undefined);
       }
       if (immediate && processedKey && processedIdentity) {
         task.immediateNoReceiptOutcome ??= task.noReceiptOutcome.then(async (value) => {
@@ -254,7 +344,10 @@ export class DispatchCoordinator {
       if (task.timedOut || task.outcomeCommitted) return;
       task.timedOut = true;
       controller.abort();
-      void finishUnknown().finally(() => { if (!task.settled) deleteTask(); });
+      // For managed roles, the dispatch Promise owns process close, scratch
+      // cleanup, and teardown publication.  Its rejection handler below is
+      // the first point at which UNKNOWN may be attempted.
+      if (!managedRole) void finishUnknown().finally(() => { if (!task.settled) deleteTask(); });
     };
     if (externalSignal) externalSignal.addEventListener('abort', abort, { once: true });
     timer = setTimeout(abort, Math.max(0, deadline - Date.now()));
@@ -290,7 +383,7 @@ export class DispatchCoordinator {
     });
   }
 
-  private launchObserve(generation: number, command: OutboxCommand, plan: Plan, capacity: number, processedKey?: string, processedIdentity?: EventIdentity): Promise<Yield | undefined> | undefined {
+  private launchObserve(generation: number, command: OutboxCommand, plan: Plan, capacity: number, processedKey?: string, processedInput?: AdvanceInput, authorityAnchor?: Ref): Promise<Yield | undefined> | undefined {
     const driver = this.host.driver;
     const observe = driver?.observe;
     if (!driver || !observe) return undefined;
@@ -302,17 +395,47 @@ export class DispatchCoordinator {
     this.activeDispatches.set(token, task);
     const deleteTask = (): void => { if (this.activeDispatches.get(token) === task) this.activeDispatches.delete(token); };
     const controller = new AbortController();
+    /** Retire an UNKNOWN managed attempt when observation proves no receipt or
+     * reaches its deadline.  Re-load immediately before invoking the callback
+     * so a concurrent receipt/authority CAS wins over retirement. */
+    const retireUnknown = async (status: 'TIMED_OUT' | 'CANCELLED' = 'TIMED_OUT'): Promise<Yield | undefined> => {
+      if (!processedInput || this.host.retireManagedAttempt === undefined) return undefined;
+      try {
+        const loaded = await this.host.store.load();
+        const current = loaded.state;
+        const candidate = current ? commandForToken(current, token) : undefined;
+        if (!current || current.schema !== 2 || !current.managed || !candidate
+          || candidate.state !== 'UNKNOWN' || candidate.commandDigest !== command.commandDigest
+          || candidate.leaseId !== command.leaseId) return undefined;
+        const result = await this.host.retireManagedAttempt(loaded.generation, current, token, processedInput, plan, capacity, status);
+        this.notifyYield(result);
+        return result;
+      } catch { return undefined; }
+    };
+    const unresolvedBoundary = async (status: 'TIMED_OUT' | 'CANCELLED' = 'TIMED_OUT'): Promise<Yield | undefined> => {
+      const retired = await retireUnknown(status);
+      if (retired) return retired;
+      try {
+        const loaded = await this.host.store.load();
+        const candidate = selectCurrentTokenCommand(loaded.state, ['UNKNOWN'], command);
+        if (!loaded.state || !candidate) return undefined;
+        const value: Yield = { kind: 'BLOCKED', code: 'UnknownDispatch', reason: 'UnknownDispatch', retryable: false, launchToken: token, snapshot: this.host.snapshot(loaded.state) };
+        this.notifyYield(value);
+        return value;
+      } catch { return undefined; }
+    };
     let normalized: ReturnType<typeof normalizeDriverResult>;
-    try { normalized = normalizeDriverResult(Reflect.apply(observe, driver.receiver, [token, controller.signal]), true); }
-    catch { deleteTask(); return Promise.resolve(undefined); }
+    try { normalized = normalizeDriverResult(Reflect.apply(observe, driver.receiver, [token, controller.signal, authorityAnchor, JSON.parse(JSON.stringify(command)) as OutboxCommand]), true); }
+    catch { task.settled = true; deleteTask(); return unresolvedBoundary(); }
     const finish = (value: DriverReceipt | undefined, immediate = false): Promise<Yield | undefined> => {
       if (!value) return Promise.resolve(undefined);
       if (value.launchToken !== token || value.commandDigest !== command.commandDigest) return Promise.resolve(undefined);
       try { this.host.validateRef(value.ref); } catch { return Promise.resolve(undefined); }
+      if (command.roleView && (!value.authorityAnchor || (authorityAnchor && canonicalString(value.authorityAnchor) !== canonicalString(authorityAnchor)))) return Promise.resolve(undefined);
       return this.host.commitDispatcherOutcome(token, command.commandDigest, plan, capacity, value, undefined, command.leaseId).then(async (result) => {
         if (!result) return undefined;
-        if (immediate && processedKey && processedIdentity) {
-          const finalized = await this.host.finalizeImmediateYield(processedKey, processedIdentity, result);
+        if (immediate && processedKey && processedInput) {
+          const finalized = await this.host.finalizeImmediateYield(processedKey, processedInput.identity, result);
           this.notifyYield(finalized ?? result);
           return finalized;
         }
@@ -320,14 +443,35 @@ export class DispatchCoordinator {
         return result;
       }).catch(() => undefined);
     };
+    const observedReceiptIsValid = (value: DriverReceipt | undefined): value is DriverReceipt => {
+      if (!value || value.launchToken !== token || value.commandDigest !== command.commandDigest) return false;
+      try {
+        this.host.validateRef(value.ref);
+        if (command.roleView && (!value.authorityAnchor || (authorityAnchor && canonicalString(value.authorityAnchor) !== canonicalString(authorityAnchor)))) return false;
+        return true;
+      } catch { return false; }
+    };
     if (normalized.kind === 'ABSENT' || normalized.kind === 'INVALID') {
       task.settled = true;
       deleteTask();
-      return Promise.resolve(undefined);
+      return unresolvedBoundary();
     }
-    if (normalized.kind === 'RECEIPT') return finish(normalized.receipt, true).finally(() => { task.settled = true; deleteTask(); });
-    const timer = setTimeout(() => { task.timedOut = true; controller.abort(); deleteTask(); }, this.options.timeoutMs);
-    normalized.receipt.then((value) => { clearTimeout(timer); task.settled = true; void finish(value).finally(deleteTask); }, () => { clearTimeout(timer); task.settled = true; deleteTask(); });
+    if (normalized.kind === 'RECEIPT') {
+      if (!observedReceiptIsValid(normalized.receipt)) { task.settled = true; deleteTask(); return unresolvedBoundary(); }
+      return finish(normalized.receipt, true).finally(() => { task.settled = true; deleteTask(); });
+    }
+    const timer = setTimeout(() => {
+      task.timedOut = true;
+      controller.abort();
+      deleteTask();
+      void unresolvedBoundary('TIMED_OUT');
+    }, this.options.timeoutMs);
+    normalized.receipt.then((value) => {
+      clearTimeout(timer);
+      task.settled = true;
+      if (!observedReceiptIsValid(value)) { deleteTask(); void unresolvedBoundary('TIMED_OUT'); return; }
+      void finish(value).finally(deleteTask);
+    }, () => { clearTimeout(timer); task.settled = true; deleteTask(); void unresolvedBoundary('TIMED_OUT'); });
     return undefined;
   }
 }

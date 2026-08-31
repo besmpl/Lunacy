@@ -1,12 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { canonicalString, digest } from '../dist/canonical.js';
 import { transition } from '../dist/bridge.js';
 import { drive } from '../dist/orchestration.js';
+import { createCodexHostPolicy } from '../dist/codex-host-policy.js';
 import { FileArtifactStore } from '../dist/store.js';
+import { validatePlan } from '../dist/validator.js';
 
 const ref = (id, value, scope = 'test') => ({ id, scope, digest: digest(value), bytes: canonicalString(value) });
 const terminal = (command, status = 'PASS', outcome = 'normal-completion') => ({
@@ -96,6 +98,95 @@ test('restart performs one asynchronous exact-token observation', async () => {
   assert.equal(result.yield.kind, 'FINAL');
   assert.equal(observes, 1);
   resolveDispatch?.();
+});
+
+test('valid live Plan and policy drift settles the retained old token once before adoption', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'lunacy-pump-plan-drift-'));
+  const workspace = join(root, 'workspace');
+  const skillRoot = join(root, 'skill');
+  const schemaPath = join(root, 'worker-schema.json');
+  await mkdir(workspace, { recursive: true });
+  await mkdir(skillRoot, { recursive: true });
+  await writeFile(schemaPath, '{}\n');
+  const oldPlan = { phaseId: 'pump-plan-drift', gateRequired: true, steps: [{ stepId: 'old' }] };
+  const newPlan = { phaseId: 'pump-plan-drift', gateRequired: true, steps: [{ stepId: 'new' }] };
+  const runId = 'pump-plan-drift-run';
+  const started = await transition({ runDir: root, runId, mode: 'runtime', plan: oldPlan }, { event: { kind: 'START', intentRef: ref('plan', oldPlan) }, eventId: 'start' });
+  await transition({
+    runDir: root,
+    runId,
+    mode: 'runtime',
+    plan: oldPlan,
+    driver: { dispatch() { return new Promise(() => undefined); } },
+    dispatcher: { timeoutMs: 0 },
+  }, { event: { kind: 'RESUME' }, eventId: 'old-dispatch', expectedRevision: started.yield.snapshot.revision });
+  await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+  let state = (await new FileArtifactStore(root).load()).state;
+  const oldCommand = Object.values(state.outbox).find((command) => command.state === 'UNKNOWN');
+  assert.ok(oldCommand);
+
+  const drift = await transition({ runDir: root, runId, mode: 'runtime', plan: newPlan }, {
+    event: { kind: 'RESUME' }, eventId: 'observe-drift', expectedRevision: state.revision,
+  });
+  assert.equal(drift.yield.kind, 'DECISION_REQUIRED');
+  const policy = createCodexHostPolicy({
+    runId,
+    planDigest: digest(validatePlan(newPlan).plan),
+    runRoot: root,
+    workspace,
+    skillRoot,
+    codexPath: '/opt/homebrew/bin/codex',
+    codexBinaryDigest: 'b'.repeat(64),
+    workerSchemaPath: schemaPath,
+    workerSchemaDigest: digest({}),
+  });
+  let dispatches = 0;
+  let observes = 0;
+  let terminals = 0;
+  const launched = new Map();
+  const driver = {
+    hostPolicy: policy,
+    dispatch(command, launchToken) {
+      dispatches += 1;
+      assert.notEqual(launchToken, oldCommand.launchToken, 'retained token must never relaunch');
+      launched.set(launchToken, command);
+      return { launchToken, commandDigest: command.commandDigest, ref: ref(`launch:${launchToken}`, { fresh: true }, 'effect') };
+    },
+    observe(launchToken) {
+      observes += 1;
+      assert.equal(launchToken, oldCommand.launchToken);
+      return { launchToken, commandDigest: oldCommand.commandDigest, ref: ref(`launch:${launchToken}`, { recovered: true }, 'effect') };
+    },
+    terminal(launchToken) {
+      terminals += 1;
+      return terminal(launchToken === oldCommand.launchToken ? oldCommand : launched.get(launchToken));
+    },
+  };
+
+  const settled = await drive({ runDir: root, runId, plan: newPlan, driver });
+  assert.equal(settled.yield.kind, 'FINAL');
+  assert.equal(settled.yield.status, 'phase-ready');
+  assert.equal(dispatches, 0);
+  assert.equal(observes, 1);
+  assert.equal(terminals, 1);
+  state = (await new FileArtifactStore(root).load()).state;
+  assert.equal(state.journal.filter((entry) => entry.event.kind === 'WORKER_ENVELOPE' && entry.identity.launchToken === oldCommand.launchToken).length, 1);
+
+  const adopted = await transition({ runDir: root, runId, mode: 'runtime', plan: newPlan }, {
+    event: { kind: 'PARENT_DECISION', token: drift.yield.token, value: { kind: 'ADOPT', digest: digest(newPlan) } },
+    eventId: 'adopt-new-plan', expectedRevision: settled.yield.snapshot.revision,
+  });
+  assert.equal(adopted.yield.snapshot.authorityEpoch, settled.yield.snapshot.authorityEpoch + 1);
+  assert.equal(adopted.yield.snapshot.attemptEpoch, settled.yield.snapshot.attemptEpoch + 1);
+  assert.equal(adopted.yield.snapshot.barrierEpoch, settled.yield.snapshot.barrierEpoch + 1);
+  const fresh = await drive({ runDir: root, runId, plan: newPlan, driver });
+  assert.equal(fresh.yield.kind, 'FINAL');
+  assert.equal(fresh.yield.status, 'phase-ready');
+  assert.equal(fresh.yield.snapshot.gate, 'DUE');
+  assert.equal(dispatches, 1);
+  assert.equal(observes, 1);
+  assert.equal(terminals, 2);
+  assert.notEqual([...launched.keys()][0], oldCommand.launchToken);
 });
 
 test('receipt settlement tolerates early and late callbacks', async () => {

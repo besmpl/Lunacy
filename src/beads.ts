@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { canonicalString, digest } from './canonical.js';
 import { validatePlan } from './validator.js';
 import { assertStableIdentity, filesystemIdentity, inspectTrustedPath, sameFilesystemIdentity, trustedIdentity } from './filesystem.js';
+import { copyImmutableEvidenceFile, type EvidenceCopyFallbackReason, type EvidenceCopyPolicy } from './evidence-copy.js';
 import type { Plan, Sha256 } from './model.js';
 
 /**
@@ -71,6 +72,18 @@ export type BeadsCapture = {
   snapshot: Readonly<BeadsSnapshot>;
   plan: Readonly<Plan>;
   sourceIds: Readonly<Record<string, string>>;
+  /** Storage receipt only; it is deliberately outside snapshot/Plan identity. */
+  evidenceCopy?: Readonly<BeadsEvidenceCopyReceipt>;
+};
+
+export type BeadsEvidenceCopyReceipt = {
+  schema: 'lunacy-evidence-copy-v1';
+  policy: Exclude<EvidenceCopyPolicy, 'off'>;
+  eligibleFiles: number;
+  clonedFiles: number;
+  ineligibleFiles: number;
+  fallbackFullCopyFiles: number;
+  fallbackReasons: ReadonlyArray<Readonly<{ reason: EvidenceCopyFallbackReason; count: number }>>;
 };
 
 export type BeadsSourceOptions = {
@@ -87,6 +100,8 @@ export type BeadsSourceOptions = {
   /** Phase identity for the generated Lunacy plan (defaults to `beads`). */
   phaseId?: string;
   timeoutMs?: number;
+  /** Future private snapshot files only. Omission is exactly `off`. */
+  evidenceCopyPolicy?: EvidenceCopyPolicy;
 };
 
 export class BeadsUnavailable extends Error {
@@ -389,7 +404,34 @@ async function readPrivateEntries(source: string, relativePath: string, depth: n
   return entries;
 }
 
-async function copyPrivateBeadsTree(sourceRoot: string, destinationRoot: string, boundary: PrivateSnapshotBoundary): Promise<void> {
+type MutableEvidenceCopyReceipt = Omit<BeadsEvidenceCopyReceipt, 'fallbackReasons'> & { fallbackReasonCounts: Map<EvidenceCopyFallbackReason, number> };
+
+function mutableEvidenceCopyReceipt(policy: Exclude<EvidenceCopyPolicy, 'off'>): MutableEvidenceCopyReceipt {
+  return { schema: 'lunacy-evidence-copy-v1', policy, eligibleFiles: 0, clonedFiles: 0, ineligibleFiles: 0, fallbackFullCopyFiles: 0, fallbackReasonCounts: new Map() };
+}
+
+function freezeEvidenceCopyReceipt(receipt: MutableEvidenceCopyReceipt): Readonly<BeadsEvidenceCopyReceipt> {
+  const fallbackReasons = [...receipt.fallbackReasonCounts]
+    .sort(([left], [right]) => compareStable(left, right))
+    .map(([reason, count]) => Object.freeze({ reason, count }));
+  return freeze({
+    schema: receipt.schema,
+    policy: receipt.policy,
+    eligibleFiles: receipt.eligibleFiles,
+    clonedFiles: receipt.clonedFiles,
+    ineligibleFiles: receipt.ineligibleFiles,
+    fallbackFullCopyFiles: receipt.fallbackFullCopyFiles,
+    fallbackReasons,
+  });
+}
+
+async function copyPrivateBeadsTree(
+  sourceRoot: string,
+  destinationRoot: string,
+  boundary: PrivateSnapshotBoundary,
+  policy: EvidenceCopyPolicy,
+  receipt?: MutableEvidenceCopyReceipt,
+): Promise<void> {
   const budget = makePrivateSnapshotBudget(boundary);
   const rootDestination = join(destinationRoot, '.beads');
   const stack: PrivateTreeItem[] = [{ source: sourceRoot, destination: rootDestination, relativePath: '', depth: 0 }];
@@ -417,28 +459,24 @@ async function copyPrivateBeadsTree(sourceRoot: string, destinationRoot: string,
     }
     const remaining = BEADS_PRIVATE_SNAPSHOT_BYTES - budget.bytes;
     if (remaining < 0) fail('Beads private snapshot exceeds its byte bound');
-    let target;
-    try { target = await fs.open(item.destination!, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_NOFOLLOW, 0o600); }
-    catch (error) { fail('Beads private snapshot file could not be created: ' + (error as Error).message); }
     try {
-      await readBoundedPrivateFile(item.source, remaining, 'Beads private snapshot file', async (chunk) => {
-        checkPrivateSnapshotBoundary(budget);
-        budget.bytes += chunk.byteLength;
-        if (budget.bytes > BEADS_PRIVATE_SNAPSHOT_BYTES) fail('Beads private snapshot exceeds its byte bound');
-        let offset = 0;
-        while (offset < chunk.byteLength) {
-          const result = await target!.write(chunk, offset, chunk.byteLength - offset, null);
-          if (!Number.isSafeInteger(result.bytesWritten) || result.bytesWritten <= 0 || result.bytesWritten > chunk.byteLength - offset) fail('Beads private snapshot write made no progress');
-          offset += result.bytesWritten;
-        }
+      const result = await copyImmutableEvidenceFile(item.source, item.destination!, {
+        policy,
+        maximumBytes: remaining,
+        checkBoundary: () => checkPrivateSnapshotBoundary(budget),
       });
-      await target!.sync();
-    } catch (error) {
-      await target!.close().catch(() => undefined);
-      throw error;
-    }
-    await target!.close();
-    await fs.chmod(item.destination!, 0o500);
+      budget.bytes += result.bytes;
+      if (budget.bytes > BEADS_PRIVATE_SNAPSHOT_BYTES) fail('Beads private snapshot exceeds its byte bound');
+      if (receipt) {
+        if (result.method === 'reflink') { receipt.eligibleFiles += 1; receipt.clonedFiles += 1; }
+        else if (result.method === 'fallback-full-copy') {
+          receipt.eligibleFiles += 1;
+          receipt.fallbackFullCopyFiles += 1;
+          const reason = result.fallbackReason!;
+          receipt.fallbackReasonCounts.set(reason, (receipt.fallbackReasonCounts.get(reason) ?? 0) + 1);
+        } else if (result.method === 'ineligible-full-copy') receipt.ineligibleFiles += 1;
+      }
+    } catch (error) { fail('Beads private snapshot file could not be copied: ' + (error as Error).message); }
   }
   await fs.chmod(destinationRoot, 0o500);
 }
@@ -767,6 +805,7 @@ export class BeadsPlanSource {
     }
     if (options.timeoutMs !== undefined && (!Number.isSafeInteger(options.timeoutMs) || options.timeoutMs <= 0 || options.timeoutMs > BEADS_TIMEOUT_MS)) fail('timeoutMs must be between 1 and 5000');
     if (options.phaseId !== undefined) { const phaseId = boundedId(options.phaseId, 'Beads phaseId'); if (phaseId.includes('/') || phaseId.includes('\\')) fail('Beads phaseId is unsafe'); }
+    if (options.evidenceCopyPolicy !== undefined && !['off', 'prefer', 'require'].includes(options.evidenceCopyPolicy)) fail('evidenceCopyPolicy must be require, prefer, or off');
     const frozenOptions = Object.freeze({
       executablePath: options.executablePath,
       workspace: options.workspace,
@@ -774,6 +813,7 @@ export class BeadsPlanSource {
       ...(options.homeDir === undefined ? {} : { homeDir: options.homeDir }),
       ...(options.xdgConfigHome === undefined ? {} : { xdgConfigHome: options.xdgConfigHome }),
       ...(options.phaseId === undefined ? {} : { phaseId: options.phaseId }),
+      ...(options.evidenceCopyPolicy === undefined ? {} : { evidenceCopyPolicy: options.evidenceCopyPolicy }),
       timeoutMs: options.timeoutMs ?? BEADS_TIMEOUT_MS,
     });
     // Keep the configuration binding immutable at runtime.  The capture
@@ -788,7 +828,7 @@ export class BeadsPlanSource {
     if (!Array.isArray(protectedRoots) || protectedRoots.some((root) => typeof root !== 'string' || !isAbsolute(root) || resolve(root) !== root)) fail('protected capture roots are invalid');
     // Snapshot every option before the first await.  A caller retaining the
     // source object cannot change the identity of an in-flight capture.
-    const { executablePath, workspace, expectedBinaryDigest, timeoutMs, homeDir, xdgConfigHome, phaseId } = this.options;
+    const { executablePath, workspace, expectedBinaryDigest, timeoutMs, homeDir, xdgConfigHome, phaseId, evidenceCopyPolicy = 'off' } = this.options;
     const captureBoundary: PrivateSnapshotBoundary = { ...(signal === undefined ? {} : { signal }), deadline: Date.now() + (timeoutMs ?? BEADS_TIMEOUT_MS) };
     checkPrivateSnapshotBoundary(captureBoundary);
     const protectedRootSnapshot = [...protectedRoots];
@@ -836,6 +876,7 @@ export class BeadsPlanSource {
     // capture, removed even when bd fails or is interrupted.
     const cleanupDirs: string[] = [];
     let privateWorkspaceRoot: string | undefined;
+    const evidenceCopyReceipt = evidenceCopyPolicy === 'off' ? undefined : mutableEvidenceCopyReceipt(evidenceCopyPolicy);
     let homeReal: string; let xdgReal: string;
     try {
       if (homeDir === undefined) {
@@ -878,7 +919,7 @@ export class BeadsPlanSource {
         privateWorkspaceRoot = await fs.mkdtemp(join(tmpdir(), 'lunacy-beads-snapshot-')).catch((error) => fail(`private Beads snapshot could not be created: ${(error as Error).message}`));
         cleanupDirs.push(privateWorkspaceRoot);
         await assertNoSymlinkSegments(privateWorkspaceRoot, 'private Beads snapshot');
-        await copyPrivateBeadsTree(beadsDirReal, privateWorkspaceRoot, captureBoundary);
+        await copyPrivateBeadsTree(beadsDirReal, privateWorkspaceRoot, captureBoundary, evidenceCopyPolicy, evidenceCopyReceipt);
         const afterTreeDigest = await hashPrivateBeadsTree(beadsDirReal, captureBoundary);
         const snapshotTreeDigest = await hashPrivateBeadsTree(join(privateWorkspaceRoot, '.beads'), captureBoundary);
         if (sourceTreeDigest !== afterTreeDigest || sourceTreeDigest !== snapshotTreeDigest) fail('Beads workspace changed during private snapshot');
@@ -929,7 +970,7 @@ export class BeadsPlanSource {
         const base = contentSnapshot({ schema: BEADS_SNAPSHOT_SCHEMA, source: 'beads', workspaceIdentity, bdVersion: BEADS_VERSION, bdBuild: BEADS_BUILD, bdCommit: BEADS_COMMIT, bdSchemaVersion: BEADS_SCHEMA_VERSION, binaryDigest: verified.digest, issues, edges });
         const snapshot = { ...base, contentDigest: digest(base), capturedAt: new Date().toISOString() } as BeadsSnapshot;
         const mapped = makePlan(issues, edges, phaseId ?? 'beads', snapshot.contentDigest);
-        return { snapshot: freeze(snapshot), plan: freeze(mapped.plan), sourceIds: freeze(mapped.sourceIds) };
+        return { snapshot: freeze(snapshot), plan: freeze(mapped.plan), sourceIds: freeze(mapped.sourceIds), ...(evidenceCopyReceipt === undefined ? {} : { evidenceCopy: freezeEvidenceCopyReceipt(evidenceCopyReceipt) }) };
       } finally { await verified.cleanup(); }
     } finally {
       await beadsHandle?.close().catch(() => undefined);

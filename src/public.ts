@@ -1,16 +1,20 @@
 import { digest, canonicalString, identityKey, parseCanonical } from './canonical.js';
 import { canonicalClaims, proveAdmission } from './admission.js';
-import { appendJournal, applyAuthorityAdoption, applyDispatchReceipt, applyParentDecision, commandForToken, nextWriterFence, previewReduce, reduce, refreshAdmission, type PreparedAdmission } from './reducer.js';
-import { claim, unknown, type DriverReceipt } from './outbox.js';
+import { appendJournal, applyAuthorityAdoption, applyDispatchReceipt, applyParentDecision, applyManagedReservations, applyManagedRolloutPolicy, bindManagedProposal, commandForToken, migrateMachineState, nextWriterFence, previewReduce, reduce, refreshAdmission, retireManagedAttempt, validateManagedDecisionBinding, type PreparedAdmission, type PreparedDecisionPublication } from './reducer.js';
+import { claim, commandInCurrentFrame, unknown, type DriverReceipt } from './outbox.js';
 import { ProseDriver, type EffectDriver } from './driver.js';
 import { isStoreGenerationConflict, storeForRoot, type ArtifactStore, type StoreLinearizedDispatchRequest } from './store.js';
 import type { FilesystemIdentity } from './filesystem.js';
 import { validatePlan } from './validator.js';
+import { isDispatchableStepStatus } from './dependency.js';
+import { compileWavePlan, deriveTopology, shadowPolicy, validateRef as validateDeliberationRef, validateWave, verifyWavePlan, type DeliberationPolicy, type DeliberationWave } from './deliberation.js';
 import { ContextCompiler, publishPreparedContext, type CompilerMode, type PreparedContext } from './compiler.js';
+import { verifyReadSet } from './authority.js';
 import { DispatchCoordinator, type DispatchDriverSnapshot, type ActiveDispatchTask } from './dispatch-coordinator.js';
 import { GraphAcceleration, type GraphMode } from './graph.js';
 import { AccelerationMetrics, defaultMetrics } from './metrics.js';
 import { JOURNAL_BYTE_CEILING, JOURNAL_EVENT_CEILING } from './limits.js';
+import { assertManagedGraph, createManagedCapability, createManagedRolloutPolicy, managedAdmissionAllowed, managedRolloutDecision, verifyManagedCapability, verifyManagedRolloutPolicy, type ManagedCapability, type ManagedCapabilityInput, type ManagedRolloutDecision, type ManagedRolloutPolicy, type ManagedRolloutPolicyInput } from './managed-capability.js';
 import type { CellHandle, SnapshotHandle } from './reuse.js';
 import type { AdvanceInput, CompactSnapshot, Event, EventIdentity, MachineState, Plan, Ref, Yield } from './model.js';
 export type { AdvanceInput, CompactSnapshot, Cursor, Event, EventIdentity, Plan, PlanStep, Ref, Yield, RunId, PhaseId, StepId, EventId, Sha256, LaunchToken } from './model.js';
@@ -48,6 +52,24 @@ export type KernelOptions = {
     cell?: CellHandle | null;
     snapshot?: SnapshotHandle | null;
   };
+  /** Private Stage-C opt-in. Omitted keeps the ordinary schema-1 path. */
+  managedCapability?: ManagedCapabilityInput | ManagedCapability | null;
+  /** Operator kill switch for the managed capability; default is off. */
+  managedKillSwitch?: boolean;
+  /** Private P4 rollout control. Omitted preserves the explicit Stage-C
+   * capability seam; an explicit disabled policy is a true managed bypass. */
+  managedRollout?: {
+    policy: ManagedRolloutPolicyInput | ManagedRolloutPolicy;
+    wave?: Ref;
+    deliberationPolicy?: DeliberationPolicy;
+    synthetic?: boolean;
+    disposable?: boolean;
+    explicitExplore?: boolean;
+    decisionUnsettled?: boolean;
+    openEnded?: boolean;
+    highStakes?: boolean;
+    openlyPhrased?: boolean;
+  } | null;
 };
 
 /** Private composition-only dispatcher controls.  These types are exported
@@ -71,6 +93,22 @@ function validateKernelOptions(options: KernelOptions): number {
   if (options.workspace !== undefined && typeof options.workspace !== 'string') throw new InvalidPlan('workspace must be a string');
   if (options.ownership !== undefined && typeof options.ownership !== 'string') throw new InvalidPlan('ownership must be a string');
   if (options.admission !== undefined && typeof options.admission !== 'function') throw new InvalidPlan('admission must be a function');
+  if (options.managedKillSwitch !== undefined && typeof options.managedKillSwitch !== 'boolean') throw new InvalidPlan('managedKillSwitch must be boolean');
+  if (options.managedCapability !== undefined && options.managedCapability !== null) {
+    try { createManagedCapability(options.managedCapability as ManagedCapabilityInput); }
+    catch { throw new InvalidPlan('managedCapability is invalid'); }
+  }
+  if (options.managedRollout !== undefined && options.managedRollout !== null) {
+    if (!options.managedRollout || typeof options.managedRollout !== 'object' || Array.isArray(options.managedRollout)) throw new InvalidPlan('managedRollout is invalid');
+    const allowed = new Set(['policy', 'wave', 'deliberationPolicy', 'synthetic', 'disposable', 'explicitExplore', 'decisionUnsettled', 'openEnded', 'highStakes', 'openlyPhrased']);
+    if (Object.keys(options.managedRollout).some((key) => !allowed.has(key))) throw new InvalidPlan('managedRollout fields are not closed');
+    if (!options.managedCapability) throw new InvalidPlan('managedRollout requires managedCapability');
+    try { createManagedRolloutPolicy(options.managedRollout.policy); }
+    catch { throw new InvalidPlan('managedRollout policy is invalid'); }
+    for (const key of ['synthetic', 'disposable', 'explicitExplore', 'decisionUnsettled', 'openEnded', 'highStakes', 'openlyPhrased'] as const) {
+      if (options.managedRollout[key] !== undefined && typeof options.managedRollout[key] !== 'boolean') throw new InvalidPlan(`managedRollout ${key} must be boolean`);
+    }
+  }
   const maxInFlight = options.maxInFlight;
   if (maxInFlight !== undefined && (!Number.isSafeInteger(maxInFlight) || maxInFlight < 0)) throw new InvalidPlan('maxInFlight must be a non-negative safe integer');
   const configuredMaxInFlight = maxInFlight ?? 1;
@@ -89,7 +127,7 @@ function clone<T>(value: T): T {
 function ref(id: string, value: unknown, scope = 'kernel'): Ref { const bytes = canonicalString(value); return { id, scope, digest: digest(value), bytes }; }
 function snapshot(state: MachineState): CompactSnapshot {
   const steps = Object.values(state.steps); const outbox = Object.values(state.outbox);
-  return { revision: state.revision, authorityEpoch: state.authorityEpoch, attemptEpoch: state.attemptEpoch, barrierEpoch: state.barrierEpoch, runStatus: state.status, phase: state.phaseId, gate: state.gate, barrier: state.barrier, readyCount: steps.filter((s) => s.status === 'READY').length, activeCount: steps.filter((s) => s.status === 'ACTIVE').length, pendingDispatchCount: outbox.filter((x) => x.state === 'PENDING' || x.state === 'CLAIMED').length, unknownDispatchCount: outbox.filter((x) => x.state === 'UNKNOWN').length, nextAction: state.nextAction };
+  return { revision: state.revision, authorityEpoch: state.authorityEpoch, attemptEpoch: state.attemptEpoch, barrierEpoch: state.barrierEpoch, runStatus: state.status, phase: state.phaseId, gate: state.gate, barrier: state.barrier, readyCount: steps.filter((s) => isDispatchableStepStatus(s.status)).length, activeCount: steps.filter((s) => s.status === 'ACTIVE').length, pendingDispatchCount: outbox.filter((x) => x.state === 'PENDING' || x.state === 'CLAIMED').length, unknownDispatchCount: outbox.filter((x) => x.state === 'UNKNOWN').length, nextAction: state.nextAction };
 }
 function asYield(state: MachineState, result: { outcome: string; reason?: string; token?: string; brief?: Ref; receipt?: Ref; launchToken?: string }): Yield {
   const snap = snapshot(state); const cursor = { revision: state.revision, authorityEpoch: state.authorityEpoch, attemptEpoch: state.attemptEpoch, barrierEpoch: state.barrierEpoch };
@@ -104,7 +142,7 @@ function asYield(state: MachineState, result: { outcome: string; reason?: string
   }
   if (result.outcome === 'BLOCKED') {
     const reason = result.reason ?? 'blocked';
-    const code = reason === 'CrossRunUnproven' ? 'CrossRunUnproven' : reason === 'UnknownDispatch' ? 'UnknownDispatch' : reason === 'HumanReceiptRequired' ? 'HumanReceiptRequired' : reason === 'ManifestMismatch' ? 'ManifestMismatch' : reason === 'JournalCeiling' ? 'JournalCeiling' : 'InvalidEvent';
+    const code = reason === 'CrossRunUnproven' ? 'CrossRunUnproven' : reason === 'UnknownDispatch' ? 'UnknownDispatch' : reason === 'HumanReceiptRequired' ? 'HumanReceiptRequired' : reason === 'ManifestMismatch' ? 'ManifestMismatch' : reason === 'JournalCeiling' ? 'JournalCeiling' : reason === 'STALE' ? 'STALE' : reason === 'NO_SETTLEMENT' ? 'NO_SETTLEMENT' : 'InvalidEvent';
     return { kind: 'BLOCKED', code, reason, ...(result.receipt === undefined ? {} : { receipt: result.receipt }), ...(result.launchToken === undefined ? {} : { launchToken: result.launchToken }), retryable: code !== 'UnknownDispatch' && code !== 'HumanReceiptRequired' && code !== 'JournalCeiling' && reason !== 'gate findings', snapshot: snap };
   }
   return { kind: 'WAITING', cursor, snapshot: snap };
@@ -138,6 +176,16 @@ function validateRef(value: Ref): void {
     } catch { throw new InvalidEvent('ref bytes must be canonical JSON'); }
   }
 }
+function validateWorkerEnvelope(value: Ref): void {
+  if (typeof value.bytes !== 'string') throw new InvalidEvent('worker envelope requires canonical result bytes');
+  try {
+    const result = parseCanonical<Record<string, unknown>>(value.bytes);
+    if (!result || typeof result !== 'object' || Array.isArray(result)) throw new Error('invalid worker result');
+    if (typeof result.status === 'string' && Object.keys(result).length === 1) return;
+    if (result.schema === 'lunacy-deliberation-report/v2' && Object.prototype.hasOwnProperty.call(result, 'wave') && Number.isSafeInteger(result.slotOrdinal)) return;
+    throw new Error('invalid worker result');
+  } catch { throw new InvalidEvent('worker envelope result is malformed'); }
+}
 function validateEvent(event: unknown): asserts event is Event {
   if (!event || typeof event !== 'object' || (Object.getPrototypeOf(event) !== Object.prototype && Object.getPrototypeOf(event) !== null) || typeof (event as { kind?: unknown }).kind !== 'string') throw new InvalidEvent('event is malformed');
   const kind = (event as { kind: string }).kind;
@@ -169,11 +217,7 @@ function validateEvent(event: unknown): asserts event is Event {
       exactKeys(event as object, ['kind', 'ref'], 'WORKER_ENVELOPE event');
       const workerRef = (event as Extract<Event, { kind: 'WORKER_ENVELOPE' }>).ref;
       validateRef(workerRef);
-      if (typeof workerRef.bytes !== 'string') throw new InvalidEvent('worker envelope requires canonical result bytes');
-      try {
-        const result = JSON.parse(workerRef.bytes) as Record<string, unknown>;
-        if (!result || typeof result !== 'object' || Array.isArray(result) || typeof result.status !== 'string' || Object.keys(result).some((key) => key !== 'status')) throw new Error('invalid worker result');
-      } catch { throw new InvalidEvent('worker envelope result is malformed'); }
+      validateWorkerEnvelope(workerRef);
       return;
     case 'OBSERVATION': {
       exactKeys(event as object, ['kind', 'ref', 'category'], 'OBSERVATION event');
@@ -228,7 +272,7 @@ function planFromCommittedState(state: MachineState): Plan {
 function canReconcileWithoutLivePlan(state: MachineState, input: AdvanceInput): boolean {
   const commands = Object.values(state.outbox);
   if (input.event.kind === 'PARENT_DECISION') return Object.prototype.hasOwnProperty.call(state.decisionTokens, input.event.token) && (state.gate === 'DUE' || state.decisionTokens[input.event.token]?.kind === 'AUTHORITY_ADOPTION');
-  if (input.event.kind === 'RESUME') return commands.some((command) => command.state === 'PENDING' || command.state === 'CLAIMED' || command.state === 'UNKNOWN');
+  if (input.event.kind === 'RESUME') return commands.some((command) => (command.state === 'PENDING' || command.state === 'CLAIMED' || command.state === 'UNKNOWN') && commandInCurrentFrame(state, command));
   if (!input.identity.launchToken) return false;
   const command = commands.find((candidate) => candidate.launchToken === input.identity.launchToken);
   if (!command) return false;
@@ -244,7 +288,7 @@ function internalIdentity(state: MachineState, command: { launchToken: string; s
   return { runId: state.runId, phaseId: state.phaseId, stepId: command.stepId, attemptEpoch: state.attemptEpoch, authorityEpoch: state.authorityEpoch, barrierEpoch: state.barrierEpoch, eventId, payloadDigest: digest(event), launchToken: command.launchToken };
 }
 function receiptEnvelope(command: { launchToken: string; commandDigest: string }, receipt: DriverReceipt): Ref {
-  const value = { launchToken: command.launchToken, commandDigest: command.commandDigest, receipt: receipt.ref };
+  const value = { launchToken: command.launchToken, commandDigest: command.commandDigest, receipt: receipt.ref, ...(receipt.authorityAnchor ? { authorityAnchor: receipt.authorityAnchor } : {}) };
   return ref(`receipt:${command.launchToken}`, value, 'outbox/receipt');
 }
 
@@ -266,6 +310,24 @@ function isAdoptionDecision(value: unknown): boolean {
   const object = value as Record<string, unknown>;
   const kind = object.kind ?? object.decision;
   return kind === 'ADOPT' || kind === 'ADOPT_AUTHORITY' || kind === 'AUTHORITY_ADOPT';
+}
+
+function authorityAdoptionRequired(current: MachineState, identity: EventIdentity, targetDigest: string): { state: MachineState; yield: Yield } {
+  const priorEntry = Object.entries(current.decisionTokens).find(([, record]) => record.kind === 'AUTHORITY_ADOPTION' && !record.consumed);
+  const priorToken = priorEntry?.[1];
+  const blockedState = clone(current);
+  let token: string;
+  if (priorToken && priorToken.targetDigest === targetDigest && priorToken.observedDigest === targetDigest) {
+    token = priorEntry![0];
+  } else {
+    if (priorEntry) blockedState.decisionTokens[priorEntry[0]]!.consumed = true;
+    token = `authority-${current.revision}-${targetDigest.slice(0, 16)}`;
+    let suffix = 1;
+    while (Object.prototype.hasOwnProperty.call(blockedState.decisionTokens, token)) token = `authority-${current.revision}-${targetDigest.slice(0, 16)}-${suffix++}`;
+    blockedState.decisionTokens[token] = { kind: 'AUTHORITY_ADOPTION', consumed: false, identity: digest(identity), expectedDigest: current.planDigest, observedDigest: targetDigest, targetDigest, ...(current.managed?.rolloutOrigin ? { rolloutOrigin: { ...current.managed.rolloutOrigin } } : {}) };
+  }
+  const value: Yield = { kind: 'DECISION_REQUIRED', brief: ref(`authority:${current.revision}`, { expected: current.planDigest, actual: targetDigest, token }, 'authority'), token, cursor: { revision: current.revision, authorityEpoch: current.authorityEpoch, attemptEpoch: current.attemptEpoch, barrierEpoch: current.barrierEpoch }, snapshot: snapshot(blockedState) };
+  return { state: blockedState, yield: value };
 }
 
 /**
@@ -297,9 +359,83 @@ function mapCommitFailure(error: unknown): KernelError {
   return message.includes('ManifestMismatch') ? new KernelError('ManifestMismatch', message) : new Conflict(message);
 }
 
+function rolloutGear(waveRef: Ref | undefined): 'FOCUS' | 'EXPLORE' | undefined {
+  try {
+    if (!waveRef?.bytes) return undefined;
+    const wave = parseCanonical<DeliberationWave>(waveRef.bytes);
+    return wave.gear === 'FOCUS' || wave.gear === 'EXPLORE' ? wave.gear : undefined;
+  } catch { return undefined; }
+}
+
+function evaluateManagedRollout(
+  planInput: Plan,
+  capability: ManagedCapability | undefined,
+  config: NonNullable<KernelOptions['managedRollout']>,
+  policy: ManagedRolloutPolicy,
+): ManagedRolloutDecision {
+  const direct = () => managedRolloutDecision(policy, capability, {
+    gear: 'DIRECT', synthetic: false, disposable: false, effectDenied: false,
+    oneDecisionKey: false, staticTopology: false, childDelegation: false,
+    claimsOrEffects: false, sealedEvidenceOnly: false, explicitExplore: false,
+    decisionUnsettled: false, openEnded: false, highStakes: false, openlyPhrased: false,
+  });
+  if (!config.wave) return direct();
+  let wave: DeliberationWave | undefined;
+  try {
+    const checkedRef = validateDeliberationRef(config.wave);
+    if (!checkedRef.ok || typeof checkedRef.value.bytes !== 'string' || checkedRef.value.scope !== 'deliberation/wave' || !config.deliberationPolicy) throw new Error('wave unavailable');
+    wave = parseCanonical<DeliberationWave>(checkedRef.value.bytes);
+    if (digest(wave) !== checkedRef.value.digest) throw new Error('wave digest mismatch');
+    const evidence = new Set(wave.question.evidence.map((item) => canonicalString({ id: item.id, digest: item.digest, scope: item.scope ?? null })));
+    const constraints = new Set(wave.question.constraints.map((item) => canonicalString({ id: item.id, digest: item.digest, scope: item.scope ?? null })));
+    const validated = validateWave(wave, { runId: wave.authorship.runId, phaseId: wave.authorship.phaseId, policy: config.deliberationPolicy, committedEvidence: evidence, reachableConstraints: constraints });
+    if (!validated.ok) throw new Error('wave invalid');
+    const compiled = compileWavePlan(checkedRef.value, validated.value);
+    if (!compiled.ok) throw new Error('wave plan invalid');
+    const topology = deriveTopology(checkedRef.value, validated.value);
+    if (!verifyWavePlan(compiled.value, topology).ok) throw new Error('wave topology invalid');
+    const supplied = validatePlan(planInput).plan;
+    const compiledPlan = validatePlan(compiled.value).plan;
+    const planMatches = digest(supplied) === digest(compiledPlan);
+    const refs = [...validated.value.question.evidence, ...validated.value.question.constraints];
+    const sealedEvidenceOnly = refs.every((item) => typeof item.bytes === 'string' && validateDeliberationRef(item).ok);
+    const claimsOrEffects = compiledPlan.steps.some((step) => (step.claims ?? []).some((claim) => claim.mode !== 'READ'));
+    return managedRolloutDecision(policy, capability, {
+      gear: validated.value.gear,
+      synthetic: config.synthetic === true,
+      disposable: config.disposable === true,
+      effectDenied: capability?.effectDenied === true,
+      oneDecisionKey: validated.value.authorship.decisionKey.length > 0,
+      staticTopology: planMatches,
+      childDelegation: false,
+      claimsOrEffects,
+      sealedEvidenceOnly,
+      explicitExplore: config.explicitExplore === true,
+      decisionUnsettled: config.decisionUnsettled === true,
+      openEnded: config.openEnded === true,
+      highStakes: config.highStakes === true,
+      openlyPhrased: config.openlyPhrased === true,
+    });
+  } catch {
+    const gear = wave?.gear === 'EXPLORE' ? 'EXPLORE' : 'FOCUS';
+    return managedRolloutDecision(policy, capability, {
+      gear, synthetic: config.synthetic === true, disposable: config.disposable === true,
+      effectDenied: capability?.effectDenied === true, oneDecisionKey: false,
+      staticTopology: false, childDelegation: false, claimsOrEffects: true,
+      sealedEvidenceOnly: false, explicitExplore: config.explicitExplore === true,
+      decisionUnsettled: config.decisionUnsettled === true, openEnded: config.openEnded === true,
+      highStakes: config.highStakes === true, openlyPhrased: config.openlyPhrased === true,
+    });
+  }
+}
+
 class KernelImpl implements RunKernel {
   private readonly configuredMaxInFlight: number;
   private readonly metrics: AccelerationMetrics;
+  readonly #managedCapability?: ManagedCapability;
+  readonly #managedKillSwitch: boolean;
+  readonly #managedRolloutPolicy?: ManagedRolloutPolicy;
+  readonly #managedRolloutDecision?: ManagedRolloutDecision;
   readonly #contextMode: CompilerMode;
   readonly #compiler: ContextCompiler;
   readonly #graphMode: GraphMode;
@@ -312,7 +448,18 @@ class KernelImpl implements RunKernel {
 
   constructor(private readonly options: KernelOptions, configuredMaxInFlight: number, private readonly store: ArtifactStore, driver?: DispatchDriverSnapshot, dispatcher: DispatcherOptions = {}) {
     this.configuredMaxInFlight = configuredMaxInFlight;
+    this.#managedCapability = options.managedCapability && options.managedCapability !== null ? createManagedCapability(options.managedCapability as ManagedCapabilityInput) : undefined;
+    this.#managedKillSwitch = options.managedKillSwitch ?? false;
     this.metrics = options.acceleration?.metrics ?? defaultMetrics;
+    if (options.managedRollout) {
+      this.#managedRolloutPolicy = createManagedRolloutPolicy(options.managedRollout.policy);
+      this.#managedRolloutDecision = evaluateManagedRollout(options.plan, this.#managedCapability, options.managedRollout, this.#managedRolloutPolicy);
+      if (this.#managedRolloutPolicy.mode !== 'disabled' && this.#managedRolloutDecision.reason !== 'DIRECT_BYPASS') {
+        this.safeMetric(this.#managedKillSwitch ? 'managedWavesKilled' : this.#managedRolloutDecision.admitted ? 'managedWavesAdmitted' : 'managedWavesRefused');
+        const gear = rolloutGear(options.managedRollout.wave);
+        if (gear) this.safeMetric(gear === 'FOCUS' ? 'managedFocusProposals' : 'managedExploreProposals');
+      }
+    }
     this.#contextMode = options.acceleration?.context ?? 'OFF';
     this.#compiler = new ContextCompiler({ mode: this.#contextMode, reuseMode: options.acceleration?.reuse ?? 'OFF', metrics: this.metrics, store });
     this.#graphMode = options.acceleration?.graph ?? 'OFF';
@@ -327,6 +474,7 @@ class KernelImpl implements RunKernel {
       commitEventOnly: (...args) => this.commitEventOnly(...args),
       commitYield: (...args) => this.commitYield(...args),
       commitDispatcherOutcome: (...args) => this.commitDispatcherOutcome(...args),
+      retireManagedAttempt: (...args) => this.commitRetireManagedAttempt(...args),
       finalizeImmediateYield: (...args) => this.finalizeImmediateYield(...args),
       commitClaim: (...args) => this.commitClaim(...args),
       asYield, snapshot, ref, internalIdentity, validateRef,
@@ -340,6 +488,106 @@ class KernelImpl implements RunKernel {
       enumerable: true,
       configurable: true,
     });
+  }
+
+  private managedEnabled(generation: number): boolean {
+    return managedAdmissionAllowed(this.#managedCapability ? { capability: this.#managedCapability, generation, killSwitch: this.#managedKillSwitch } : undefined, generation, this.#managedKillSwitch);
+  }
+
+  private managedRuntimeEnabled(): boolean {
+    return Boolean(this.#managedCapability && !this.#managedKillSwitch && (!this.#managedRolloutPolicy || this.#managedRolloutDecision?.admitted));
+  }
+
+  private safeMetric(name: import('./metrics.js').AccelerationCounter): void {
+    try { this.metrics.increment(name); } catch { /* diagnostics never affect execution */ }
+  }
+
+  private prepareManagedState(state: MachineState, generation: number, input: AdvanceInput, lease?: import('./store.js').PublicationLease): MachineState {
+    if (!this.#managedCapability || !this.managedEnabled(generation)) return state;
+    if (state.schema === 2 && state.managed) {
+      const persisted = state.managed.capability;
+      if (!verifyManagedCapability(persisted) || persisted.checksum !== this.#managedCapability.checksum || state.managed.killSwitch) throw new Conflict('managed capability unavailable');
+    }
+    let next = migrateMachineState(state, this.#managedCapability);
+    if (this.#managedRolloutPolicy) next = applyManagedRolloutPolicy(next, this.#managedCapability, this.#managedRolloutPolicy);
+    if (input.event.kind === 'START' && !next.managed!.proposal) {
+      const key = digest({ runId: String(input.runId), phaseId: next.phaseId, authorshipInputDigest: input.event.intentRef.digest, decisionKey: 'START' });
+      const leaseSetId = lease?.leaseId ?? `lease-${key.slice(0, 32)}`;
+      if (!lease) throw new Conflict('managed graph lease root is unavailable');
+      assertManagedGraph({
+        proposal: { leaseSetId, waveRef: input.event.intentRef },
+        leaseSets: { [leaseSetId]: { leaseId: leaseSetId, closedRefGraph: lease.refs } },
+      });
+      next = bindManagedProposal(next, this.#managedCapability, { key: key as import('./model.js').Sha256, waveRef: input.event.intentRef, ...(this.options.managedRollout?.wave ? { roleWaveRef: this.options.managedRollout.wave } : {}), planDigest: next.planDigest, leaseSetId });
+      if (lease) next.managed!.leaseSets[lease.leaseId] = { leaseId: lease.leaseId, closedRefGraph: lease.refs.map((ref) => ({ ...ref })), expiresAt: lease.expiresAt, status: lease.status };
+    } else applyManagedReservations(next, this.#managedCapability);
+    return next;
+  }
+
+  /** Prepare one bounded publication lease for a managed parent decision.
+   * Acquisition is deliberately side-effect-only at the lease layer; the
+   * token, journal, prefix, and proposal mutate only in the subsequent state
+   * CAS through applyParentDecision. */
+  private async prepareDecisionPublication(state: MachineState, token: string, value: unknown): Promise<PreparedDecisionPublication | undefined> {
+    if (!state.managed || !Object.prototype.hasOwnProperty.call(state.decisionTokens, token)) return undefined;
+    const record = state.decisionTokens[token];
+    if (!record || (record.kind !== 'DELIBERATION_SELECTION' && record.kind !== 'DELIBERATION') || record.consumed) return undefined;
+    const requested = typeof value === 'string' ? { disposition: value } : value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+    const disposition = typeof requested.disposition === 'string' ? requested.disposition : typeof requested.kind === 'string' ? requested.kind : typeof requested.decision === 'string' ? requested.decision : undefined;
+    if (!disposition || !['SELECTION', 'SYNTHESIS', 'WIDEN', 'NO_SETTLEMENT'].includes(disposition)) throw new Conflict('unsupported deliberation decision');
+    if (disposition === 'NO_SETTLEMENT') return undefined;
+    const binding = validateManagedDecisionBinding(state, token, value);
+    if (!binding) throw new Conflict('full canonical deliberation result or settlement binding is invalid');
+    const requestedSettlement = Object.prototype.hasOwnProperty.call(requested, 'nullableSettlement')
+      ? requested.nullableSettlement
+      : Object.prototype.hasOwnProperty.call(requested, 'settlementRef')
+        ? requested.settlementRef
+        : Object.prototype.hasOwnProperty.call(requested, 'settlement')
+          ? requested.settlement
+          : requested.settlementDigest;
+    const fullRef = (candidate: unknown): candidate is Ref => {
+      try { validateRef(candidate as Ref); } catch { return false; }
+      return typeof (candidate as Ref).bytes === 'string' && typeof (candidate as Ref).scope === 'string' && String((candidate as Ref).scope).startsWith('deliberation/settlement');
+    };
+    let settlementRef: Ref | null = null;
+    if (disposition === 'WIDEN') {
+      if (!Object.prototype.hasOwnProperty.call(requested, 'nullableSettlement') || requestedSettlement !== null) throw new Conflict('WIDEN requires explicit null settlement');
+      if (!binding.successorWaveRef) throw new Conflict('WIDEN requires an exact Explore successor');
+    } else {
+      if (!fullRef(requestedSettlement) || !binding.settlementRef) throw new Conflict('selection/synthesis requires a full settlement ref');
+      settlementRef = { ...(binding.settlementRef as Ref) };
+    }
+    const resultObject = requested.result && typeof requested.result === 'object' && !Array.isArray(requested.result) ? requested.result as Record<string, unknown> : undefined;
+    const successor = binding.successorWaveRef ?? requested.nextWaveRef ?? requested.successorWaveRef ?? resultObject?.wave;
+    const authorityAnchors: Ref[] = [];
+    for (const reportRef of record.orderedReportRefs ?? []) {
+      const row = state.managed.acceptedReports?.[reportRef.digest];
+      if (row?.roleDigest) {
+        if (!row.authorityAnchor) throw new Conflict('accepted Report authority anchor is missing');
+        authorityAnchors.push({ ...row.authorityAnchor });
+      }
+    }
+    const closure: Ref[] = [{ ...(record.waveRef as Ref) }, ...((record.orderedReportRefs ?? []).map((item) => ({ ...item }))), ...authorityAnchors];
+    if (settlementRef) closure.push(settlementRef);
+    if (successor !== undefined) {
+      try { validateRef(successor as Ref); } catch { throw new Conflict('successor Wave Ref is malformed'); }
+      if (typeof (successor as Ref).bytes !== 'string') throw new Conflict('successor Wave Ref requires canonical bytes');
+      closure.push({ ...(successor as Ref) });
+    }
+    const uniqueClosure = [...new Map(closure.map((item) => [canonicalString(item), item])).values()];
+    // The lease identity is derived from the exact normalized result admitted
+    // by the shared reducer preflight, not from an optional/aliased caller
+    // payload.  This keeps the pre-publication root deterministic and makes a
+    // replay with a differently-spelled result fail closed at the binding seam.
+    const resultDigest = digest(binding.result ?? null);
+    const leaseId = `decision-lease-${digest({ runId: state.runId, token, predecessorGeneration: record.predecessorGeneration, disposition, settlementDigest: settlementRef?.digest ?? null, resultDigest }).slice(0, 32)}`;
+    const acquire = this.store.acquirePublicationLease;
+    if (!acquire) throw new Conflict('managed publication lease unavailable');
+    let lease: import('./store.js').PublicationLease;
+    try { lease = await acquire.call(this.store, leaseId, uniqueClosure); }
+    catch { throw new Conflict('managed publication lease unavailable'); }
+    if (lease.leaseId !== leaseId || lease.status === 'EXPIRED' || canonicalString(lease.refs) !== canonicalString(uniqueClosure)) throw new Conflict('managed publication lease closure mismatch');
+    return { disposition: disposition as 'SELECTION' | 'SYNTHESIS' | 'WIDEN', settlementRef, lease };
   }
 
   async #prepareContext(plan: Plan, current: MachineState | undefined, input: AdvanceInput, generation: number): Promise<PreparedContext | undefined> {
@@ -404,6 +652,21 @@ class KernelImpl implements RunKernel {
 
   async advance(input: AdvanceInput): Promise<Yield> {
     validateIdentity(input);
+    // P2 policy is a private, default-off shadow seam.  It must be called
+    // before any managed plan/frame resolution and is intentionally unable to
+    // affect the ordinary reducer, store, or returned Yield.  OFF returns
+    // before inspecting policy, refs, or computing an identity digest.
+    const zeroDigest = '0000000000000000000000000000000000000000000000000000000000000000' as import('./model.js').Sha256;
+    const shadowRef: Ref = { id: 'shadow', digest: zeroDigest, scope: 'shadow' };
+    shadowPolicy({
+      authorship: {
+        runId: String(input.runId), phaseId: String(input.identity.phaseId),
+        intent: input.event.kind === 'START' ? input.event.intentRef : shadowRef,
+        evidenceSnapshot: shadowRef, authorityDigest: zeroDigest, policyVersion: shadowRef, settlements: [],
+      },
+      predicates: { decisionUnsettled: false, explicitExplore: false, citedWitness: false, planEquivalent: false, containedDiscovery: false, openEnded: false, highStakes: false, openlyPhrased: false, namedDiscriminator: false },
+      mode: 'OFF',
+    });
     let loaded;
     try { loaded = await this.store.load(); }
     catch (error) {
@@ -411,8 +674,58 @@ class KernelImpl implements RunKernel {
       if (message.includes('ManifestMismatch') || message.includes('ENOENT')) throw new KernelError('ManifestMismatch', message);
       throw error;
     }
-    const current = loaded.state;
+    let current = loaded.state;
     if (current && current.runId !== String(input.runId)) throw new Conflict('runId does not match CURRENT');
+    // Rollout policy changes share the existing generation CAS. Exact replay
+    // is inert; promotion or rollback must carry a strictly newer generation.
+    if (current?.schema === 2 && current.managed && this.#managedCapability && this.#managedRolloutPolicy) {
+      let synced: MachineState;
+      try { synced = applyManagedRolloutPolicy(current, this.#managedCapability, this.#managedRolloutPolicy); }
+      catch { return asYield(current, { outcome: 'BLOCKED', reason: 'managed rollout policy conflict' }); }
+      if (canonicalString(synced.managed?.rollout) !== canonicalString(current.managed.rollout)) {
+        try {
+          const policyIdentity: EventIdentity = {
+            runId: current.runId, phaseId: current.phaseId, stepId: 'run',
+            attemptEpoch: current.attemptEpoch, authorityEpoch: current.authorityEpoch, barrierEpoch: current.barrierEpoch,
+            eventId: `managed-rollout:${this.#managedRolloutPolicy.generation}:${this.#managedRolloutPolicy.digest.slice(0, 16)}`,
+            payloadDigest: this.#managedRolloutPolicy.digest,
+          };
+          synced.writerFence = nextWriterFence(current.writerFence, loaded.generation + 1, policyIdentity);
+          const generation = await this.store.commit(loaded.generation, synced);
+          loaded = { state: synced, generation };
+          current = synced;
+        } catch (error) { throw mapCommitFailure(error); }
+      }
+    }
+    // Schema-1 runs remain readable by default.  A managed opt-in atomically
+    // lifts the committed projection before any managed admission; a failed
+    // migration leaves the legacy state untouched and closes the capability.
+    if (current && this.managedRuntimeEnabled() && current.schema === 1) {
+      const migrated = migrateMachineState(current, this.#managedCapability);
+      try {
+        const generation = await this.store.commit(loaded.generation, migrated);
+        loaded = { state: migrated, generation };
+        current = migrated;
+      } catch (error) {
+        throw mapCommitFailure(error);
+      }
+    }
+    // Schema-2 is an explicitly managed projection.  It cannot silently
+    // fall back to the ordinary path: a restart must present the same
+    // authenticated descriptor with the kill switch clear, otherwise no
+    // managed CAS or downstream work is admitted.
+    if (current?.schema === 2 && current.managed) {
+      const persisted = current.managed.capability;
+      const sameCapability = Boolean(this.#managedCapability && verifyManagedCapability(persisted)
+        && persisted.checksum === this.#managedCapability.checksum);
+      const rolloutAvailable = !current.managed.rollout || Boolean(this.#managedRolloutPolicy && this.#managedRolloutDecision?.admitted
+        && current.managed.rollout.generation === this.#managedRolloutPolicy.generation
+        && current.managed.rollout.digest === this.#managedRolloutPolicy.digest
+        && current.managed.rollout.mode === this.#managedRolloutPolicy.mode);
+      if (!sameCapability || !rolloutAvailable || this.#managedKillSwitch || current.managed.killSwitch) {
+        return asYield(current, { outcome: 'BLOCKED', reason: 'managed capability unavailable' });
+      }
+    }
     if (!current && input.event.kind === 'START' && (input.identity.attemptEpoch !== 0 || input.identity.authorityEpoch !== 0 || input.identity.barrierEpoch !== 0)) throw new Conflict('START must use zero epochs for a new run');
     const key = identityKey(input.identity);
     if (current) {
@@ -497,14 +810,34 @@ class KernelImpl implements RunKernel {
           const blocked = asYield(current, { outcome: 'DECISION_REQUIRED', brief: ref(`authority:${current.revision}`, { expected: current.planDigest, actual: normalizedPlanDigest, token: input.event.token }, 'authority'), token: input.event.token });
           return blocked;
         }
-        const adopted = applyAuthorityAdoption(current, input.identity, input.event.token, input.event.value, plan, normalizedPlanDigest as import('./model.js').Sha256, segmentedJournalEnabled(this.store));
-        if (adopted.outcome === 'BLOCKED' || adopted.state === current) throw new Conflict(adopted.reason ?? 'authority adoption rejected');
-        return this.commitYield(loaded.generation, adopted.state, key, input.identity, asYield(adopted.state, adopted));
+        // Mutation-coupled freshness is checked at the authority-moving CAS,
+        // never when the token is merely displayed.  A caller may provide the
+        // sealed read-set digest alongside its adoption value; any drift is a
+        // non-consuming STALE result and leaves the token live for resealing.
+        const requestedObject = input.event.value && typeof input.event.value === 'object' && !Array.isArray(input.event.value) ? input.event.value as Record<string, unknown> : undefined;
+        const readSet = requestedObject?.readSet ?? requestedObject?.workspaceReadSet;
+        const expectedReadSet = requestedObject?.readSetDigest ?? requestedObject?.workspaceDigest;
+        if (readSet !== undefined && typeof expectedReadSet === 'string' && !verifyReadSet(expectedReadSet as import('./model.js').Sha256, readSet)) {
+          return asYield(current, { outcome: 'BLOCKED', reason: 'STALE' });
+        }
+      const adopted = applyAuthorityAdoption(current, input.identity, input.event.token, input.event.value, plan, normalizedPlanDigest as import('./model.js').Sha256, segmentedJournalEnabled(this.store));
+      if (adopted.outcome === 'BLOCKED' || adopted.state === current) {
+        if (adopted.reason === 'STALE') return asYield(current, adopted);
+        throw new Conflict(adopted.reason ?? 'authority adoption rejected');
+      }
+      if (this.managedRuntimeEnabled()) adopted.state = this.prepareManagedState(adopted.state, loaded.generation, input);
+      return this.commitYield(loaded.generation, adopted.state, key, input.identity, asYield(adopted.state, adopted));
       }
       // A gate decision is parent-owned and remains valid against the old
-      // committed plan even if declarations changed after the gate closed.
+      // committed plan only when the live declaration is malformed. A valid
+      // new authority must be explicitly adopted before the old gate can be
+      // resolved, which creates fresh epochs/work/a fresh gate.
       if (tokenRecord?.kind === 'GATE') {
-        plan = recoveryAgainstCommittedPlan || authorityDrift ? validatePlan(planFromCommittedState(current)).plan : plan;
+        if (authorityDrift) {
+          const adoption = authorityAdoptionRequired(current, input.identity, normalizedPlanDigest);
+          return this.commitYield(loaded.generation, adoption.state, key, input.identity, adoption.yield);
+        }
+        if (recoveryAgainstCommittedPlan) plan = validatePlan(planFromCommittedState(current)).plan;
       }
     }
 
@@ -520,23 +853,19 @@ class KernelImpl implements RunKernel {
         rawPlanDigest = current.planDigest;
         normalizedPlanDigest = current.planDigest;
       } else {
-        const blockedState = clone(current);
-        let token: string;
-        if (priorToken && priorToken.targetDigest === normalizedPlanDigest && priorToken.observedDigest === normalizedPlanDigest) {
-          token = priorEntry![0];
-        } else {
-          // A newer explicit observation supersedes an unconsumed candidate.
-          // Consume the old token before publishing the new one so a delayed
-          // B acknowledgement can never adopt after the source has moved to C.
-          if (priorEntry) blockedState.decisionTokens[priorEntry[0]]!.consumed = true;
-          token = `authority-${current.revision}-${normalizedPlanDigest.slice(0, 16)}`;
-          let suffix = 1;
-          while (Object.prototype.hasOwnProperty.call(blockedState.decisionTokens, token)) token = `authority-${current.revision}-${normalizedPlanDigest.slice(0, 16)}-${suffix++}`;
-          blockedState.decisionTokens[token] = { kind: 'AUTHORITY_ADOPTION', consumed: false, identity: digest(input.identity), expectedDigest: current.planDigest, observedDigest: normalizedPlanDigest, targetDigest: normalizedPlanDigest };
-        }
-        const blocked: Yield = { kind: 'DECISION_REQUIRED', brief: ref(`authority:${current.revision}`, { expected: current.planDigest, actual: normalizedPlanDigest, token }, 'authority'), token, cursor: { revision: current.revision, authorityEpoch: current.authorityEpoch, attemptEpoch: current.attemptEpoch, barrierEpoch: current.barrierEpoch }, snapshot: snapshot(blockedState) };
-        return this.commitYield(loaded.generation, blockedState, key, input.identity, blocked);
+        const adoption = authorityAdoptionRequired(current, input.identity, normalizedPlanDigest);
+        return this.commitYield(loaded.generation, adoption.state, key, input.identity, adoption.yield);
       }
+    }
+    // Managed admission is fail-closed before invoking the caller's
+    // admission hook.  A kill switch therefore cannot leak a policy probe,
+    // acquire a lease, or enter any downstream admission seam.
+    const managedRequested = this.#managedRolloutPolicy ? Boolean(this.#managedRolloutDecision?.admitted) : Boolean(this.#managedCapability);
+    if (this.#managedRolloutPolicy && this.#managedRolloutPolicy.mode !== 'disabled' && this.#managedRolloutDecision?.reason !== 'DIRECT_BYPASS' && !managedRequested) {
+      return asYield(current ?? emptyState(String(input.runId), plan.phaseId), { outcome: 'BLOCKED', reason: 'managed rollout cohort refused' });
+    }
+    if (managedRequested && this.#managedKillSwitch) {
+      return asYield(current ?? emptyState(String(input.runId), plan.phaseId), { outcome: 'BLOCKED', reason: 'managed capability unavailable' });
     }
     const claims = canonicalClaims(plan.steps);
     const admissionOk = recoveryAgainstCommittedPlan ? true : await proveAdmission(this.options.admission, { runId: String(input.runId), claims, workspace: this.options.workspace, ownership: this.options.ownership });
@@ -546,6 +875,31 @@ class KernelImpl implements RunKernel {
     // lifecycle unchanged while making the reducer capacity explicit.
     const recoveryCapacity = recoveryAgainstCommittedPlan ? 0 : this.configuredMaxInFlight;
 
+    let managedLease: import('./store.js').PublicationLease | undefined;
+    if (managedRequested && this.#managedCapability && !this.#managedKillSwitch && !current && input.event.kind === 'START') {
+      // The managed lease is a closed graph root, not an assertion about a
+      // caller-supplied name. Require canonical bytes before creating that
+      // root; validateEvent has already proved the digest/bytes relation.
+      if (typeof input.event.intentRef.bytes !== 'string') {
+        return asYield(emptyState(String(input.runId), plan.phaseId), { outcome: 'BLOCKED', reason: 'managed artifact unavailable' });
+      }
+      const leaseId = `lease-${digest({ runId: String(input.runId), phaseId: plan.phaseId, authorshipInputDigest: input.event.intentRef.digest, decisionKey: 'START' }).slice(0, 32)}`;
+      try {
+        // Validate ownership/provenance before touching the store. The same
+        // validator is applied again to the acquired lease and at commit.
+        assertManagedGraph({ proposal: { leaseSetId: leaseId, waveRef: input.event.intentRef }, leaseSets: { [leaseId]: { leaseId, closedRefGraph: [input.event.intentRef] } } });
+      } catch {
+        return asYield(emptyState(String(input.runId), plan.phaseId), { outcome: 'BLOCKED', reason: 'managed graph is invalid' });
+      }
+      const acquire = this.store.acquirePublicationLease;
+      if (!acquire) return asYield(emptyState(String(input.runId), plan.phaseId), { outcome: 'BLOCKED', reason: 'managed publication lease unavailable' });
+      try {
+        managedLease = await acquire.call(this.store, leaseId, [input.event.intentRef]);
+        assertManagedGraph({ proposal: { leaseSetId: leaseId, waveRef: input.event.intentRef }, leaseSets: { [leaseId]: { leaseId, closedRefGraph: managedLease.refs } } });
+      }
+      catch { return asYield(emptyState(String(input.runId), plan.phaseId), { outcome: 'BLOCKED', reason: 'managed publication lease unavailable' }); }
+    }
+
     // Stable context preparation is independent of the reducer event and is
     // retained through CURRENT commit for post-commit BASE publication.  The
     // graph, in contrast, is built only after a pure post-event preflight so a
@@ -553,17 +907,29 @@ class KernelImpl implements RunKernel {
     const preparedContext = recoveryAgainstCommittedPlan || input.event.kind === 'PARENT_DECISION' ? undefined : await this.#prepareContext(plan, current, input, loaded.generation);
 
     if (current && input.event.kind === 'PARENT_DECISION') {
-      const reduced = applyParentDecision(current, input.identity, input.event.token, input.event.value, segmentedJournalEnabled(this.store));
-      if (reduced.outcome === 'BLOCKED' && reduced.state === current) throw new Conflict(reduced.reason ?? 'invalid decision');
+      let preparedDecision: PreparedDecisionPublication | undefined;
+      if (this.managedRuntimeEnabled()) {
+        preparedDecision = await this.prepareDecisionPublication(current, input.event.token, input.event.value);
+      }
+      const reduced = applyParentDecision(current, input.identity, input.event.token, input.event.value, segmentedJournalEnabled(this.store), preparedDecision, plan);
+      if (reduced.outcome === 'BLOCKED' && reduced.state === current) {
+        // NO_SETTLEMENT is a pure refusal: no native event, token consumption,
+        // prefix publication, or generation CAS is allowed.  Return the
+        // existing public blocked shape while leaving the live token intact.
+        if (reduced.reason === 'NO_SETTLEMENT') return asYield(current, reduced);
+        throw new Conflict(reduced.reason ?? 'invalid decision');
+      }
       // A FINDINGS decision opens a fresh attempt.  Keep admission under the
       // same mandatory direct validator; effects still launch only on a later
       // RESUME, so this event never calls an external driver inline.
-      if (reduced.outcome === 'WAITING' && reduced.state.gate === 'NOT-DUE' && reduced.state.barrier === 'OPEN') refreshAdmission(reduced.state, plan, recoveryCapacity);
+      if (reduced.outcome === 'WAITING' && reduced.state.gate === 'NOT-DUE' && reduced.state.barrier === 'OPEN' && !reduced.deferAdmission) refreshAdmission(reduced.state, plan, recoveryCapacity);
+      if (this.managedRuntimeEnabled()) reduced.state = this.prepareManagedState(reduced.state, loaded.generation, input);
       return this.commitYield(loaded.generation, reduced.state, key, input.identity, asYield(reduced.state, reduced), preparedContext);
     }
 
-    if (current && input.event.kind === 'RESUME' && Object.values(current.outbox).some((command) => command.state === 'PENDING' || command.state === 'CLAIMED' || command.state === 'UNKNOWN')) {
-      const command = Object.values(current.outbox).find((candidate) => candidate.state === 'PENDING' || candidate.state === 'CLAIMED' || candidate.state === 'UNKNOWN');
+    const hasCurrentDispatch = (command: import('./model.js').OutboxCommand): boolean => Boolean(current && commandInCurrentFrame(current, command));
+    if (current && input.event.kind === 'RESUME' && Object.values(current.outbox).some((command) => (command.state === 'PENDING' || command.state === 'CLAIMED' || command.state === 'UNKNOWN') && hasCurrentDispatch(command))) {
+      const command = Object.values(current.outbox).find((candidate) => (candidate.state === 'PENDING' || candidate.state === 'CLAIMED' || candidate.state === 'UNKNOWN') && hasCurrentDispatch(candidate));
       const active = command ? this.activeDispatches.get(command.launchToken) : undefined;
       const liveInProcess = Boolean(command && active && active.commandDigest === command.commandDigest && active.leaseId === command.leaseId);
       const maximumInternalRecords = command?.state === 'CLAIMED' ? (liveInProcess ? 1 : 2) : command?.state === 'UNKNOWN' ? (liveInProcess ? 1 : this.coordinator.driver?.observe ? 2 : 1) : (admissionOk && this.coordinator.driver ? 3 : 1);
@@ -598,6 +964,10 @@ class KernelImpl implements RunKernel {
       if ((error as Error).message === 'JournalCeiling') return asYield(current ?? emptyState(String(input.runId), plan.phaseId), { outcome: 'BLOCKED', reason: 'JournalCeiling' });
       throw new InvalidEvent((error as Error).message);
     }
+    if (this.managedRuntimeEnabled() && managedRequested) {
+      try { reduced.state = this.prepareManagedState(reduced.state, loaded.generation, input, managedLease); }
+      catch (error) { if ((error as Error).message.includes('managed proposal') || (error as Error).message.includes('managed graph')) throw new Conflict((error as Error).message); throw error; }
+    }
     if (reduced.outcome === 'BLOCKED' && !reduced.state) return asYield(emptyState(String(input.runId), plan.phaseId), reduced);
     if (reduced.outcome === 'BLOCKED' && reduced.state === current && (input.event.kind === 'DISPATCH_RECEIPT' || input.event.kind === 'PARENT_DECISION')) throw new Conflict(reduced.reason ?? 'event rejected');
     return this.commitYield(loaded.generation, reduced.state, key, input.identity, asYield(reduced.state, reduced), preparedContext, preparedAdmission);
@@ -608,6 +978,9 @@ class KernelImpl implements RunKernel {
    * the sole commit facade and returns the immutable authority snapshot used
    * by the store-linearized launch fence. */
   private async commitClaim(generation: number, claimed: MachineState, claimedCommand: import('./model.js').OutboxCommand, key: string, input: AdvanceInput, waiting: Yield): Promise<{ generation: number; authority: StoreLinearizedDispatchRequest['authority'] } | { replay: Yield }> {
+    this.assertManagedCas(claimed, generation);
+    const managedAttempt = claimed.managed?.attempts?.[claimedCommand.commandId];
+    if (managedAttempt) { managedAttempt.leaseId = claimedCommand.leaseId; managedAttempt.status = 'LIVE'; }
     claimed.writerFence = nextWriterFence(claimed.writerFence, generation + 1, input.identity);
     claimed.processed[key] = { digest: input.identity.payloadDigest, yieldBytes: canonicalString(waiting), revision: claimed.revision, identity: clone(input.identity) };
     let claimedGeneration: number;
@@ -639,6 +1012,7 @@ class KernelImpl implements RunKernel {
     const next = clone(current);
     appendJournal(next, input.identity, input.event, segmentedJournalEnabled(this.store));
     refreshAdmission(next, plan, capacity);
+    if (this.managedRuntimeEnabled() && this.#managedCapability) applyManagedReservations(next, this.#managedCapability);
     const rebased: Yield = y.kind === 'WAITING'
       ? asYield(next, { outcome: 'WAITING' })
       : y.kind === 'BLOCKED'
@@ -649,13 +1023,37 @@ class KernelImpl implements RunKernel {
     return this.commitYield(generation, next, key, input.identity, rebased, preparedContext);
   }
 
+  /** Managed schema-2 transitions are admitted only while the exact
+   * capability descriptor is available and the operator switch is clear.
+   * This guard is deliberately placed immediately before every generation CAS
+   * (including private recovery/authority CASes), rather than relying on the
+   * initial START admission check. */
+  private assertManagedCas(state: MachineState, generation: number): void {
+    if (state.schema !== 2 || !state.managed) return;
+    if (!this.#managedCapability || this.#managedKillSwitch || state.managed.killSwitch || !verifyManagedCapability(state.managed.capability) || state.managed.capability.checksum !== this.#managedCapability.checksum || !managedAdmissionAllowed({ capability: this.#managedCapability, generation, killSwitch: this.#managedKillSwitch }, generation, this.#managedKillSwitch)) throw new Conflict('managed capability unavailable');
+    if (state.managed.rollout) {
+      if (!this.#managedRolloutPolicy || !verifyManagedRolloutPolicy(this.#managedRolloutPolicy) || !this.#managedRolloutDecision?.admitted
+        || state.managed.rollout.generation !== this.#managedRolloutPolicy.generation
+        || state.managed.rollout.digest !== this.#managedRolloutPolicy.digest
+        || state.managed.rollout.mode !== this.#managedRolloutPolicy.mode) throw new Conflict('managed rollout policy unavailable');
+    }
+  }
+
+  private async commitRetireManagedAttempt(generation: number, current: MachineState, token: string, input: AdvanceInput, plan: Plan, capacity: number, status: 'TIMED_OUT' | 'CANCELLED' | 'FAILED' = 'TIMED_OUT', preparedContext?: PreparedContext): Promise<Yield> {
+    this.assertManagedCas(current, generation);
+    const reduced = retireManagedAttempt(current, input.identity, token, plan, capacity, status, segmentedJournalEnabled(this.store));
+    if (reduced.outcome === 'BLOCKED' || reduced.state === current) return asYield(current, reduced);
+    if (this.managedRuntimeEnabled() && this.#managedCapability) applyManagedReservations(reduced.state, this.#managedCapability);
+    return this.commitYield(generation, reduced.state, identityKey(input.identity), input.identity, asYield(reduced.state, reduced), preparedContext);
+  }
+
   /**
    * Persist a receipt/UNKNOWN transition using the same launch-token identity
    * as the original command.  One invocation owns exactly eight private typed
    * generation-CAS retry grants after its first attempt; no external effect is
    * retried and no unrelated error is classified by message text.
    */
-  private async commitDispatcherOutcome(token: string, expectedDigest: string, plan: Plan, capacity: number, receipt?: DriverReceipt, expectedLeaseId?: string, receiptLeaseId?: string): Promise<Yield | undefined> {
+  private async commitDispatcherOutcome(token: string, expectedDigest: string, plan: Plan, capacity: number, receipt?: DriverReceipt, expectedLeaseId?: string, receiptLeaseId?: string, teardownEvidence?: Ref): Promise<Yield | undefined> {
     let receiptMode = receipt === undefined ? 'UNKNOWN' as const : 'RECEIPT' as const;
     let remainingTypedCasRetries = 8;
     for (;;) {
@@ -666,7 +1064,11 @@ class KernelImpl implements RunKernel {
       if (!command || command.commandDigest !== expectedDigest) return undefined;
       if (receiptMode === 'RECEIPT') {
         if (!receipt) return undefined;
-        if (command.state === 'ACKED') return asYield(state, { outcome: 'WAITING' });
+        if (command.state === 'ACKED') {
+          const anchored = state.managed?.attempts?.[command.commandId]?.authorityAnchor;
+          if (command.roleView && (!anchored || !receipt?.authorityAnchor || canonicalString(anchored) !== canonicalString(receipt.authorityAnchor))) return undefined;
+          return asYield(state, { outcome: 'WAITING' });
+        }
         // Observation receipts are tied to the UNKNOWN lease they were
         // started for.  Unlike a dispatch Promise's late receipt channel,
         // an observer that was delayed across a successor claim must not
@@ -679,10 +1081,11 @@ class KernelImpl implements RunKernel {
         if (expectedLeaseId !== undefined && (command.leaseId !== expectedLeaseId || command.state === 'PENDING')) return undefined;
         if (receipt.launchToken !== token || receipt.commandDigest !== expectedDigest) return undefined;
         validateRef(receipt.ref);
+        if (receipt.authorityAnchor) validateRef(receipt.authorityAnchor);
         const next = clone(state); const nextCommand = commandForToken(next, token)!;
         const event: Event = { kind: 'DISPATCH_RECEIPT', ref: receiptEnvelope(nextCommand, receipt) };
         const identity = internalIdentity(next, nextCommand, `dispatcher-receipt:${token}:${next.revision + 1}`, event);
-        try { applyDispatchReceipt(next, identity, event); appendJournal(next, identity, event, segmentedJournalEnabled(this.store)); refreshAdmission(next, plan, capacity); }
+        try { this.assertManagedCas(state, loaded.generation); applyDispatchReceipt(next, identity, event); appendJournal(next, identity, event, segmentedJournalEnabled(this.store)); refreshAdmission(next, plan, capacity); if (this.managedRuntimeEnabled() && this.#managedCapability) applyManagedReservations(next, this.#managedCapability); }
         catch (error) {
           // A receipt that cannot fit is external-effect uncertainty, not a
           // reason to acknowledge an unrepresentable result.  Continue in
@@ -705,11 +1108,21 @@ class KernelImpl implements RunKernel {
       // WAITING replay after a matching receipt has already ACKED the command.
       if (command.state === 'ACKED' || command.state === 'UNKNOWN') return undefined;
       if (command.state !== 'CLAIMED' || typeof expectedLeaseId !== 'string' || command.leaseId !== expectedLeaseId) return undefined;
-      const next = clone(state); const nextCommand = commandForToken(next, token)!; unknown(nextCommand);
+      const next = clone(state); const nextCommand = commandForToken(next, token)!;
+      if (nextCommand.roleView) {
+        if (!teardownEvidence) return undefined;
+        try { validateRef(teardownEvidence); } catch { return undefined; }
+        if (teardownEvidence.scope !== 'outbox/teardown') return undefined;
+        nextCommand.noEffectEvidence = [...(nextCommand.noEffectEvidence ?? []), clone(teardownEvidence)];
+      }
+      unknown(nextCommand);
+      this.assertManagedCas(state, loaded.generation);
+      const unknownAttempt = next.managed?.attempts?.[nextCommand.commandId];
+      if (unknownAttempt && (unknownAttempt.status === 'LIVE' || unknownAttempt.status === 'UNKNOWN')) unknownAttempt.status = 'UNKNOWN';
       const evidence: Ref = ref(`unknown:${token}`, { launchToken: token, commandDigest: expectedDigest, status: 'UNKNOWN' }, 'outbox/recovery');
       const event: Event = { kind: 'OBSERVATION', category: 'RECOVERY', ref: evidence };
       const identity = internalIdentity(next, nextCommand, `dispatcher-unknown:${token}:${next.revision + 1}`, event);
-      appendJournal(next, identity, event, segmentedJournalEnabled(this.store)); refreshAdmission(next, plan, capacity);
+      appendJournal(next, identity, event, segmentedJournalEnabled(this.store)); refreshAdmission(next, plan, capacity); if (this.managedRuntimeEnabled() && this.#managedCapability) applyManagedReservations(next, this.#managedCapability);
       next.writerFence = nextWriterFence(next.writerFence, loaded.generation + 1, identity);
       try { await this.store.commit(loaded.generation, next); }
       catch (error) {
@@ -754,9 +1167,36 @@ class KernelImpl implements RunKernel {
     } catch { return undefined; }
   }
 
+  /** Reconcile the private leaseSet status after its publication row has
+   * crossed the store's ACTIVE-to-PROMOTED boundary. This bounded, no-journal
+   * CAS may lose a race; the next recovery/commit can retry convergence. */
+  private async convergeManagedLeasePromotion(leaseSetId: string, identity: EventIdentity): Promise<boolean> {
+    try {
+      const loaded = await this.store.load();
+      const current = loaded.state;
+      const leaseSet = current?.schema === 2 ? current.managed?.leaseSets[leaseSetId] : undefined;
+      if (!current || !leaseSet) return false;
+      if (leaseSet.status !== 'ACTIVE') return leaseSet.status === 'PROMOTED';
+      const next = clone(current);
+      next.managed!.leaseSets[leaseSetId]!.status = 'PROMOTED';
+      // This is still a managed authority CAS (even though it carries no
+      // public event), so the capability generation and operator gate must be
+      // checked at the last possible moment just like every other write.
+      this.assertManagedCas(current, loaded.generation);
+      next.writerFence = nextWriterFence(current.writerFence, loaded.generation + 1, identity);
+      await this.store.commit(loaded.generation, next);
+      return true;
+    } catch {
+      // The durable publication row remains bounded if this reconciliation
+      // loses a CAS race or the store is temporarily unavailable.
+      return false;
+    }
+  }
+
   private async commitYield(generation: number, state: MachineState, key: string, identity: EventIdentity, y: Yield, preparedContext?: PreparedContext, preparedAdmission?: PreparedAdmission): Promise<Yield> {
     const next = state === undefined ? state : clone(state);
     if (!next) return y;
+    this.assertManagedCas(next, generation);
     // Every durable event gets a unique writer fence.  It is private state,
     // but it is the binding that makes staged reuse publication exact.
     next.writerFence = nextWriterFence(state.writerFence, generation + 1, identity);
@@ -773,6 +1213,24 @@ class KernelImpl implements RunKernel {
       const replay = await this.recoverExactCommittedReplay(key, identity);
       if (replay !== undefined) return replay;
       throw mapped;
+    }
+    // Promotion follows the authoritative CURRENT CAS.  A crash in this
+    // small post-commit window leaves a bounded lease root, never an
+    // unpinned authoritative Ref; restart/recovery can safely re-promote it.
+    const leaseIds = new Set<string>();
+    if (next.managed?.proposal?.leaseSetId) leaseIds.add(next.managed.proposal.leaseSetId);
+    for (const record of Object.values(next.decisionTokens)) if (record.consumed && record.publicationLeaseSetId) leaseIds.add(record.publicationLeaseSetId);
+    for (const leaseSetId of leaseIds) if (this.store.promotePublicationLease) {
+      try {
+        const promoted = await this.store.promotePublicationLease(leaseSetId);
+        if (promoted.status === 'PROMOTED' && await this.convergeManagedLeasePromotion(leaseSetId, identity)) {
+          // Once CURRENT owns the closed graph, the temporary publication row
+          // has served its purpose and can be released. A crash before this
+          // call leaves a bounded PROMOTED row for deterministic recovery.
+          if (this.store.releasePublicationLease) await this.store.releasePublicationLease(leaseSetId);
+        }
+      }
+      catch { /* lease remains bounded and is never treated as authority */ }
     }
     try { await publishPreparedContext(preparedContext, this.store); }
     catch { /* the authoritative commit is already durable; the row is a miss next time */ }
@@ -799,10 +1257,12 @@ export function makeComposedKernel(options: KernelOptions, driver?: EffectDriver
   let snapshot: DispatchDriverSnapshot | undefined;
   if (driver !== undefined) {
     if (!driver || typeof driver !== 'object') throw new InvalidPlan('driver is invalid');
+    const prepare = driver.prepare;
     const dispatch = driver.dispatch;
     const observe = driver.observe;
-    if (typeof dispatch !== 'function' || (observe !== undefined && typeof observe !== 'function')) throw new InvalidPlan('driver is invalid');
-    snapshot = { receiver: driver, dispatch, observe };
+    const observeTeardown = driver.observeTeardown;
+    if ((prepare !== undefined && typeof prepare !== 'function') || typeof dispatch !== 'function' || (observe !== undefined && typeof observe !== 'function') || (observeTeardown !== undefined && typeof observeTeardown !== 'function')) throw new InvalidPlan('driver is invalid');
+    snapshot = { receiver: driver, prepare, dispatch, observe, observeTeardown };
   }
   return new KernelImpl(options, configuredMaxInFlight, storeForRoot(options.rootDir), snapshot, dispatcher);
 }
@@ -817,10 +1277,12 @@ export function makeComposedKernelForBridge(options: KernelOptions, expectedRoot
   let snapshot: DispatchDriverSnapshot | undefined;
   if (driver !== undefined) {
     if (!driver || typeof driver !== 'object') throw new InvalidPlan('driver is invalid');
+    const prepare = driver.prepare;
     const dispatch = driver.dispatch;
     const observe = driver.observe;
-    if (typeof dispatch !== 'function' || (observe !== undefined && typeof observe !== 'function')) throw new InvalidPlan('driver is invalid');
-    snapshot = { receiver: driver, dispatch, observe };
+    const observeTeardown = driver.observeTeardown;
+    if ((prepare !== undefined && typeof prepare !== 'function') || typeof dispatch !== 'function' || (observe !== undefined && typeof observe !== 'function') || (observeTeardown !== undefined && typeof observeTeardown !== 'function')) throw new InvalidPlan('driver is invalid');
+    snapshot = { receiver: driver, prepare, dispatch, observe, observeTeardown };
   }
   return new KernelImpl(options, configuredMaxInFlight, storeForRoot(options.rootDir, expectedRootIdentity), snapshot, dispatcher);
 }

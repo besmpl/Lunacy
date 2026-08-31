@@ -27,6 +27,19 @@ lifecycle method is `kernel.advance(input)`. `rootDir` is optional: omission
 uses an in-memory store; a supplied directory persists `.kernel/CURRENT`,
 immutable generations, and the append-only journal.
 
+Adaptive deliberation is private host composition. Package install and managed
+runtime deployment create no ambient rollout, so omission remains fail-safe
+disabled. The separately installed operator profile composes reviewed D3
+`automatic-focus` with `createManagedRolloutPolicy` only as one generation-1,
+effect-denied Focus Wave before the acceptance pointer/Plan is sealed and
+before the first implementation spawn. It never automatically WIDENs or
+re-enters from gates, repair, worker completion, resume, rollout, or an
+existing rollout-bearing run; an unsettled Wave returns exactly one parent
+decision boundary. It preserves Direct bypass, user-explicit ADHD/Explore,
+exact Luna/max isolation, and parent authority; missing or nonconforming
+composition is disabled/refused without fallback. Validate its operator surface and a disposable target with
+the copy-paste procedure in the [adaptive operator contract](../orchestrator/DELIBERATION.md).
+
 ## Minimal API
 
 ```js

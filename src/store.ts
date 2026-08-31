@@ -1,10 +1,13 @@
 import { promises as fs, constants as fsConstants, type Dirent } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { isPromise, isProxy } from 'node:util/types';
-import type { Event, EventIdentity, MachineState, OutboxCommand, Ref } from './model.js';
+import type { Event, EventIdentity, MachineState, OutboxCommand, Ref, ManagedState } from './model.js';
+import { assertManagedGraph, verifyManagedCapability, verifyManagedRolloutProjection, type ManagedGraphRef, type ManagedGraphAttemptOwner, type ManagedGraphDecisionOwner } from './managed-capability.js';
 import type { DriverReceipt } from './outbox.js';
 import { canonicalString, digest, identityKey, parseCanonical } from './canonical.js';
 import { validateDependencyTopology } from './dependency.js';
+import { deriveTopology, isManagedDissent, reconcileWave, settlementPrefixDigest, validateReport, validateWave, type AcceptedReport, type DeliberationPolicy, type DeliberationReport, type DeliberationWave } from './deliberation.js';
+import { validatePlan } from './validator.js';
 import { CURRENT_BYTE_CEILING, JOURNAL_BYTE_CEILING, JOURNAL_EVENT_CEILING, MANAGED_METADATA_BYTE_CEILING, READ_ONLY_STATE_BYTE_CEILING } from './limits.js';
 import { assertStableIdentity, ensurePrivateDirectory, filesystemIdentity, inspectTrustedPath, sameFilesystemIdentity, trustedIdentity, type FilesystemIdentity } from './filesystem.js';
 import {
@@ -18,6 +21,7 @@ import {
 } from './release-admission.js';
 
 export type StoreSnapshot = { state: MachineState | undefined; generation: number };
+export type PublicationLease = { leaseId: string; refs: Ref[]; expiresAt: number; status: 'ACTIVE' | 'PROMOTED' | 'EXPIRED' };
 /** Artifact format selector. `segmented` is the shipped v1 format; v2 is an
  * explicit opt-in marker and is intentionally not selected implicitly. */
 export type ArtifactFormat = 'legacy' | 'segmented' | 'segmented/v2' | 'segmented-v2';
@@ -104,6 +108,12 @@ export interface ArtifactStore {
   reusePublish?(record: ReuseRecord): Promise<void>;
   reuseQuarantine?(key: string): Promise<void>;
   reuseClear?(): Promise<void>;
+  /** Private managed publication lease family.  Leases are bounded roots;
+   * callers must promote only after the authoritative journal CAS succeeds. */
+  acquirePublicationLease?(leaseId: string, refs: readonly Ref[], ttlMs?: number): Promise<PublicationLease>;
+  promotePublicationLease?(leaseId: string): Promise<PublicationLease>;
+  releasePublicationLease?(leaseId: string): Promise<void>;
+  collectPublicationLeases?(now?: number): Promise<{ removed: number }>;
 }
 
 function cloneState(state: MachineState): MachineState { return JSON.parse(JSON.stringify(state)) as MachineState; }
@@ -202,18 +212,232 @@ function refIsValid(ref: unknown): ref is Ref {
   return true;
 }
 
+function managedReceiptAuthorityAnchorIsValid(ref: unknown, commandDigest: string, reportDigest: string): ref is Ref {
+  if (!refIsValid(ref) || ref.scope !== 'outbox/managed-receipt-authority' || ref.id !== `managed-receipt-authority:${commandDigest}:${ref.digest}` || typeof ref.bytes !== 'string') return false;
+  try {
+    const payload = parseCanonical<Record<string, unknown>>(ref.bytes);
+    return Object.keys(payload).sort().join(',') === 'commandDigest,receiptDigest,reportDigest,schema,teardown,transport'
+      && payload.schema === 'lunacy-managed-receipt-authority/v1' && payload.commandDigest === commandDigest && payload.reportDigest === reportDigest
+      && typeof payload.receiptDigest === 'string' && SHA256.test(payload.receiptDigest)
+      && refIsValid(payload.transport) && (payload.transport as Ref).scope === 'outbox/model-transport'
+      && refIsValid(payload.teardown) && (payload.teardown as Ref).scope === 'outbox/teardown';
+  } catch { return false; }
+}
+
 function dispatchProofIsValid(ref: Ref): boolean {
   try {
     const proof = parseCanonical<Record<string, unknown>>(ref.bytes ?? '');
-    return Boolean(proof && typeof proof === 'object' && !Array.isArray(proof) && typeof proof.launchToken === 'string' && typeof proof.commandDigest === 'string' && Object.keys(proof).every((key) => ['launchToken', 'commandDigest', 'receipt'].includes(key)) && (proof.receipt === undefined || refIsValid(proof.receipt)));
+    return Boolean(proof && typeof proof === 'object' && !Array.isArray(proof) && typeof proof.launchToken === 'string' && typeof proof.commandDigest === 'string'
+      && Object.keys(proof).every((key) => ['launchToken', 'commandDigest', 'receipt', 'authorityAnchor'].includes(key))
+      && (proof.receipt === undefined || refIsValid(proof.receipt))
+      && (proof.authorityAnchor === undefined || (refIsValid(proof.receipt) && managedReceiptAuthorityAnchorIsValid(proof.authorityAnchor, proof.commandDigest, proof.receipt.digest))));
   } catch { return false; }
 }
 
 function workerEnvelopeIsValid(ref: Ref): boolean {
   try {
     const result = parseCanonical<Record<string, unknown>>(ref.bytes ?? '');
-    return Boolean(result && typeof result === 'object' && !Array.isArray(result) && typeof result.status === 'string' && Object.keys(result).length === 1);
+    if (!result || typeof result !== 'object' || Array.isArray(result)) return false;
+    if (typeof result.status === 'string' && Object.keys(result).length === 1) return true;
+    // Managed deliberation envelopes carry an exact Report/v2 object. The
+    // reducer/store perform the deeper Wave/topology/receipt validation.
+    return result.schema === 'lunacy-deliberation-report/v2'
+      && Object.prototype.hasOwnProperty.call(result, 'wave')
+      && Number.isSafeInteger(result.slotOrdinal);
   } catch { return false; }
+}
+
+/** Rebuild the narrow policy binding needed to validate a durable Wave.  The
+ * provider policy is not persisted in the public state; Report/v2 still binds
+ * its Wave to the exact authored policy version and the deterministic frame
+ * catalog shape used by the managed reducer. */
+function managedPolicyForWave(wave: DeliberationWave): DeliberationPolicy {
+  const frameCatalog = wave.gear === 'EXPLORE'
+    ? wave.generatorLenses.map((frame, index) => ({ frameId: frame.frameId, tag: index === 4 ? 'wild' as const : 'code' as const, text: frame.frameId }))
+    : [];
+  return {
+    version: wave.authorship.policyVersion,
+    frameCatalog,
+    maxMaterialDecisions: 0,
+    maxSettlementBytes: wave.limits.maxTotalReportBytes,
+    maxResolvedRoleInputBytes: wave.limits.maxResolvedRoleInputBytes,
+    convergeCount: 3,
+    nonObviousNovelty: 0,
+    viableFloor: 0,
+  };
+}
+
+/** Validate accepted rows as a prefix projection rather than trusting the
+ * canonical bytes alone.  Partial rows are valid (the next predecessor may
+ * not have arrived); every admitted row must nevertheless be a real current
+ * topology slot, and no row may be silently dropped by reconcileWave. */
+function validateAcceptedReportProjection(rows: readonly Record<string, unknown>[], state: MachineState): void {
+  if (!rows.length) return;
+  invariant(state.managed?.proposal !== undefined, 'managed accepted reports require a proposal');
+  const groups = new Map<string, { ref: Ref; wave: DeliberationWave; reports: AcceptedReport[] }>();
+  for (const row of rows) {
+    const reportRef = row.ref as Ref;
+    const report = row.report as DeliberationReport;
+    let parsed: DeliberationReport;
+    try { parsed = parseCanonical<DeliberationReport>(reportRef.bytes!); }
+    catch { throw new Error('ManifestMismatch: managed accepted report bytes are invalid'); }
+    const waveRef = parsed.wave;
+    invariant(waveRef && typeof waveRef === 'object' && waveRef.scope === 'deliberation/wave' && typeof waveRef.bytes === 'string', 'managed accepted report Wave Ref is invalid');
+    let wave: DeliberationWave;
+    try { wave = parseCanonical<DeliberationWave>(waveRef.bytes); }
+    catch { throw new Error('ManifestMismatch: managed accepted report Wave bytes are invalid'); }
+    const policy = managedPolicyForWave(wave);
+    const waveValidation = validateWave(wave, { runId: state.runId, phaseId: state.phaseId, policy, committedEvidence: new Set(), reachableConstraints: new Set() });
+    invariant(waveValidation.ok && digest(wave) === waveRef.digest, 'managed accepted report Wave binding is invalid');
+    const topology = deriveTopology(waveRef, waveValidation.value);
+    invariant(topology.slots.some((slot) => slot.slotOrdinal === parsed.slotOrdinal), 'managed accepted report slot is outside the topology');
+    const key = canonicalString(waveRef);
+    const group = groups.get(key) ?? { ref: { ...waveRef }, wave: waveValidation.value, reports: [] };
+    group.reports.push({ ref: { ...reportRef }, report, receipt: row.receipt as AcceptedReport['receipt'] });
+    groups.set(key, group);
+  }
+  for (const group of groups.values()) {
+    const result = reconcileWave(group.ref, group.wave, group.reports);
+    invariant(result.architecture !== 'CONFLICT' && result.architecture !== 'STALE', 'managed accepted report prefix is not reconciliable');
+    invariant(result.refs.length === group.reports.length && group.reports.every((item) => result.refs.some((ref) => canonicalString(ref) === canonicalString(item.ref))), 'managed accepted report row is outside the validated prefix');
+  }
+}
+
+function managedSettlementPrefixStore(state: MachineState, token: Record<string, unknown>): Ref[] | undefined {
+  const generation = token.predecessorGeneration;
+  if (typeof generation !== 'number' || !Number.isSafeInteger(generation)) return undefined;
+  const generationNumber = generation;
+  const rows: Array<{ generation: number; ref: Ref }> = [];
+  for (const candidate of Object.values(state.decisionTokens)) {
+    if (candidate.kind !== 'DELIBERATION_SELECTION' && candidate.kind !== 'DELIBERATION') continue;
+    if (!candidate.consumed || typeof candidate.predecessorGeneration !== 'number' || !Number.isSafeInteger(candidate.predecessorGeneration) || candidate.predecessorGeneration >= generationNumber || (candidate.disposition !== 'SELECTION' && candidate.disposition !== 'SYNTHESIS')) continue;
+    if (typeof candidate.nullableSettlement !== 'string') continue;
+    const ref = state.managed?.settlements?.[candidate.nullableSettlement];
+    const leaseId = candidate.publicationLeaseSetId;
+    const lease = leaseId ? state.managed?.leaseSets?.[leaseId] : undefined;
+    if (!ref || !refIsValid(ref) || ref.scope?.startsWith('deliberation/settlement') !== true || typeof ref.bytes !== 'string'
+      || !lease || lease.status === 'EXPIRED' || !Array.isArray(lease.closedRefGraph) || !lease.closedRefGraph.some((candidateRef) => canonicalString(candidateRef) === canonicalString(ref))) return undefined;
+    // Only a fully validated consumed owner may contribute a Ref to a later
+    // authorship prefix. This recursively proves the owner's own predecessor
+    // closure and keeps a map-inserted canonical Ref from becoming a root.
+    if (!managedSettlementRecordIsValid(ref, candidate, state)) return undefined;
+    rows.push({ generation: candidate.predecessorGeneration, ref });
+  }
+  rows.sort((a, b) => a.generation - b.generation);
+  for (let index = 1; index < rows.length; index += 1) if (rows[index - 1].generation === rows[index].generation) return undefined;
+  for (let index = 1; index < rows.length; index += 1) if (canonicalString(rows[index - 1].ref) === canonicalString(rows[index].ref)) return undefined;
+  const refs = rows.map((row) => row.ref);
+  if (!refIsValid(token.waveRef) || typeof (token.waveRef as Ref).bytes !== 'string') return undefined;
+  try {
+    const wave = parseCanonical<DeliberationWave>((token.waveRef as Ref).bytes!);
+    const policy = managedPolicyForWave(wave);
+    const admitted = validateWave(wave, { runId: state.runId, phaseId: state.phaseId, policy, committedEvidence: new Set(), reachableConstraints: new Set() });
+    if (!admitted.ok || admitted.value.authorship.settlementPrefixDigest !== settlementPrefixDigest(refs)) return undefined;
+  } catch { return undefined; }
+  return refs;
+}
+
+function managedAcceptedReportPrefixSnapshotStore(token: Record<string, unknown>): Ref {
+  const value = { schema: 'lunacy-managed-accepted-report-prefix/v1', waveRef: token.waveRef, orderedReportRefs: token.orderedReportRefs };
+  const bytes = canonicalString(value);
+  const reportDigest = digest(value);
+  return { id: `accepted-report-prefix:${reportDigest.slice(0, 16)}`, scope: 'deliberation/report-prefix', digest: reportDigest, bytes };
+}
+
+function managedSuccessorWaveIsBoundStore(state: MachineState, token: Record<string, unknown>, successor: Ref): boolean {
+  if (!refIsValid(token.waveRef) || typeof (token.waveRef as Ref).bytes !== 'string' || typeof successor.bytes !== 'string') return false;
+  const prefix = managedSettlementPrefixStore(state, token);
+  if (!prefix) return false;
+  try {
+    const focus = parseCanonical<DeliberationWave>((token.waveRef as Ref).bytes!);
+    const next = parseCanonical<DeliberationWave>(successor.bytes!);
+    const focusPolicy = managedPolicyForWave(focus);
+    const nextPolicy = managedPolicyForWave(next);
+    const focusValid = validateWave(focus, { runId: state.runId, phaseId: state.phaseId, policy: focusPolicy, committedEvidence: new Set(), reachableConstraints: new Set() });
+    const nextValid = validateWave(next, { runId: state.runId, phaseId: state.phaseId, policy: nextPolicy, committedEvidence: new Set(), reachableConstraints: new Set() });
+    if (!focusValid.ok || !nextValid.ok || focusValid.value.gear !== 'FOCUS' || nextValid.value.gear !== 'EXPLORE') return false;
+    const a = nextValid.value.authorship;
+    const f = focusValid.value.authorship;
+    const prefixDigest = settlementPrefixDigest(prefix);
+    if (f.settlementPrefixDigest !== prefixDigest) return false;
+    return canonicalString(a.intent) === canonicalString(token.waveRef)
+      && canonicalString(a.evidenceSnapshot) === canonicalString(managedAcceptedReportPrefixSnapshotStore(token))
+      && a.authorityDigest === f.authorityDigest
+      && canonicalString(a.policyVersion) === canonicalString(f.policyVersion)
+      && a.settlementPrefixDigest === prefixDigest
+      && a.decisionKey === token.decisionKey
+      && a.prospectiveEffectFrontierOrdinal === f.prospectiveEffectFrontierOrdinal;
+  } catch { return false; }
+}
+
+function managedSettlementRecordIsValid(settlement: Ref, token: Record<string, unknown>, state: MachineState): boolean {
+  if (typeof settlement.bytes !== 'string' || settlement.scope?.startsWith('deliberation/settlement') !== true) return false;
+  let record: Record<string, unknown>;
+  try { record = parseCanonical<Record<string, unknown>>(settlement.bytes); } catch { return false; }
+  const required = ['schema', 'authorshipInputDigest', 'decisionKey', 'frontierOrdinal', 'waveRef', 'orderedReportRefs', 'basis', 'dissent', 'predecessors', 'result'];
+  if (Object.keys(record).some((key) => ![...required, 'selection', 'synthesis', 'disposition', 'resultDigest'].includes(key)) || required.some((key) => !Object.prototype.hasOwnProperty.call(record, key))) return false;
+  if (record.schema !== 'lunacy-deliberation-settlement/v1' && record.schema !== 'lunacy-parent-decision/v1') return false;
+  if (record.authorshipInputDigest !== token.authorshipInputDigest || record.decisionKey !== token.decisionKey || !Number.isSafeInteger(record.frontierOrdinal) || !refIsValid(token.waveRef)) return false;
+  try {
+    const waveRef = token.waveRef as Ref;
+    const wave = parseCanonical<DeliberationWave>(waveRef.bytes ?? '');
+    const policy = managedPolicyForWave(wave);
+    const admitted = validateWave(wave, { runId: state.runId, phaseId: state.phaseId, policy, committedEvidence: new Set(), reachableConstraints: new Set() });
+    if (!admitted.ok || record.frontierOrdinal !== admitted.value.authorship.prospectiveEffectFrontierOrdinal) return false;
+  } catch { return false; }
+  if (!refIsValid(record.waveRef) || canonicalString(record.waveRef) !== canonicalString(token.waveRef) || !Array.isArray(record.orderedReportRefs) || canonicalString(record.orderedReportRefs) !== canonicalString(token.orderedReportRefs)) return false;
+  if (record.disposition !== undefined && record.disposition !== token.disposition) return false;
+  if (!Array.isArray(record.predecessors) || record.predecessors.some((item) => !refIsValid(item) || (item as Ref).scope?.startsWith('deliberation/settlement') !== true)) return false;
+  if (new Set((record.predecessors as Ref[]).map((item) => canonicalString(item))).size !== (record.predecessors as Ref[]).length || (record.predecessors as Ref[]).some((item) => canonicalString(item) === canonicalString(settlement))) return false;
+  if (record.basis === null || record.basis === undefined || !isManagedDissent(record.dissent)) return false;
+  const prefix = managedSettlementPrefixStore(state, token);
+  if (!prefix) return false;
+  const prefixKeys = prefix.map((item) => canonicalString(item));
+  const predecessorIndexes = (record.predecessors as Ref[]).map((item) => prefixKeys.indexOf(canonicalString(item)));
+  if (predecessorIndexes.some((index) => index < 0) || predecessorIndexes.some((index, i) => i > 0 && index <= predecessorIndexes[i - 1])) return false;
+  const result = record.result;
+  if (!result || typeof result !== 'object' || Array.isArray(result) || canonicalString(result) === '') return false;
+  if (digest(result) !== token.resultDigest || (result as Record<string, unknown>).kind !== token.resultKind) return false;
+  const resultObject = result as Record<string, unknown>;
+  if (resultObject.kind === 'COMPLETE_PLAN') {
+    if (Object.keys(resultObject).some((key) => !['kind', 'plan'].includes(key)) || !Object.prototype.hasOwnProperty.call(resultObject, 'plan')) return false;
+    try { if (validatePlan(resultObject.plan as import('./model.js').Plan).plan.phaseId !== state.phaseId) return false; } catch { return false; }
+  } else if (resultObject.kind === 'DELIBERATION_REQUIRED') {
+    if (Object.keys(resultObject).some((key) => !['kind', 'wave'].includes(key)) || !refIsValid(resultObject.wave) || (resultObject.wave as Ref).scope !== 'deliberation/wave' || typeof (resultObject.wave as Ref).bytes !== 'string') return false;
+    try { if (JSON.parse((resultObject.wave as Ref).bytes!).schema !== 'lunacy-deliberation-wave/v2') return false; } catch { return false; }
+  } else if (resultObject.kind === 'NO_SETTLEMENT') {
+    if (Object.keys(resultObject).some((key) => !['kind', 'reason'].includes(key)) || !refIsValid(resultObject.reason) || !(resultObject.reason as Ref).scope?.startsWith('deliberation')) return false;
+  } else return false;
+  if (record.resultDigest !== undefined && record.resultDigest !== token.resultDigest) return false;
+  const boundLocator = (value: unknown): boolean => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+    const locator = value as Record<string, unknown>;
+    if (Object.keys(locator).some((key) => !['generatorReport', 'oneBasedOrdinal'].includes(key)) || !Number.isSafeInteger(locator.oneBasedOrdinal) || (locator.oneBasedOrdinal as number) < 1 || !refIsValid(locator.generatorReport)) return false;
+    const generatorRef = locator.generatorReport as Ref;
+    if (generatorRef.scope !== 'deliberation/report' || !(token.orderedReportRefs as Ref[]).some((candidate) => canonicalString(candidate) === canonicalString(generatorRef)) || typeof (token.waveRef as Ref)?.bytes !== 'string') return false;
+    try {
+      const waveRef = token.waveRef as Ref;
+      const wave = parseCanonical<DeliberationWave>(waveRef.bytes!);
+      const policy = managedPolicyForWave(wave);
+      const validWave = validateWave(wave, { runId: state.runId, phaseId: state.phaseId, policy, committedEvidence: new Set(), reachableConstraints: new Set() });
+      if (!validWave.ok) return false;
+      const report = parseCanonical<DeliberationReport>(generatorRef.bytes!);
+      const slot = deriveTopology(waveRef, validWave.value).slots.find((candidate) => candidate.slotOrdinal === report.slotOrdinal);
+      if (!slot || slot.role !== 'GENERATOR') return false;
+      const checked = validateReport(report, { waveRef, wave: validWave.value, slot, predecessors: [], policy });
+      return checked.ok && 'ideas' in checked.value && (locator.oneBasedOrdinal as number) <= checked.value.ideas.length;
+    } catch { return false; }
+  };
+  if (token.disposition === 'SELECTION') {
+    if (!boundLocator(record.basis)) return false;
+    if (record.selection !== undefined && (!boundLocator(record.selection) || canonicalString(record.selection) !== canonicalString(record.basis))) return false;
+    if (record.synthesis !== undefined) return false;
+  } else {
+    if (record.selection !== undefined) return false;
+    if (typeof record.synthesis !== 'string' || record.synthesis.length === 0 || !Array.isArray(record.basis) || record.basis.length === 0) return false;
+    if (record.basis.some((item) => !boundLocator(item))) return false;
+  }
+  return true;
 }
 
 function recoveryProofIsValid(ref: Ref): boolean {
@@ -309,14 +533,21 @@ function enumerableData(value: unknown, label: string): Record<string, unknown> 
 
 function cloneDriverReceipt(value: unknown): DriverReceipt {
   const receipt = enumerableData(value, 'driver receipt');
-  exactKeys(receipt, ['launchToken', 'commandDigest', 'ref'], 'driver receipt');
+  exactKeys(receipt, ['launchToken', 'commandDigest', 'ref', ...(Object.prototype.hasOwnProperty.call(receipt, 'authorityAnchor') ? ['authorityAnchor'] : [])], 'driver receipt');
   invariant(typeof receipt.launchToken === 'string' && receipt.launchToken.length > 0, 'driver receipt launchToken is invalid');
   invariant(typeof receipt.commandDigest === 'string' && SHA256.test(receipt.commandDigest), 'driver receipt commandDigest is invalid');
   const refValue = enumerableData(receipt.ref, 'driver receipt ref');
   invariant(Object.keys(refValue).every((key) => ['id', 'digest', 'scope', 'bytes'].includes(key)), 'driver receipt ref fields are invalid');
   const clonedRef = { ...refValue } as Ref;
   invariant(refIsValid(clonedRef), 'driver receipt ref is invalid');
-  return { launchToken: receipt.launchToken, commandDigest: receipt.commandDigest, ref: clonedRef };
+  let authorityAnchor: Ref | undefined;
+  if (receipt.authorityAnchor !== undefined) {
+    const anchorValue = enumerableData(receipt.authorityAnchor, 'driver receipt authority anchor');
+    invariant(Object.keys(anchorValue).every((key) => ['id', 'digest', 'scope', 'bytes'].includes(key)), 'driver receipt authority anchor fields are invalid');
+    authorityAnchor = { ...anchorValue } as Ref;
+    invariant(managedReceiptAuthorityAnchorIsValid(authorityAnchor, receipt.commandDigest as string, clonedRef.digest), 'driver receipt authority anchor is invalid');
+  }
+  return { launchToken: receipt.launchToken as string, commandDigest: receipt.commandDigest as string, ref: clonedRef, ...(authorityAnchor ? { authorityAnchor } : {}) };
 }
 
 function exactClaimIsCurrent(snapshot: StoreSnapshot, authority: LaunchAuthority): boolean {
@@ -436,7 +667,7 @@ function yieldBytesAreValid(bytes: string): boolean {
     if (!cursorValid) return false;
     if (value.kind === 'WAITING') return Object.keys(value).sort().join(',') === 'cursor,kind,snapshot';
     if (value.kind === 'DECISION_REQUIRED') return Object.keys(value).sort().join(',') === 'brief,cursor,kind,snapshot,token' && refIsValid(value.brief) && typeof value.token === 'string' && value.token.length > 0;
-    if (value.kind === 'BLOCKED') return Object.keys(value).every((key) => ['kind', 'code', 'reason', 'retryable', 'snapshot', 'receipt', 'launchToken'].includes(key)) && ['kind', 'code', 'reason', 'retryable', 'snapshot'].every((key) => Object.prototype.hasOwnProperty.call(value, key)) && ['CrossRunUnproven', 'UnknownDispatch', 'HumanReceiptRequired', 'ManifestMismatch', 'JournalCeiling', 'InvalidEvent'].includes(String(value.code)) && typeof value.reason === 'string' && typeof value.retryable === 'boolean' && (value.receipt === undefined || refIsValid(value.receipt)) && (value.launchToken === undefined || typeof value.launchToken === 'string');
+    if (value.kind === 'BLOCKED') return Object.keys(value).every((key) => ['kind', 'code', 'reason', 'retryable', 'snapshot', 'receipt', 'launchToken'].includes(key)) && ['kind', 'code', 'reason', 'retryable', 'snapshot'].every((key) => Object.prototype.hasOwnProperty.call(value, key)) && ['CrossRunUnproven', 'UnknownDispatch', 'HumanReceiptRequired', 'ManifestMismatch', 'JournalCeiling', 'STALE', 'NO_SETTLEMENT', 'InvalidEvent'].includes(String(value.code)) && typeof value.reason === 'string' && typeof value.retryable === 'boolean' && (value.receipt === undefined || refIsValid(value.receipt)) && (value.launchToken === undefined || typeof value.launchToken === 'string');
     if (value.kind === 'FINAL') return Object.keys(value).sort().join(',') === 'artifacts,kind,snapshot,status' && ['phase-ready', 'complete'].includes(String(value.status)) && Array.isArray(value.artifacts) && value.artifacts.every(refIsValid);
     return false;
   } catch { return false; }
@@ -477,11 +708,202 @@ function validateJournal(state: MachineState, journalText: string, options: { se
   return entries;
 }
 
+function validateManagedState(managed: unknown, state: MachineState): asserts managed is ManagedState {
+  invariant(managed && typeof managed === 'object' && !Array.isArray(managed), 'managed state is invalid');
+  const value = managed as Record<string, unknown>;
+  exactKeys(value, ['capability', 'killSwitch', 'waveCounters', 'reservations', 'leaseSets', ...(Object.prototype.hasOwnProperty.call(value, 'rollout') ? ['rollout'] : []), ...(Object.prototype.hasOwnProperty.call(value, 'rolloutOrigin') ? ['rolloutOrigin'] : []), ...(Object.prototype.hasOwnProperty.call(value, 'proposal') ? ['proposal'] : []), ...(Object.prototype.hasOwnProperty.call(value, 'attempts') ? ['attempts'] : []), ...(Object.prototype.hasOwnProperty.call(value, 'acceptedReports') ? ['acceptedReports'] : []), ...(Object.prototype.hasOwnProperty.call(value, 'settlements') ? ['settlements'] : []), ...(Object.prototype.hasOwnProperty.call(value, 'settlementOrigins') ? ['settlementOrigins'] : [])], 'managed state');
+  invariant(typeof value.killSwitch === 'boolean', 'managed kill switch is invalid');
+  invariant(verifyManagedCapability(value.capability), 'managed capability is invalid');
+  if (value.rollout !== undefined) invariant(verifyManagedRolloutProjection(value.rollout), 'managed rollout policy is invalid');
+  if (value.rolloutOrigin !== undefined) invariant(verifyManagedRolloutProjection(value.rolloutOrigin), 'managed rollout origin is invalid');
+  if (value.proposal !== undefined && value.rollout !== undefined) invariant(value.rolloutOrigin !== undefined, 'managed rollout origin is missing');
+  const capability = value.capability;
+  const counters = value.waveCounters;
+  invariant(counters && typeof counters === 'object' && !Array.isArray(counters), 'managed wave counters are invalid');
+  exactKeys(counters as object, ['waves', 'calls', 'inTok', 'outTok', 'reportBytes', 'refs', 'persistedBytes', 'deadline'], 'managed wave counters');
+  for (const [key, item] of Object.entries(counters as Record<string, unknown>)) {
+    nonNegativeInteger(item, `managed wave counter ${key}`);
+    const ceiling = capability.ceilings[key as keyof typeof capability.ceilings];
+    invariant(typeof ceiling === 'number' && (item as number) <= ceiling, `managed wave counter ${key} exceeds capability ceiling`);
+  }
+  const reservations = value.reservations;
+  invariant(reservations && typeof reservations === 'object' && !Array.isArray(reservations), 'managed reservations are invalid');
+  for (const [key, raw] of Object.entries(reservations as Record<string, unknown>)) {
+    invariant(raw && typeof raw === 'object' && !Array.isArray(raw), `managed reservation ${key} is invalid`);
+    const reservation = raw as Record<string, unknown>;
+    exactKeys(reservation, ['calls', 'charged', 'commandId', 'deadline', 'epoch', 'inTok', 'outTok', 'persistedBytes', 'refs', 'reportBytes', 'reservationId', 'waves'], `managed reservation ${key}`);
+    invariant(typeof reservation.reservationId === 'string' && reservation.reservationId === key, `managed reservation ${key} identity is invalid`);
+    invariant(typeof reservation.commandId === 'string' && reservation.commandId.length > 0 && reservation.charged === true, `managed reservation ${key} binding is invalid`);
+    for (const field of ['waves', 'calls', 'inTok', 'outTok', 'reportBytes', 'refs', 'persistedBytes', 'deadline', 'epoch'] as const) {
+      nonNegativeInteger(reservation[field], `managed reservation ${key}.${field}`);
+      if (field !== 'epoch') invariant((reservation[field] as number) <= capability.ceilings[field], `managed reservation ${key}.${field} exceeds capability ceiling`);
+    }
+  }
+  const leaseSets = value.leaseSets;
+  invariant(leaseSets && typeof leaseSets === 'object' && !Array.isArray(leaseSets), 'managed lease sets are invalid');
+  for (const [key, raw] of Object.entries(leaseSets as Record<string, unknown>)) {
+    invariant(raw && typeof raw === 'object' && !Array.isArray(raw), `managed lease set ${key} is invalid`);
+    const lease = raw as Record<string, unknown>;
+    exactKeys(lease, ['closedRefGraph', 'expiresAt', 'leaseId', 'status'], `managed lease set ${key}`);
+    invariant(typeof lease.leaseId === 'string' && lease.leaseId === key && typeof lease.expiresAt === 'number' && Number.isSafeInteger(lease.expiresAt) && lease.expiresAt >= 0 && ['ACTIVE', 'PROMOTED', 'EXPIRED'].includes(String(lease.status)), `managed lease set ${key} fields are invalid`);
+    invariant(Array.isArray(lease.closedRefGraph) && lease.closedRefGraph.every(refIsValid), `managed lease set ${key} refs are invalid`);
+  }
+  if (value.attempts !== undefined) {
+    const attempts = value.attempts;
+    invariant(attempts && typeof attempts === 'object' && !Array.isArray(attempts), 'managed attempts are invalid');
+    for (const [key, raw] of Object.entries(attempts as Record<string, unknown>)) {
+      invariant(raw && typeof raw === 'object' && !Array.isArray(raw), `managed attempt ${key} is invalid`);
+      const attempt = raw as Record<string, unknown>;
+      exactKeys(attempt, ['commandId', 'epoch', 'reservationId', 'status', 'leaseId', 'receipt', 'resultDigest', 'authorityAnchor', 'rolloutOrigin'].filter((field) => Object.prototype.hasOwnProperty.call(attempt, field)), `managed attempt ${key}`);
+      invariant(typeof attempt.commandId === 'string' && attempt.commandId === key && /^[0-9a-f]{32}$/.test(attempt.commandId), `managed attempt ${key} identity is invalid`);
+      invariant(typeof attempt.epoch === 'number' && Number.isSafeInteger(attempt.epoch) && attempt.epoch >= 0, `managed attempt ${key} epoch is invalid`);
+      invariant(typeof attempt.reservationId === 'string' && attempt.reservationId === key, `managed attempt ${key} reservation binding is invalid`);
+      invariant(['LIVE', 'UNKNOWN', 'SUCCESS', 'TIMED_OUT', 'CANCELLED', 'FAILED'].includes(String(attempt.status)), `managed attempt ${key} status is invalid`);
+      invariant(attempt.leaseId === undefined || typeof attempt.leaseId === 'string', `managed attempt ${key} lease is invalid`);
+      invariant(attempt.receipt === undefined || refIsValid(attempt.receipt), `managed attempt ${key} receipt is invalid`);
+      invariant(attempt.resultDigest === undefined || (typeof attempt.resultDigest === 'string' && SHA256.test(attempt.resultDigest)), `managed attempt ${key} result digest is invalid`);
+      invariant(value.rolloutOrigin === undefined ? attempt.rolloutOrigin === undefined : (verifyManagedRolloutProjection(attempt.rolloutOrigin) && canonicalString(attempt.rolloutOrigin) === canonicalString(value.rolloutOrigin)), `managed attempt ${key} rollout origin is invalid`);
+      const reservation = (reservations as Record<string, unknown>)[key] as Record<string, unknown> | undefined;
+      invariant(reservation !== undefined && reservation.epoch === attempt.epoch, `managed attempt ${key} reservation is missing or mismatched`);
+      const command = (state.outbox as Record<string, unknown>)[key] as Record<string, unknown> | undefined;
+      invariant(command !== undefined && command.commandId === key && command.attemptEpoch === attempt.epoch, `managed attempt ${key} command is missing or mismatched`);
+      if (attempt.status === 'SUCCESS') invariant(command.state === 'ACKED' && attempt.receipt !== undefined && attempt.resultDigest === (attempt.receipt as Ref).digest, `managed attempt ${key} success binding is invalid`);
+      if (attempt.authorityAnchor !== undefined) {
+        invariant(attempt.status === 'SUCCESS' && command.roleView !== undefined && command.receipt && refIsValid(command.receipt), `managed attempt ${key} authority anchor owner is invalid`);
+        let proof: Record<string, unknown>;
+        try { proof = parseCanonical<Record<string, unknown>>((command.receipt as Ref).bytes ?? ''); }
+        catch { throw new Error(`ManifestMismatch: managed attempt ${key} dispatch proof is invalid`); }
+        invariant(refIsValid(proof.receipt) && managedReceiptAuthorityAnchorIsValid(attempt.authorityAnchor, command.commandDigest as string, (proof.receipt as Ref).digest)
+          && canonicalString(proof.authorityAnchor) === canonicalString(attempt.authorityAnchor), `managed attempt ${key} authority anchor binding is invalid`);
+      }
+      if (attempt.status === 'SUCCESS' && command.roleView !== undefined) invariant(attempt.authorityAnchor !== undefined, `managed attempt ${key} authority anchor is missing`);
+      if (attempt.status === 'LIVE') invariant(command.state === 'PENDING' || command.state === 'CLAIMED', `managed attempt ${key} live binding is invalid`);
+      if (attempt.status === 'UNKNOWN') invariant(command.state === 'UNKNOWN', `managed attempt ${key} unknown binding is invalid`);
+    }
+  }
+  if (value.settlements !== undefined) {
+    const settlements = value.settlements;
+    invariant(settlements && typeof settlements === 'object' && !Array.isArray(settlements), 'managed settlements are invalid');
+    for (const [key, raw] of Object.entries(settlements as Record<string, unknown>)) {
+      invariant(SHA256.test(key) && refIsValid(raw), `managed settlement ${key} is invalid`);
+      invariant((raw as Ref).digest === key, `managed settlement ${key} digest binding is invalid`);
+      if (value.rolloutOrigin !== undefined) invariant(Object.prototype.hasOwnProperty.call((value.settlementOrigins as object | undefined) ?? {}, key), `managed settlement ${key} rollout origin is missing`);
+    }
+  }
+  if (value.settlementOrigins !== undefined) {
+    const origins = value.settlementOrigins;
+    invariant(origins && typeof origins === 'object' && !Array.isArray(origins), 'managed settlement origins are invalid');
+    for (const [key, raw] of Object.entries(origins as Record<string, unknown>)) {
+      invariant(SHA256.test(key) && Object.prototype.hasOwnProperty.call((value.settlements as object | undefined) ?? {}, key), `managed settlement origin ${key} is orphaned`);
+      invariant(verifyManagedRolloutProjection(raw) && canonicalString(raw) === canonicalString(value.rolloutOrigin), `managed settlement origin ${key} is invalid`);
+    }
+  }
+  if (value.acceptedReports !== undefined) {
+    const reports = value.acceptedReports;
+    invariant(reports && typeof reports === 'object' && !Array.isArray(reports), 'managed accepted reports are invalid');
+    for (const [key, raw] of Object.entries(reports as Record<string, unknown>)) {
+      invariant(SHA256.test(key) && raw && typeof raw === 'object' && !Array.isArray(raw), `managed accepted report ${key} is invalid`);
+      const row = raw as Record<string, unknown>;
+      const hasRoleBinding = Object.prototype.hasOwnProperty.call(row, 'roleDigest') || Object.prototype.hasOwnProperty.call(row, 'predecessorReportDigests');
+      exactKeys(row, ['ref', 'report', 'commandId', ...(hasRoleBinding ? ['roleDigest', 'predecessorReportDigests', 'authorityAnchor'] : []), 'receipt', 'attemptEpoch', 'authorityEpoch', 'barrierEpoch', 'modeEpoch', ...(Object.prototype.hasOwnProperty.call(row, 'rolloutOrigin') ? ['rolloutOrigin'] : [])], `managed accepted report ${key}`);
+      invariant(value.rolloutOrigin === undefined ? row.rolloutOrigin === undefined : (verifyManagedRolloutProjection(row.rolloutOrigin) && canonicalString(row.rolloutOrigin) === canonicalString(value.rolloutOrigin)), `managed accepted report ${key} rollout origin is invalid`);
+      invariant(refIsValid(row.ref) && typeof (row.ref as Ref).bytes === 'string' && (row.ref as Ref).scope === 'deliberation/report', `managed accepted report ${key} ref is invalid`);
+      invariant((row.ref as Ref).digest === key, `managed accepted report ${key} digest key disagrees`);
+      let report: Record<string, unknown>;
+      try { report = parseCanonical<Record<string, unknown>>((row.ref as Ref).bytes!); }
+      catch { throw new Error(`ManifestMismatch: managed accepted report ${key} bytes are invalid`); }
+      invariant(report.schema === 'lunacy-deliberation-report/v2' && canonicalString(report) === (row.ref as Ref).bytes && digest(report) === key, `managed accepted report ${key} Report/v2 binding is invalid`);
+      invariant(row.report && typeof row.report === 'object' && !Array.isArray(row.report) && canonicalString(row.report) === (row.ref as Ref).bytes, `managed accepted report ${key} report projection is invalid`);
+      invariant(typeof row.commandId === 'string' && /^[0-9a-f]{32}$/.test(row.commandId), `managed accepted report ${key} command binding is invalid`);
+      const command = (state.outbox as Record<string, unknown>)[row.commandId] as Record<string, unknown> | undefined;
+      invariant(command && command.state === 'ACKED' && command.commandDigest === (row.receipt as Record<string, unknown>)?.commandDigest, `managed accepted report ${key} command is not receipt-ACKED`);
+      const commandRecord = command as Record<string, unknown>;
+      if (hasRoleBinding) {
+        invariant(typeof row.roleDigest === 'string' && SHA256.test(row.roleDigest) && refIsValid(commandRecord.roleView)
+          && (commandRecord.roleView as Ref).scope === 'deliberation/role-view' && (commandRecord.roleView as Ref).digest === row.roleDigest,
+        `managed accepted report ${key} role binding is invalid`);
+        invariant(Array.isArray(row.predecessorReportDigests) && row.predecessorReportDigests.every((item) => typeof item === 'string' && SHA256.test(item))
+          && canonicalString(row.predecessorReportDigests) === canonicalString(commandRecord.predecessorReportDigests),
+        `managed accepted report ${key} predecessor binding is invalid`);
+        invariant((row.ref as Ref).id === `managed-report:${row.roleDigest}:${key}`, `managed accepted report ${key} role-bound id is invalid`);
+        const attempt = (value.attempts as Record<string, Record<string, unknown>> | undefined)?.[row.commandId as string];
+        invariant(attempt?.authorityAnchor !== undefined && managedReceiptAuthorityAnchorIsValid(row.authorityAnchor, command.commandDigest as string, key)
+          && canonicalString(row.authorityAnchor) === canonicalString(attempt.authorityAnchor), `managed accepted report ${key} authority anchor is invalid`);
+      } else invariant(commandRecord.roleView === undefined, `managed accepted report ${key} omits its command role binding`);
+      const receipt = row.receipt as Record<string, unknown>;
+      exactKeys(receipt, ['commandDigest', 'resultDigest', 'attemptEpoch', ...(hasRoleBinding ? ['authorityAnchorDigest'] : [])], `managed accepted report ${key} receipt`);
+      invariant(typeof receipt.commandDigest === 'string' && SHA256.test(receipt.commandDigest) && receipt.commandDigest === command.commandDigest && typeof receipt.resultDigest === 'string' && SHA256.test(receipt.resultDigest) && receipt.resultDigest === key && typeof receipt.attemptEpoch === 'number' && Number.isSafeInteger(receipt.attemptEpoch) && receipt.attemptEpoch === command.attemptEpoch, `managed accepted report ${key} receipt binding is invalid`);
+      if (hasRoleBinding) invariant(receipt.authorityAnchorDigest === (row.authorityAnchor as Ref).digest, `managed accepted report ${key} receipt authority anchor is invalid`);
+      for (const field of ['attemptEpoch', 'authorityEpoch', 'barrierEpoch', 'modeEpoch'] as const) invariant(typeof row[field] === 'number' && Number.isSafeInteger(row[field]) && (row[field] as number) >= 0 && (row[field] as number) === commandRecord[field], `managed accepted report ${key} ${field} binding is invalid`);
+      invariant(command.receipt && refIsValid(command.receipt), `managed accepted report ${key} dispatch receipt is missing`);
+      let proof: Record<string, unknown>;
+      try { proof = parseCanonical<Record<string, unknown>>((command.receipt as Ref).bytes ?? ''); }
+      catch { throw new Error(`ManifestMismatch: managed accepted report ${key} dispatch proof is invalid`); }
+      invariant(proof.launchToken === command.launchToken && proof.commandDigest === command.commandDigest && proof.receipt && refIsValid(proof.receipt) && canonicalString(proof.receipt) === canonicalString(row.ref)
+        && (!hasRoleBinding || canonicalString(proof.authorityAnchor) === canonicalString(row.authorityAnchor)), `managed accepted report ${key} dispatch result is not the same immutable Ref`);
+    }
+    validateAcceptedReportProjection(Object.values(reports as Record<string, unknown>) as Record<string, unknown>[], state);
+  }
+  if (value.proposal !== undefined) {
+    const proposal = value.proposal;
+    invariant(proposal && typeof proposal === 'object' && !Array.isArray(proposal), 'managed proposal is invalid');
+    exactKeys(proposal as object, ['key', 'leaseSetId', 'planDigest', 'waveRef', ...(Object.prototype.hasOwnProperty.call(proposal, 'roleWaveRef') ? ['roleWaveRef'] : []), ...(Object.prototype.hasOwnProperty.call(proposal, 'rolloutOrigin') ? ['rolloutOrigin'] : [])], 'managed proposal');
+    const item = proposal as Record<string, unknown>;
+    invariant(typeof item.key === 'string' && SHA256.test(item.key) && typeof item.planDigest === 'string' && SHA256.test(item.planDigest) && typeof item.leaseSetId === 'string' && item.leaseSetId.length > 0 && refIsValid(item.waveRef), 'managed proposal fields are invalid');
+    invariant(item.roleWaveRef === undefined || (refIsValid(item.roleWaveRef) && (item.roleWaveRef as Ref).scope === 'deliberation/wave' && typeof (item.roleWaveRef as Ref).bytes === 'string'), 'managed proposal role Wave is invalid');
+    invariant(value.rollout === undefined || (verifyManagedRolloutProjection(item.rolloutOrigin) && canonicalString(item.rolloutOrigin) === canonicalString(value.rolloutOrigin)), 'managed proposal rollout origin is invalid');
+  }
+  try {
+    // The durable lease rows carry lifecycle metadata (expiry/status), while
+    // the C1–C5 graph proof intentionally sees only the closed identity edge.
+    // Project each row into that exact graph shape before invoking the shared
+    // validator; lifecycle fields remain validated above.
+    const graphLeaseSets: Record<string, { leaseId: string; closedRefGraph: Ref[] }> = {};
+    for (const [leaseId, raw] of Object.entries(leaseSets as Record<string, unknown>)) {
+      const lease = raw as Record<string, unknown>;
+      graphLeaseSets[leaseId] = { leaseId: lease.leaseId as string, closedRefGraph: (lease.closedRefGraph as Ref[]).map((ref) => ({ ...ref })) };
+    }
+    const attemptOwners: ManagedGraphAttemptOwner[] = Object.values((value.attempts as Record<string, Record<string, unknown>> | undefined) ?? {})
+      .filter((attempt) => attempt.authorityAnchor !== undefined)
+      .map((attempt) => ({ commandId: attempt.commandId as string, authorityAnchor: attempt.authorityAnchor as Ref }));
+    const decisionOwners: ManagedGraphDecisionOwner[] = [];
+    for (const [token, raw] of Object.entries(state.decisionTokens)) {
+      const record = raw as Record<string, unknown>;
+      if ((record.kind === 'DELIBERATION_SELECTION' || record.kind === 'DELIBERATION') && record.consumed) {
+        const settlement = record.nullableSettlement === null ? null : (value.settlements as Record<string, Ref> | undefined)?.[record.nullableSettlement as string];
+        const authorityAnchors = (record.orderedReportRefs as Ref[]).flatMap((reportRef) => {
+          const row = (value.acceptedReports as Record<string, Record<string, unknown>> | undefined)?.[reportRef.digest];
+          return row?.authorityAnchor ? [row.authorityAnchor as Ref] : [];
+        });
+        decisionOwners.push({ token, leaseSetId: record.publicationLeaseSetId as string, disposition: record.disposition as string, waveRef: record.waveRef as Ref, orderedReportRefs: record.orderedReportRefs as Ref[], ...(authorityAnchors.length ? { authorityAnchors } : {}), settlement, ...(record.successorWaveRef === undefined ? {} : { successorWaveRef: record.successorWaveRef as Ref }) });
+      }
+    }
+    assertManagedGraph({
+      proposal: value.proposal === undefined ? undefined : {
+        leaseSetId: (value.proposal as Record<string, unknown>).leaseSetId as string,
+        waveRef: (value.proposal as Record<string, unknown>).waveRef as ManagedGraphRef,
+      },
+      leaseSets: graphLeaseSets,
+      ...(attemptOwners.length ? { attemptOwners } : {}),
+      ...(decisionOwners.length ? { decisionOwners } : {}),
+    });
+  } catch (error) {
+    throw new Error(`ManifestMismatch: ${(error as Error).message}`);
+  }
+  // Keep the parent state identity bound to the managed proposal when one is
+  // present; a free-floating proposal would be an authority escape.
+  if (value.proposal !== undefined) invariant((value.proposal as Record<string, unknown>).planDigest === state.planDigest, 'managed proposal plan digest disagrees with state');
+}
+
 function validateStateShape(state: MachineState): void {
   invariant(state && typeof state === 'object', 'state is not an object');
-  exactKeys(state as unknown as object, ['schema', 'runId', 'phaseId', 'revision', 'authorityEpoch', 'attemptEpoch', 'barrierEpoch', 'modeEpoch', 'writerFence', 'status', 'gate', 'barrier', 'steps', 'outbox', 'processed', 'decisionTokens', 'planDigest', 'nextAction', 'journal'], 'state');
-  invariant(state.schema === 1, 'state schema is invalid');
+  const stateKeys = ['schema', 'runId', 'phaseId', 'revision', 'authorityEpoch', 'attemptEpoch', 'barrierEpoch', 'modeEpoch', 'writerFence', 'status', 'gate', 'barrier', 'steps', 'outbox', 'processed', 'decisionTokens', 'planDigest', 'nextAction', 'journal'];
+  if (state.schema === 2) stateKeys.push('managed');
+  exactKeys(state as unknown as object, stateKeys, 'state');
+  invariant(state.schema === 1 || state.schema === 2, 'state schema is invalid');
+  if (state.schema === 2) validateManagedState(state.managed, state);
   for (const [field, value] of Object.entries({ revision: state.revision, authorityEpoch: state.authorityEpoch, attemptEpoch: state.attemptEpoch, barrierEpoch: state.barrierEpoch, modeEpoch: state.modeEpoch })) nonNegativeInteger(value, field);
+  invariant(state.modeEpoch === 0, 'state modeEpoch is unsupported');
   invariant(typeof state.runId === 'string' && state.runId.length > 0, 'state runId is invalid');
   invariant(typeof state.phaseId === 'string' && state.phaseId.length > 0, 'state phaseId is invalid');
   invariant(typeof state.writerFence === 'string' && state.writerFence.length > 0, 'state writerFence is invalid');
@@ -518,20 +940,42 @@ function validateStateShape(state: MachineState): void {
     invariant(!RESERVED_PROJECTION_KEYS.has(key), `outbox ${key} uses a reserved projection key`);
     invariant(value && typeof value === 'object', `outbox ${key} is invalid`);
     const command = value as Partial<OutboxCommand>;
-    invariant(Object.keys(command as object).every((field) => ['commandId', 'runId', 'phaseId', 'stepId', 'attemptEpoch', 'authorityEpoch', 'barrierEpoch', 'modeEpoch', 'launchToken', 'commandDigest', 'state', 'receipt', 'leaseId', 'noEffectEvidence'].includes(field)), `outbox ${key} fields are invalid`);
+    invariant(Object.keys(command as object).every((field) => ['commandId', 'runId', 'phaseId', 'stepId', 'attemptEpoch', 'authorityEpoch', 'barrierEpoch', 'modeEpoch', 'launchToken', 'commandDigest', 'state', 'roleView', 'predecessorReportDigests', 'receipt', 'leaseId', 'noEffectEvidence'].includes(field)), `outbox ${key} fields are invalid`);
     // A safely adopted authority may remove a display node while preserving
     // the old command identity for late receipt/UNKNOWN reconciliation.  The
     // command remains bound to this run/phase; membership in the *current*
     // step projection is intentionally not required.
     invariant(command.commandId === key && typeof command.commandId === 'string' && /^[0-9a-f]{32}$/.test(command.commandId) && typeof command.runId === 'string' && command.runId === state.runId && typeof command.phaseId === 'string' && command.phaseId === state.phaseId && typeof command.stepId === 'string' && command.stepId.length > 0, `outbox ${key} identity is invalid`);
     for (const field of ['attemptEpoch', 'authorityEpoch', 'barrierEpoch', 'modeEpoch'] as const) { const epoch = command[field]; invariant(typeof epoch === 'number' && Number.isSafeInteger(epoch) && epoch >= 0, `outbox ${key} ${field} is invalid`); }
+    invariant(command.modeEpoch === 0, `outbox ${key} modeEpoch is unsupported`);
     invariant(command.attemptEpoch! <= state.attemptEpoch && command.authorityEpoch! <= state.authorityEpoch && command.barrierEpoch! <= state.barrierEpoch && command.modeEpoch! <= state.modeEpoch, `outbox ${key} is from a future epoch`);
     invariant(typeof command.launchToken === 'string' && command.launchToken.length > 0 && !launchTokens.has(command.launchToken), `outbox ${key} launch token is invalid`); launchTokens.add(command.launchToken);
     invariant(typeof command.commandDigest === 'string' && SHA256.test(command.commandDigest) && command.commandDigest === digest({ commandId: command.commandId, runId: command.runId, phaseId: command.phaseId, stepId: command.stepId, attemptEpoch: command.attemptEpoch, launchToken: command.launchToken }), `outbox ${key} digest is invalid`);
     invariant(typeof command.state === 'string' && outboxStates.has(command.state), `outbox ${key} state is invalid`);
+    invariant((command.roleView === undefined) === (command.predecessorReportDigests === undefined), `outbox ${key} role binding is incomplete`);
+    if (command.roleView !== undefined) {
+      invariant(refIsValid(command.roleView) && command.roleView.scope === 'deliberation/role-view' && typeof command.roleView.bytes === 'string'
+        && command.roleView.id === `role-view:${command.roleView.digest}`, `outbox ${key} role view is invalid`);
+      invariant(Array.isArray(command.predecessorReportDigests) && command.predecessorReportDigests.every((item) => typeof item === 'string' && SHA256.test(item))
+        && new Set(command.predecessorReportDigests).size === command.predecessorReportDigests.length, `outbox ${key} predecessor digests are invalid`);
+      invariant(command.launchToken === `launch-${digest({ commandId: command.commandId, attemptEpoch: command.attemptEpoch, roleDigest: command.roleView.digest, predecessorReportDigests: command.predecessorReportDigests }).slice(0, 32)}`,
+        `outbox ${key} launch token is not role-bound`);
+    }
     invariant(command.leaseId === undefined || typeof command.leaseId === 'string', `outbox ${key} lease is invalid`);
     invariant(command.receipt === undefined || refIsValid(command.receipt), `outbox ${key} receipt is invalid`);
     invariant(command.noEffectEvidence === undefined || (Array.isArray(command.noEffectEvidence) && command.noEffectEvidence.every(refIsValid)), `outbox ${key} evidence is invalid`);
+    if (command.roleView !== undefined && command.state === 'UNKNOWN') {
+      const teardown = command.noEffectEvidence?.find((candidate) => candidate.scope === 'outbox/teardown' && typeof candidate.bytes === 'string');
+      let value: any;
+      try { value = teardown ? parseCanonical(teardown.bytes!) : undefined; } catch { value = undefined; }
+      invariant(teardown !== undefined && value && typeof value === 'object' && !Array.isArray(value)
+        && Object.keys(value).sort().join(',') === 'command,predecessorReportDigests,processTreeExited,providerExited,roleDigest,schema,scratchRemoved'
+        && value.schema === 'lunacy-codex-deliberation-teardown/v1' && value.providerExited === true && value.processTreeExited === true && value.scratchRemoved === true
+        && value.command && typeof value.command === 'object' && Object.keys(value.command).sort().join(',') === 'attemptEpoch,authorityEpoch,barrierEpoch,commandDigest,commandId,launchToken,modeEpoch,phaseId,runId,stepId'
+        && value.command.commandId === command.commandId && value.command.launchToken === command.launchToken && value.command.commandDigest === command.commandDigest
+        && value.roleDigest === command.roleView.digest && canonicalString(value.predecessorReportDigests) === canonicalString(command.predecessorReportDigests)
+        && teardown!.digest === digest(value), `outbox ${key} UNKNOWN lacks bound teardown evidence`);
+    }
     const stepAttempt = `${command.stepId}\u0000${command.attemptEpoch}`;
     const attemptCommands = commandsByStepAttempt.get(stepAttempt) ?? [];
     attemptCommands.push(command as OutboxCommand);
@@ -564,19 +1008,90 @@ function validateStateShape(state: MachineState): void {
       : (commandsByStepAttempt.get(`${key}\u0000${value.attempt}`) ?? []);
     invariant(commands.length === 1, `active step ${key} does not have exactly one ${value.attempt === state.attemptEpoch ? 'current' : 'historical'} command`);
     const expectedCommandId = digest({ runId: state.runId, phaseId: state.phaseId, stepId: key, attemptEpoch: value.attempt }).slice(0, 32);
-    invariant(commands[0].commandId === expectedCommandId && commands[0].launchToken === `launch-${expectedCommandId}`, `active step ${key} command identity is invalid`);
+    const expectedLaunchToken = commands[0].roleView
+      ? `launch-${digest({ commandId: commands[0].commandId, attemptEpoch: commands[0].attemptEpoch, roleDigest: commands[0].roleView!.digest, predecessorReportDigests: commands[0].predecessorReportDigests }).slice(0, 32)}`
+      : `launch-${expectedCommandId}`;
+    invariant(commands[0].commandId === expectedCommandId && commands[0].launchToken === expectedLaunchToken, `active step ${key} command identity is invalid`);
   }
+  const managedLeaseSets = state.managed?.leaseSets ?? {};
+  const managedSettlements = state.managed?.settlements ?? {};
+  const managedAcceptedReports = (state.managed?.acceptedReports as Record<string, unknown> | undefined) ?? {};
+  const settlementOwners = new Set<string>();
   for (const [token, value] of Object.entries(state.decisionTokens)) {
     invariant(!RESERVED_PROJECTION_KEYS.has(token) && value && typeof value === 'object', `decision token ${token} is invalid`);
     const record = value as Record<string, unknown>;
     invariant(typeof record.kind === 'string' && typeof record.consumed === 'boolean' && typeof record.identity === 'string' && SHA256.test(record.identity), `decision token ${token} fields are invalid`);
     if (record.kind === 'AUTHORITY_ADOPTION') {
-      exactKeys(record, ['kind', 'consumed', 'identity', 'expectedDigest', 'observedDigest', 'targetDigest'], `decision token ${token}`);
+      exactKeys(record, ['kind', 'consumed', 'identity', 'expectedDigest', 'observedDigest', 'targetDigest', ...(Object.prototype.hasOwnProperty.call(record, 'rolloutOrigin') ? ['rolloutOrigin'] : [])], `decision token ${token}`);
       invariant(typeof record.expectedDigest === 'string' && SHA256.test(record.expectedDigest) && typeof record.observedDigest === 'string' && SHA256.test(record.observedDigest) && typeof record.targetDigest === 'string' && SHA256.test(record.targetDigest), `decision token ${token} authority digests are invalid`);
+      invariant(state.managed?.rolloutOrigin === undefined ? record.rolloutOrigin === undefined : (verifyManagedRolloutProjection(record.rolloutOrigin) && canonicalString(record.rolloutOrigin) === canonicalString(state.managed.rolloutOrigin)), `decision token ${token} rollout origin is invalid`);
+    } else if (record.kind === 'DELIBERATION_SELECTION' || record.kind === 'DELIBERATION') {
+      exactKeys(record, ['kind', 'consumed', 'identity', 'authorshipInputDigest', 'decisionKey', 'waveRef', 'orderedReportRefs', 'predecessorGeneration', 'disposition', 'nullableSettlement', 'bindingDigest', ...(Object.prototype.hasOwnProperty.call(record, 'resultKind') ? ['resultKind'] : []), ...(Object.prototype.hasOwnProperty.call(record, 'resultDigest') ? ['resultDigest'] : []), ...(Object.prototype.hasOwnProperty.call(record, 'publicationLeaseSetId') ? ['publicationLeaseSetId'] : []), ...(Object.prototype.hasOwnProperty.call(record, 'successorWaveRef') ? ['successorWaveRef'] : []), ...(Object.prototype.hasOwnProperty.call(record, 'rolloutOrigin') ? ['rolloutOrigin'] : [])], `decision token ${token}`);
+      invariant(state.managed?.rolloutOrigin === undefined ? record.rolloutOrigin === undefined : (verifyManagedRolloutProjection(record.rolloutOrigin) && canonicalString(record.rolloutOrigin) === canonicalString(state.managed.rolloutOrigin)), `decision token ${token} rollout origin is invalid`);
+      invariant(typeof record.authorshipInputDigest === 'string' && SHA256.test(record.authorshipInputDigest), `decision token ${token} authorship digest is invalid`);
+      invariant(typeof record.decisionKey === 'string' && record.decisionKey.length > 0, `decision token ${token} decision key is invalid`);
+      invariant(refIsValid(record.waveRef), `decision token ${token} wave ref is invalid`);
+      invariant(Array.isArray(record.orderedReportRefs) && record.orderedReportRefs.every(refIsValid), `decision token ${token} report refs are invalid`);
+      if (record.consumed || record.orderedReportRefs.length > 0) {
+        for (const reportRef of record.orderedReportRefs as Ref[]) invariant(Object.prototype.hasOwnProperty.call(managedAcceptedReports, reportRef.digest) && canonicalString((managedAcceptedReports[reportRef.digest] as Record<string, unknown>)?.ref) === canonicalString(reportRef), `decision token ${token} accepted report row is missing or foreign`);
+      }
+      nonNegativeInteger(record.predecessorGeneration, `decision token ${token} predecessor generation`);
+      invariant(typeof record.disposition === 'string' && record.disposition.length > 0, `decision token ${token} disposition is invalid`);
+      invariant(record.nullableSettlement === null || (typeof record.nullableSettlement === 'string' && SHA256.test(record.nullableSettlement)), `decision token ${token} settlement digest is invalid`);
+      invariant(typeof record.bindingDigest === 'string' && SHA256.test(record.bindingDigest), `decision token ${token} binding digest is invalid`);
+        invariant(record.publicationLeaseSetId === undefined || (typeof record.publicationLeaseSetId === 'string' && record.publicationLeaseSetId.length > 0), `decision token ${token} publication lease binding is invalid`);
+      invariant(record.successorWaveRef === undefined || refIsValid(record.successorWaveRef), `decision token ${token} successor Wave Ref is invalid`);
+      const expectedBinding = digest({
+        kind: record.kind,
+        authorshipInputDigest: record.authorshipInputDigest,
+        decisionKey: record.decisionKey,
+        waveRef: record.waveRef,
+        orderedReportRefs: record.orderedReportRefs,
+        predecessorGeneration: record.predecessorGeneration,
+        disposition: record.disposition,
+        nullableSettlement: record.nullableSettlement,
+        resultKind: record.resultKind ?? null,
+        resultDigest: record.resultDigest ?? null,
+        publicationLeaseSetId: record.publicationLeaseSetId ?? null,
+        successorWaveRef: record.successorWaveRef ?? null,
+        ...(record.rolloutOrigin ? { rolloutOrigin: record.rolloutOrigin } : {}),
+      });
+      invariant(record.bindingDigest === expectedBinding, `decision token ${token} binding digest mismatch`);
+      if (record.consumed) {
+        invariant(['SELECTION', 'SYNTHESIS', 'WIDEN'].includes(String(record.disposition)), `decision token ${token} consumed disposition is invalid`);
+        invariant(['COMPLETE_PLAN', 'DELIBERATION_REQUIRED'].includes(String(record.resultKind)) && typeof record.resultDigest === 'string' && SHA256.test(record.resultDigest), `decision token ${token} full result binding is invalid`);
+        invariant(typeof record.publicationLeaseSetId === 'string' && Object.prototype.hasOwnProperty.call(managedLeaseSets, record.publicationLeaseSetId) && (managedLeaseSets[record.publicationLeaseSetId] as { status?: string }).status !== 'EXPIRED', `decision token ${token} publication lease is missing or expired`);
+        if (record.disposition === 'WIDEN') {
+          invariant(record.nullableSettlement === null, `decision token ${token} WIDEN settlement is invalid`);
+          invariant(record.resultKind === 'DELIBERATION_REQUIRED' && record.successorWaveRef !== undefined && refIsValid(record.successorWaveRef) && (record.successorWaveRef as Ref).scope === 'deliberation/wave' && typeof (record.successorWaveRef as Ref).bytes === 'string', `decision token ${token} WIDEN successor binding is missing`);
+          const successor = record.successorWaveRef as Ref;
+          try { const parsed = parseCanonical<Record<string, unknown>>(successor.bytes!); invariant(parsed.schema === 'lunacy-deliberation-wave/v2', `decision token ${token} WIDEN successor schema is invalid`); } catch { throw new Error(`ManifestMismatch: decision token ${token} WIDEN successor bytes are invalid`); }
+          invariant(managedSuccessorWaveIsBoundStore(state, record, successor), `decision token ${token} WIDEN successor authorship is disconnected`);
+        }
+        else {
+          invariant(typeof record.nullableSettlement === 'string' && Object.prototype.hasOwnProperty.call(managedSettlements, record.nullableSettlement), `decision token ${token} settlement binding is missing`);
+          settlementOwners.add(record.nullableSettlement as string);
+          invariant(managedSettlementRecordIsValid(managedSettlements[record.nullableSettlement] as Ref, record, state), `decision token ${token} settlement record binding is invalid`);
+          if (record.successorWaveRef && record.resultKind === 'DELIBERATION_REQUIRED') {
+            let settlementResult: Record<string, unknown> | undefined;
+            try {
+              const settlementBytes = (managedSettlements[record.nullableSettlement] as Ref).bytes!;
+              settlementResult = (parseCanonical<Record<string, unknown>>(settlementBytes).result as Record<string, unknown>);
+            } catch { settlementResult = undefined; }
+            invariant(settlementResult && canonicalString(settlementResult.wave) === canonicalString(record.successorWaveRef), `decision token ${token} settlement result/successor mismatch`);
+          }
+        }
+      } else invariant(record.disposition === 'LIVE' && record.nullableSettlement === null && record.publicationLeaseSetId === undefined, `decision token ${token} live disposition is invalid`);
     } else {
       exactKeys(record, ['kind', 'consumed', 'identity'], `decision token ${token}`);
     }
   }
+  // A settlement is an owned publication artifact, never an independent
+  // managed root.  Reject rows that are not named by exactly one consumed
+  // selection/synthesis token; this closes the map-level orphan gap that a
+  // lease-graph check alone cannot see.
+  for (const key of Object.keys(managedSettlements)) invariant(settlementOwners.has(key), `managed settlement ${key} is orphaned`);
+  for (const key of Object.keys(state.managed?.settlementOrigins ?? {})) invariant(Object.prototype.hasOwnProperty.call(managedSettlements, key), `managed settlement origin ${key} is orphaned`);
   for (const [key, value] of Object.entries(state.processed)) {
     invariant(value && typeof value === 'object', `processed ${key} is invalid`);
     const record = value as { identity?: EventIdentity; digest?: string; yieldBytes?: string; revision?: number };
@@ -630,6 +1145,7 @@ type VerifiedReadOnlySnapshot = StoreSnapshot & {
 type VerifiedGenerationMemo = Readonly<{
   generation: number;
   current: string;
+  authorityAnchors: ManagedAuthorityAnchors;
   proof: Readonly<{
     current: FilesystemIdentity;
     generations: FilesystemIdentity;
@@ -648,6 +1164,37 @@ type VerifiedGenerationMemo = Readonly<{
   }>;
 }>;
 
+type ManagedAuthorityAnchors = Readonly<{
+  attempts: Readonly<Record<string, string>>;
+  reports: Readonly<Record<string, string>>;
+}>;
+
+function managedAuthorityAnchors(state: MachineState | undefined): ManagedAuthorityAnchors {
+  const attempts: Record<string, string> = {};
+  const reports: Record<string, string> = {};
+  if (state?.schema === 2 && state.managed) {
+    for (const [commandId, attempt] of Object.entries(state.managed.attempts ?? {})) {
+      if (attempt.authorityAnchor) attempts[commandId] = canonicalString(attempt.authorityAnchor);
+    }
+    for (const [rowId, row] of Object.entries(state.managed.acceptedReports ?? {})) {
+      if (row.authorityAnchor) reports[rowId] = canonicalString(row.authorityAnchor);
+    }
+  }
+  return Object.freeze({ attempts: Object.freeze(attempts), reports: Object.freeze(reports) });
+}
+
+/** Authority anchors are append-only state history.  A later generation may
+ * add an anchor, but cannot omit or rewrite one already accepted by CAS. */
+function validateManagedAuthorityTransition(prior: ManagedAuthorityAnchors, next: MachineState): void {
+  const candidate = managedAuthorityAnchors(next);
+  for (const [commandId, anchor] of Object.entries(prior.attempts)) {
+    invariant(candidate.attempts[commandId] === anchor, `managed attempt ${commandId} authority anchor changed`);
+  }
+  for (const [rowId, anchor] of Object.entries(prior.reports)) {
+    invariant(candidate.reports[rowId] === anchor, `managed report ${rowId} authority anchor changed`);
+  }
+}
+
 type VerifiedCurrentResult = StoreSnapshot & { current?: CurrentManifest };
 
 const CURRENT_KEYS = ['schema', 'generation', 'revision', 'authorityEpoch', 'attemptEpoch', 'barrierEpoch', 'modeEpoch', 'writerFence', 'stateDigest', 'journalEnd', 'journalDigest'] as const;
@@ -662,6 +1209,7 @@ function validateCurrent(value: unknown): CurrentManifest {
   invariant(current.schema === 1, 'CURRENT schema is invalid');
   nonNegativeInteger(current.generation, 'CURRENT generation'); invariant((current.generation as number) > 0, 'CURRENT generation must be positive');
   for (const field of ['revision', 'authorityEpoch', 'attemptEpoch', 'barrierEpoch', 'modeEpoch', 'journalEnd']) nonNegativeInteger(current[field], `CURRENT ${field}`);
+  invariant(current.modeEpoch === 0, 'CURRENT modeEpoch is unsupported');
   invariant(typeof current.writerFence === 'string' && current.writerFence.length > 0, 'CURRENT writerFence is invalid');
   invariant(typeof current.stateDigest === 'string' && SHA256.test(current.stateDigest), 'CURRENT stateDigest is invalid');
   invariant(typeof current.journalDigest === 'string' && SHA256.test(current.journalDigest), 'CURRENT journalDigest is invalid');
@@ -806,6 +1354,7 @@ export class MemoryArtifactStore implements ArtifactStore {
   private generation = 0;
   private fence: Promise<void> = Promise.resolve();
   private readonly reuse = new Map<string, ReuseRecord>();
+  private readonly publicationLeases = new Map<string, PublicationLease>();
   /** Keep the small committed-generation fence history needed to reject a
    * delayed publication in deterministic/in-memory tests as well as on disk. */
   private readonly generationFences = new Map<number, { writerFence: string; runId: string; authorityEpoch: number }>();
@@ -826,6 +1375,11 @@ export class MemoryArtifactStore implements ArtifactStore {
   async load(): Promise<StoreSnapshot> {
     return this.withFence(() => {
       const state = this.state ? cloneState(this.state) : undefined;
+      // Keep MemoryArtifactStore on the same trust boundary as FileArtifactStore:
+      // schema-2 graph closure is proved again at every load, not only when a
+      // candidate was first committed.  This also catches hostile in-process
+      // mutation of the private backing state before it reaches a kernel.
+      if (state) validateStateShape(state);
       return { state, generation: this.generation };
     });
   }
@@ -833,6 +1387,7 @@ export class MemoryArtifactStore implements ArtifactStore {
     return this.withFence(() => {
       if (previousGeneration !== this.generation) throw mintStoreGenerationConflict();
       validateStateShape(state);
+      validateManagedAuthorityTransition(managedAuthorityAnchors(this.state), state);
       const journalText = state.journal.map((entry) => canonicalString(entry)).join('\n') + (state.journal.length ? '\n' : '');
       validateJournal(state, journalText, { segmented: isSegmentedFormat(this.format) });
       this.state = cloneState(state); this.generation += 1;
@@ -868,6 +1423,44 @@ export class MemoryArtifactStore implements ArtifactStore {
   }
   async reuseQuarantine(key: string): Promise<void> { this.reuse.delete(key); }
   async reuseClear(): Promise<void> { this.reuse.clear(); }
+  async acquirePublicationLease(leaseId: string, refs: readonly Ref[], ttlMs = 60_000): Promise<PublicationLease> {
+    return this.withFence(() => {
+      if (!/^[A-Za-z0-9._:-]{1,200}$/.test(leaseId) || !Array.isArray(refs) || refs.length === 0 || refs.some((item) => !refIsValid(item))) throw new Error('publication lease is malformed');
+      if (!Number.isSafeInteger(ttlMs) || ttlMs < 1 || ttlMs > 86_400_000) throw new Error('publication lease ttl is invalid');
+      const prior = this.publicationLeases.get(leaseId);
+      if (prior && prior.status === 'ACTIVE' && prior.expiresAt > Date.now()) {
+        if (canonicalString(prior.refs) !== canonicalString(refs)) throw new Error('publication lease conflicts');
+        return { ...prior, refs: prior.refs.map((ref) => ({ ...ref })) };
+      }
+      if (prior?.status === 'PROMOTED') throw new Error('publication lease already promoted');
+      const lease: PublicationLease = { leaseId, refs: refs.map((ref) => ({ ...ref })), expiresAt: Date.now() + ttlMs, status: 'ACTIVE' };
+      this.publicationLeases.set(leaseId, lease); return { ...lease, refs: lease.refs.map((ref) => ({ ...ref })) };
+    });
+  }
+  async promotePublicationLease(leaseId: string): Promise<PublicationLease> {
+    return this.withFence(() => {
+      const lease = this.publicationLeases.get(leaseId);
+      if (!lease) throw new Error('publication lease unavailable');
+      if (lease.status === 'PROMOTED') return { ...lease, refs: lease.refs.map((ref) => ({ ...ref })) };
+      if (lease.status !== 'ACTIVE' || lease.expiresAt <= Date.now()) throw new Error('publication lease unavailable');
+      lease.status = 'PROMOTED'; return { ...lease, refs: lease.refs.map((ref) => ({ ...ref })) };
+    });
+  }
+  async releasePublicationLease(leaseId: string): Promise<void> { await this.withFence(() => { this.publicationLeases.delete(leaseId); }); }
+  async collectPublicationLeases(now = Date.now()): Promise<{ removed: number }> {
+    return this.withFence(() => {
+      let removed = 0;
+      const rooted = new Set(Object.keys(this.state?.managed?.leaseSets ?? {}));
+      for (const [id, lease] of this.publicationLeases) {
+        // CURRENT's managed leaseSets are authoritative roots. Expired rows
+        // remain bounded until their root is explicitly released/converged.
+        if (lease.status === 'ACTIVE' && lease.expiresAt <= now && !rooted.has(id)) {
+          lease.status = 'EXPIRED'; this.publicationLeases.delete(id); removed += 1;
+        }
+      }
+      return { removed };
+    });
+  }
 }
 
 export class FileArtifactStore implements ArtifactStore {
@@ -882,6 +1475,7 @@ export class FileArtifactStore implements ArtifactStore {
   private readonly reuseBlobsDir: string;
   private readonly reusePinsDir: string;
   private readonly reuseIndexPath: string;
+  private readonly publicationLeasesDir: string;
   private readonly expectedRootIdentity?: FilesystemIdentity;
   private readonly faultInjector?: (point: string) => void;
   private rollbackRequested = false;
@@ -902,6 +1496,7 @@ export class FileArtifactStore implements ArtifactStore {
     this.reuseBlobsDir = join(this.reuseDir, 'blobs');
     this.reusePinsDir = join(this.reuseDir, 'pins');
     this.reuseIndexPath = join(this.reuseDir, 'index.json');
+    this.publicationLeasesDir = join(this.kernelDir, 'publication-leases');
     const maybeOptions = expectedRootIdentity && ('format' in expectedRootIdentity || 'segmentEventCeiling' in expectedRootIdentity || 'faultInjector' in expectedRootIdentity) ? expectedRootIdentity as ArtifactStoreOptions : undefined;
     const identity = maybeOptions ? undefined : expectedRootIdentity as FilesystemIdentity | undefined;
     const selected = options.format ?? maybeOptions?.format;
@@ -1462,7 +2057,7 @@ export class FileArtifactStore implements ArtifactStore {
   /** Capture only after the complete verifier has succeeded.  The two small
    * CURRENT/identity passes close the capture window without rereading state
    * or journal payloads. */
-  private async captureVerifiedGenerationMemo(current: CurrentManifest): Promise<VerifiedGenerationMemo> {
+  private async captureVerifiedGenerationMemo(current: CurrentManifest, state: MachineState): Promise<VerifiedGenerationMemo> {
     const canonicalCurrent = canonicalString(current);
     const before = await this.readCurrent();
     if (!before || canonicalString(before) !== canonicalCurrent) throw new Error('ManifestMismatch: CURRENT changed while capturing verified generation');
@@ -1474,19 +2069,30 @@ export class FileArtifactStore implements ArtifactStore {
       if (!sameFilesystemIdentity(first.proof[key], second.proof[key])) throw new Error(`ManifestMismatch: verified ${key} identity changed while capturing generation`);
       if (first.stat[key].size !== second.stat[key].size || first.stat[key].mtimeMs !== second.stat[key].mtimeMs || first.stat[key].ctimeMs !== second.stat[key].ctimeMs) throw new Error(`ManifestMismatch: verified ${key} stat changed while capturing generation`);
     }
-    return Object.freeze({ generation: current.generation, current: canonicalCurrent, proof: second.proof, stat: second.stat });
+    return Object.freeze({ generation: current.generation, current: canonicalCurrent, authorityAnchors: managedAuthorityAnchors(state), proof: second.proof, stat: second.stat });
   }
 
   private verifiedGenerationMemoShape(value: unknown): value is VerifiedGenerationMemo {
     if (!value || typeof value !== 'object') return false;
     const memo = value as Record<string, unknown>;
-    if (Object.keys(memo).sort().join(',') !== 'current,generation,proof,stat') return false;
+    if (Object.keys(memo).sort().join(',') !== 'authorityAnchors,current,generation,proof,stat') return false;
     if (!Number.isSafeInteger(memo.generation) || (memo.generation as number) <= 0 || typeof memo.current !== 'string' || memo.current.length === 0 || Buffer.byteLength(memo.current, 'utf8') > CURRENT_BYTE_CEILING) return false;
     try {
       const current = parseCanonical<unknown>(memo.current);
       const validated = validateCurrent(current);
       if (validated.generation !== memo.generation || canonicalString(validated) !== memo.current) return false;
     } catch { return false; }
+    if (!memo.authorityAnchors || typeof memo.authorityAnchors !== 'object') return false;
+    const anchors = memo.authorityAnchors as Record<string, unknown>;
+    if (Object.keys(anchors).sort().join(',') !== 'attempts,reports') return false;
+    for (const field of ['attempts', 'reports'] as const) {
+      const rows = anchors[field];
+      if (!rows || typeof rows !== 'object' || Array.isArray(rows)) return false;
+      for (const [key, value] of Object.entries(rows as Record<string, unknown>)) {
+        if (typeof key !== 'string' || key.length === 0 || typeof value !== 'string') return false;
+        try { if (canonicalString(parseCanonical<Ref>(value)) !== value) return false; } catch { return false; }
+      }
+    }
     if (!memo.proof || typeof memo.proof !== 'object') return false;
     const proof = memo.proof as Record<string, unknown>;
     if (Object.keys(proof).sort().join(',') !== 'current,generation,generations,journal,state') return false;
@@ -1571,7 +2177,7 @@ export class FileArtifactStore implements ArtifactStore {
         // v2 keeps the journal exclusively in authenticated segment files;
         // state.json is a projection with the same schema minus `journal`.
         const stateKeys = Object.keys(parsed).sort();
-        const expected = ['attemptEpoch', 'authorityEpoch', 'barrier', 'barrierEpoch', 'decisionTokens', 'gate', 'modeEpoch', 'nextAction', 'outbox', 'phaseId', 'planDigest', 'processed', 'revision', 'runId', 'schema', 'status', 'steps', 'writerFence'];
+        const expected = ['attemptEpoch', 'authorityEpoch', 'barrier', 'barrierEpoch', 'decisionTokens', 'gate', 'modeEpoch', 'nextAction', 'outbox', 'phaseId', 'planDigest', 'processed', 'revision', 'runId', 'schema', 'status', 'steps', 'writerFence', ...(parsed.schema === 2 ? ['managed'] : [])].sort();
         invariant(stateKeys.length === expected.length && stateKeys.every((key, index) => key === expected[index]), 'segmented v2 state fields are invalid');
         state = parsed as unknown as MachineState;
         state.journal = [];
@@ -1964,7 +2570,7 @@ export class FileArtifactStore implements ArtifactStore {
         // public snapshot and let the next commit take the unchanged cold
         // verifier path.
         try {
-          this.verifiedGenerationMemo = await this.captureVerifiedGenerationMemo(verified.current);
+          this.verifiedGenerationMemo = await this.captureVerifiedGenerationMemo(verified.current, verified.state!);
         } catch {
           this.verifiedGenerationMemo = undefined;
         }
@@ -2212,6 +2818,7 @@ export class FileArtifactStore implements ArtifactStore {
         this.format = 'segmented/v2';
         this.verifiedGenerationMemo = undefined;
         const verifiedPrior = previousGeneration > 0 ? await this.readVerifiedCurrent(true) : undefined;
+        validateManagedAuthorityTransition(managedAuthorityAnchors(verifiedPrior?.state), state);
         return this.commitSegmentedV2(previousGeneration, state, verifiedPrior?.current ?? currentManifest);
       }
       if (segmented) {
@@ -2220,13 +2827,16 @@ export class FileArtifactStore implements ArtifactStore {
         // Reader-before-writer: a segmented successor is staged only after
         // the complete predecessor head/state/segment chain has verified.
         const verifiedPrior = previousGeneration > 0 ? await this.readVerifiedCurrent(true) : undefined;
+        validateManagedAuthorityTransition(managedAuthorityAnchors(verifiedPrior?.state), state);
         return this.commitSegmented(previousGeneration, state, verifiedPrior?.current ?? currentManifest);
       }
       const memo = this.verifiedGenerationMemo;
       this.verifiedGenerationMemo = undefined;
       const memoHit = await this.probeVerifiedGenerationMemo(memo, previousGeneration);
-      const loadedGeneration = memoHit ? previousGeneration : (await this.readVerifiedCurrent()).generation;
+      const verifiedPrior = memoHit ? undefined : await this.readVerifiedCurrent();
+      const loadedGeneration = memoHit ? previousGeneration : verifiedPrior!.generation;
       if (loadedGeneration !== previousGeneration) throw mintStoreGenerationConflict();
+      validateManagedAuthorityTransition(memoHit ? memo!.authorityAnchors : managedAuthorityAnchors(verifiedPrior!.state), state);
       // Retire only the exact immediate predecessor after CURRENT has been
       // fully verified. No generation/quarantine retention cleanup runs after
       // CURRENT publication; normal lock release and disposable reuse work
@@ -2867,6 +3477,88 @@ export class FileArtifactStore implements ArtifactStore {
       index[record.key] = { ...record }; await this.writeReuseIndex(index);
       await fs.unlink(pinPath).catch(() => undefined); await this.fsyncDir(this.reusePinsDir);
       await this.gcReuseUnsafe(index);
+    });
+  }
+
+  private publicationLeasePath(leaseId: string): string { return join(this.publicationLeasesDir, `${digest(leaseId)}.json`); }
+  private validatePublicationLease(lease: PublicationLease): void {
+    if (!lease || !/^[A-Za-z0-9._:-]{1,200}$/.test(lease.leaseId) || !Array.isArray(lease.refs) || lease.refs.length === 0 || lease.refs.some((item) => !refIsValid(item)) || !Number.isSafeInteger(lease.expiresAt) || lease.expiresAt < 0 || !['ACTIVE', 'PROMOTED', 'EXPIRED'].includes(lease.status)) throw new Error('publication lease is malformed');
+  }
+  async acquirePublicationLease(leaseId: string, refs: readonly Ref[], ttlMs = 60_000): Promise<PublicationLease> {
+    if (!/^[A-Za-z0-9._:-]{1,200}$/.test(leaseId) || !Array.isArray(refs) || refs.length === 0 || refs.some((item) => !refIsValid(item))) throw new Error('publication lease is malformed');
+    if (!Number.isSafeInteger(ttlMs) || ttlMs < 1 || ttlMs > 86_400_000) throw new Error('publication lease ttl is invalid');
+    return this.withFence(async () => {
+      await this.ensureDirectory(this.publicationLeasesDir, 'publication leases directory');
+      const path = this.publicationLeasePath(leaseId);
+      let prior: PublicationLease | undefined;
+      try {
+        prior = parseCanonical<PublicationLease>(await this.readRegular(path, 'publication lease'));
+        this.validatePublicationLease(prior);
+        if (prior.leaseId !== leaseId) throw new Error('publication lease identity mismatch');
+        if (prior.status === 'ACTIVE' && prior.expiresAt > Date.now()) {
+          if (canonicalString(prior.refs) !== canonicalString(refs)) throw new Error('publication lease conflicts');
+          return { ...prior, refs: prior.refs.map((ref) => ({ ...ref })) };
+        }
+        if (prior.status === 'PROMOTED') throw new Error('publication lease already promoted');
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+      if (prior) await fs.unlink(path).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'ENOENT') throw error; });
+      const lease: PublicationLease = { leaseId, refs: refs.map((ref) => ({ ...ref })), expiresAt: Date.now() + ttlMs, status: 'ACTIVE' };
+      await this.writeRegular(path, canonicalString(lease), 'publication lease', true).catch(async (error) => {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+        const prior = parseCanonical<PublicationLease>(await this.readRegular(path, 'publication lease')); this.validatePublicationLease(prior);
+        if (prior.status === 'ACTIVE' && prior.expiresAt > Date.now() && canonicalString(prior.refs) === canonicalString(refs)) return;
+        throw new Error('publication lease conflicts');
+      });
+      await this.fsyncDir(this.publicationLeasesDir);
+      return { ...lease, refs: lease.refs.map((ref) => ({ ...ref })) };
+    });
+  }
+  async promotePublicationLease(leaseId: string): Promise<PublicationLease> {
+    return this.withFence(async () => {
+      try { await this.assertDirectory(this.publicationLeasesDir, 'publication leases directory'); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw new Error('publication lease unavailable'); throw error; }
+      const path = this.publicationLeasePath(leaseId);
+      const lease = parseCanonical<PublicationLease>(await this.readRegular(path, 'publication lease')); this.validatePublicationLease(lease);
+      if (lease.leaseId !== leaseId) throw new Error('publication lease unavailable');
+      if (lease.status === 'PROMOTED') return { ...lease, refs: lease.refs.map((ref) => ({ ...ref })) };
+      if (lease.status !== 'ACTIVE' || lease.expiresAt <= Date.now()) throw new Error('publication lease unavailable');
+      const promoted: PublicationLease = { ...lease, status: 'PROMOTED' };
+      await this.writeRegular(path, canonicalString(promoted), 'publication lease'); await this.fsyncDir(this.publicationLeasesDir);
+      return { ...promoted, refs: promoted.refs.map((ref) => ({ ...ref })) };
+    });
+  }
+  async releasePublicationLease(leaseId: string): Promise<void> {
+    await this.withFence(async () => {
+      try { await this.assertDirectory(this.publicationLeasesDir, 'publication leases directory'); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return; throw error; }
+      await fs.unlink(this.publicationLeasePath(leaseId)).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'ENOENT') throw error; }); await this.fsyncDir(this.publicationLeasesDir);
+    });
+  }
+  async collectPublicationLeases(now = Date.now()): Promise<{ removed: number }> {
+    return this.withFence(async () => {
+      try { await this.assertDirectory(this.publicationLeasesDir, 'publication leases directory'); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { removed: 0 }; throw error; }
+      // Verify CURRENT once under the same writer fence before deleting any
+      // expired row. A managed leaseSet in the authoritative state is a root;
+      // malformed/missing CURRENT therefore fails closed instead of collecting
+      // a lease that may still be needed for publication.
+      const rooted = new Set<string>();
+      const verified = await this.readVerifiedCurrent(true);
+      for (const leaseId of Object.keys(verified.state?.managed?.leaseSets ?? {})) rooted.add(leaseId);
+      const entries = await this.readDirectoryBounded(this.publicationLeasesDir, 'publication leases directory', JOURNAL_EVENT_CEILING + 1);
+      let removed = 0;
+      for (const entry of entries) {
+        if (!entry.isFile() || !entry.name.endsWith('.json')) throw new Error(`ManifestMismatch: unexpected publication lease ${entry.name}`);
+        const path = join(this.publicationLeasesDir, entry.name);
+        let lease: PublicationLease;
+        try { lease = parseCanonical<PublicationLease>(await this.readRegular(path, 'publication lease')); this.validatePublicationLease(lease); }
+        catch (error) { throw new Error(`ManifestMismatch: ${(error as Error).message}`); }
+        if (lease.status === 'ACTIVE' && lease.expiresAt <= now && !rooted.has(lease.leaseId)) { await fs.unlink(path); removed += 1; }
+      }
+      if (removed) await this.fsyncDir(this.publicationLeasesDir);
+      return { removed };
     });
   }
 

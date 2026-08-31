@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { canonicalString, parseCanonical } from './canonical.js';
 import type { BeadsBridgeMode, BridgeMode, BridgeOptions, BridgeTransition } from './bridge.js';
 import type { BeadsAcknowledgement } from './beads.js';
+import type { EvidenceCopyPolicy } from './evidence-copy.js';
 import type { Event, Plan } from './model.js';
 import { drive, type TerminalEffectDriver } from './orchestration.js';
 import { lifecycle, type LifecycleCommand, type LifecycleResult } from './orchestration.js';
@@ -14,7 +15,7 @@ type Flags = {
   runDir?: string; runId?: string; mode?: BridgeMode; modeProvided: boolean; plan?: string; event?: string; eventId?: string; phaseId?: string; stepId?: string;
   state?: string; steps?: string; expectedRevision?: number; attemptEpoch?: number; authorityEpoch?: number; barrierEpoch?: number; launchToken?: string;
   action?: 'disable' | 'delete'; help: boolean;
-  beadsMode?: BeadsBridgeMode; bdPath?: string; beadsWorkspace?: string; beadsDigest?: string; beadsHome?: string; beadsConfig?: string; beadsAck?: string; beadsPhase?: string;
+  beadsMode?: BeadsBridgeMode; beadsEvidenceCopy?: EvidenceCopyPolicy; bdPath?: string; beadsWorkspace?: string; beadsDigest?: string; beadsHome?: string; beadsConfig?: string; beadsAck?: string; beadsPhase?: string;
 };
 
 function usage(): string {
@@ -51,6 +52,7 @@ Options:
   --barrier-epoch N       Identity epoch
   --launch-token TOKEN    Dispatch/receipt identity token
   --beads-mode off|shadow|active  Explicit read-only Beads planning mode
+  --beads-evidence-copy off|prefer|require  Private snapshot copy policy (default off)
   --bd-path PATH          Absolute operator-provisioned bd v1.2.2 executable
   --beads-workspace PATH  Absolute Beads workspace
   --beads-sha256 HEX      Expected SHA-256 of the bd executable
@@ -142,6 +144,7 @@ function parseArgs(argv: string[]): Flags {
       case 'state': flags.state = value; break; case 'steps': flags.steps = value; break; case 'expected-revision': flags.expectedRevision = numberFlag(name, value); break;
       case 'attempt-epoch': flags.attemptEpoch = numberFlag(name, value); break; case 'authority-epoch': flags.authorityEpoch = numberFlag(name, value); break; case 'barrier-epoch': flags.barrierEpoch = numberFlag(name, value); break; case 'launch-token': flags.launchToken = value; break;
       case 'beads-mode': if (value !== 'off' && value !== 'shadow' && value !== 'active') throw new Error('--beads-mode must be off, shadow, or active'); flags.beadsMode = value; break;
+      case 'beads-evidence-copy': if (value !== 'off' && value !== 'prefer' && value !== 'require') throw new Error('--beads-evidence-copy must be off, prefer, or require'); flags.beadsEvidenceCopy = value; break;
       case 'bd-path': flags.bdPath = value; break; case 'beads-workspace': flags.beadsWorkspace = value; break; case 'beads-sha256': flags.beadsDigest = value; break; case 'beads-home': flags.beadsHome = value; break; case 'beads-config': flags.beadsConfig = value; break; case 'beads-phase': flags.beadsPhase = value; break; case 'beads-ack': flags.beadsAck = value; break;
       default: throw new Error(`unknown option --${name}`);
     }
@@ -155,10 +158,11 @@ async function readCanonical(path: string): Promise<unknown> {
 }
 
 async function beadsOptions(flags: Flags): Promise<BridgeOptions['beads'] | undefined> {
+  if (flags.beadsEvidenceCopy !== undefined && (!flags.beadsMode || flags.beadsMode === 'off')) throw new Error('--beads-evidence-copy requires shadow or active Beads mode');
   if (!flags.beadsMode || flags.beadsMode === 'off') return undefined;
   if (!flags.bdPath || !flags.beadsWorkspace || !flags.beadsDigest) throw new Error('--bd-path, --beads-workspace, and --beads-sha256 are required for Beads mode');
   const { BeadsPlanSource } = await import('./beads.js');
-  const source = new BeadsPlanSource({ executablePath: flags.bdPath, workspace: flags.beadsWorkspace, expectedBinaryDigest: flags.beadsDigest, ...(flags.beadsHome === undefined ? {} : { homeDir: flags.beadsHome }), ...(flags.beadsConfig === undefined ? {} : { xdgConfigHome: flags.beadsConfig }), ...(flags.beadsPhase === undefined ? {} : { phaseId: flags.beadsPhase }) });
+  const source = new BeadsPlanSource({ executablePath: flags.bdPath, workspace: flags.beadsWorkspace, expectedBinaryDigest: flags.beadsDigest, ...(flags.beadsHome === undefined ? {} : { homeDir: flags.beadsHome }), ...(flags.beadsConfig === undefined ? {} : { xdgConfigHome: flags.beadsConfig }), ...(flags.beadsPhase === undefined ? {} : { phaseId: flags.beadsPhase }), ...(flags.beadsEvidenceCopy === undefined ? {} : { evidenceCopyPolicy: flags.beadsEvidenceCopy }) });
   const acknowledgement = flags.beadsAck === undefined ? undefined : await readCanonical(flags.beadsAck) as BeadsAcknowledgement;
   return { mode: flags.beadsMode, source, ...(acknowledgement === undefined ? {} : { acknowledgement }) };
 }

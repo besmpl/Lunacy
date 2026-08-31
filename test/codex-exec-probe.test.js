@@ -62,7 +62,7 @@ test('help probe recognizes the installed required flags and explicit safe sandb
   assert.equal(result.supportsJsonl, true);
 });
 
-test('direct docs route Luna or Sol/high while managed execution remains pinned to Sol', async () => {
+test('direct docs and private deliberation use Luna/max while writable managed action remains pinned to Sol/high', async () => {
   const directDocs = [
     'README.md', 'SKILL.md', 'WORKSPACE.md', 'orchestrator/PLANNING.md',
   ];
@@ -70,11 +70,11 @@ test('direct docs route Luna or Sol/high while managed execution remains pinned 
   for (const [index, text] of directTexts.entries()) {
     assert.match(text, /gpt-5\.6-luna/, directDocs[index]);
     assert.match(text, /gpt-5\.6-sol/, directDocs[index]);
-    assert.match(text, /\bxhigh\b/, directDocs[index]);
+    assert.match(text, /\bmax\b/, directDocs[index]);
     assert.match(text, /\bhigh\b/, directDocs[index]);
   }
-  assert.match(directTexts[0], /model: gpt-5\.6-luna[\s\S]*reasoning_effort: xhigh[\s\S]*model: gpt-5\.6-sol[\s\S]*reasoning_effort: high/);
-  assert.match(directTexts[1], /omitted route means Luna at `xhigh`[\s\S]*explicit `sol-high` means exactly GPT-5\.6 Sol at `high`/);
+  assert.match(directTexts[0], /model: gpt-5\.6-luna[\s\S]*reasoning_effort: max[\s\S]*model: gpt-5\.6-sol[\s\S]*reasoning_effort: high/);
+  assert.match(directTexts[1], /omitted route means Luna at `max`[\s\S]*explicit `sol-high` means exactly GPT-5\.6 Sol at `high`/);
 
   const managed = [
     'src/codex-host-policy.ts',
@@ -82,10 +82,12 @@ test('direct docs route Luna or Sol/high while managed execution remains pinned 
     'tools/verify-release-quiescence.mjs',
   ];
   const managedTexts = await Promise.all(managed.map((path) => readFile(join(root, path), 'utf8')));
-  for (const [index, text] of managedTexts.entries()) {
-    assert.doesNotMatch(text, /gpt-5\.6-luna|\bLuna\b|\bxhigh\b|CODEX_LUNA_COMPAT/, managed[index]);
+  for (const [index, text] of managedTexts.slice(1).entries()) {
+    assert.doesNotMatch(text, /gpt-5\.6-luna|\bLuna\b|\bxhigh\b|CODEX_LUNA_COMPAT/, managed[index + 1]);
   }
   assert.match(managedTexts[0], /CODEX_MODEL = 'gpt-5\.6-sol'[\s\S]*DEFAULT_REASONING_EFFORT = 'high'/);
+  assert.match(managedTexts[0], /DELIBERATION_CODEX_MODEL = 'gpt-5\.6-luna'[\s\S]*DELIBERATION_REASONING_EFFORT = 'max'/);
+  assert.match(managedTexts[0], /effectDenied: true[\s\S]*targetWrite: false[\s\S]*network: false[\s\S]*fallback: false/);
   assert.match(managedTexts[1], /CODEX_MODEL = 'gpt-5\.6-sol'[\s\S]*DEFAULT_EFFORT = 'high'/);
   assert.match(managedTexts[2], /probe-codex-exec\.mjs'[\s\S]*runtime\/tools\/probe-codex-exec\.mjs[\s\S]*verify-release-quiescence\.mjs'[\s\S]*runtime\/tools\/verify-release-quiescence\.mjs/);
 

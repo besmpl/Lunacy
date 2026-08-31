@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
-import { promises as fs } from 'node:fs';
+import { lstatSync, promises as fs, realpathSync } from 'node:fs';
 import { spawn } from 'node:child_process';
-import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { OutboxCommand, Sha256 } from './model.js';
 import { canonicalString, digest } from './canonical.js';
 
@@ -9,9 +9,11 @@ import { canonicalString, digest } from './canonical.js';
  * status, dependency state, retry instruction, or scheduler cursor. */
 export const CODEX_HOST_POLICY_SCHEMA = 'lunacy-codex-exec-policy/v1' as const;
 export const CODEX_MODEL = 'gpt-5.6-sol' as const;
+export const DELIBERATION_CODEX_MODEL = 'gpt-5.6-luna' as const;
 export const CODEX_VERSION = '0.145.0' as const;
 export const DEFAULT_REASONING_EFFORT = 'high' as const;
 export const MAX_REASONING_EFFORT = 'max' as const;
+export const DELIBERATION_REASONING_EFFORT = 'max' as const;
 export const WORKER_RESULT_SCHEMA = 'lunacy-codex-worker-result-v1' as const;
 
 export const MAX_REASON_CODES = Object.freeze([
@@ -155,6 +157,50 @@ export type CodexHostPolicyInput = Readonly<Partial<Omit<CodexHostPolicy, 'schem
   maxOverrides?: readonly MaxOverride[];
 }>;
 
+/** Authority-free sibling branch owned by this host-policy module. It is not
+ * a fallback from the writable action policy: callers must select it
+ * explicitly and provide an isolated scratch root. */
+export type CodexDeliberationHostPolicy = Readonly<{
+  schema: 'lunacy-codex-deliberation-policy/v1';
+  profile: 'deliberation';
+  targetWorkspace: string;
+  scratchRoot: string;
+  evidenceRoot: string;
+  readIsolation: 'darwin-seatbelt/v1';
+  sandboxExecPath: '/usr/bin/sandbox-exec';
+  codexPath: string;
+  codexVersion: typeof CODEX_VERSION;
+  codexBinaryDigest: string;
+  authFilePath: string;
+  authFileDigest: string;
+  runtimeReadFiles: readonly string[];
+  runtimeReadSubpaths: readonly string[];
+  workerSchemaPath: string;
+  workerSchemaDigest: string;
+  model: typeof DELIBERATION_CODEX_MODEL;
+  effort: typeof DELIBERATION_REASONING_EFFORT;
+  effectDenied: true;
+  targetWrite: false;
+  network: false;
+  fallback: false;
+  timeoutMs: number;
+  maxOutputBytes: number;
+}>;
+
+export type CodexDeliberationHostPolicyInput = Readonly<Partial<Omit<CodexDeliberationHostPolicy, 'schema' | 'profile' | 'model' | 'effort' | 'effectDenied' | 'targetWrite' | 'network' | 'fallback' | 'codexVersion'>> & {
+  targetWorkspace: string;
+  scratchRoot: string;
+  evidenceRoot: string;
+  codexPath: string;
+  codexBinaryDigest: string;
+  authFilePath: string;
+  authFileDigest: string;
+  runtimeReadFiles?: readonly string[];
+  runtimeReadSubpaths?: readonly string[];
+  workerSchemaPath: string;
+  workerSchemaDigest: string;
+}>;
+
 export type CodexCommandFrame = Readonly<Pick<OutboxCommand, 'commandId' | 'runId' | 'phaseId' | 'stepId' | 'attemptEpoch' | 'authorityEpoch' | 'barrierEpoch' | 'modeEpoch' | 'launchToken' | 'commandDigest'> & {
   /** The plan digest is supplied by the composition root, never inferred from Markdown. */
   planDigest: string;
@@ -194,6 +240,133 @@ function asNonNegativeInteger(value: number, label: string): number {
 function asPositiveInteger(value: number, label: string): number {
   if (!Number.isSafeInteger(value) || value < 1) fail(`${label} must be a positive safe integer`);
   return value;
+}
+
+export function createCodexDeliberationHostPolicy(input: CodexDeliberationHostPolicyInput): CodexDeliberationHostPolicy {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) fail('deliberation policy input is required');
+  const prototype = Object.getPrototypeOf(input);
+  if (prototype !== Object.prototype && prototype !== null) fail('deliberation policy input must be a plain object');
+  const allowed = new Set(['schema', 'profile', 'targetWorkspace', 'scratchRoot', 'evidenceRoot', 'readIsolation', 'sandboxExecPath', 'codexPath', 'codexVersion', 'codexBinaryDigest', 'authFilePath', 'authFileDigest', 'runtimeReadFiles', 'runtimeReadSubpaths', 'workerSchemaPath', 'workerSchemaDigest', 'model', 'effort', 'effectDenied', 'targetWrite', 'network', 'fallback', 'timeoutMs', 'maxOutputBytes']);
+  if (Object.keys(input).some((key) => !allowed.has(key))) fail('deliberation policy fields are not closed');
+  const supplied = input as unknown as Partial<CodexDeliberationHostPolicy>;
+  if (supplied.schema !== undefined && supplied.schema !== 'lunacy-codex-deliberation-policy/v1' || supplied.profile !== undefined && supplied.profile !== 'deliberation' || supplied.codexVersion !== undefined && supplied.codexVersion !== CODEX_VERSION || supplied.model !== undefined && supplied.model !== DELIBERATION_CODEX_MODEL || supplied.effort !== undefined && supplied.effort !== DELIBERATION_REASONING_EFFORT || supplied.effectDenied !== undefined && supplied.effectDenied !== true || supplied.targetWrite !== undefined && supplied.targetWrite !== false || supplied.network !== undefined && supplied.network !== false || supplied.fallback !== undefined && supplied.fallback !== false || supplied.readIsolation !== undefined && supplied.readIsolation !== 'darwin-seatbelt/v1' || supplied.sandboxExecPath !== undefined && supplied.sandboxExecPath !== '/usr/bin/sandbox-exec') fail('deliberation policy profile is invalid');
+  const targetWorkspace = asPath(input.targetWorkspace, 'targetWorkspace');
+  const scratchRoot = asPath(input.scratchRoot, 'scratchRoot');
+  const evidenceRoot = asPath(input.evidenceRoot, 'evidenceRoot');
+  if (within(targetWorkspace, scratchRoot) || within(scratchRoot, targetWorkspace) || within(targetWorkspace, evidenceRoot) || within(evidenceRoot, targetWorkspace) || within(scratchRoot, evidenceRoot) || within(evidenceRoot, scratchRoot)) fail('deliberation scratch/evidence roots must be mutually isolated from targetWorkspace');
+  const codexPath = asPath(input.codexPath, 'codexPath'); const workerSchemaPath = asPath(input.workerSchemaPath, 'workerSchemaPath');
+  const authFilePath = asPath(input.authFilePath, 'authFilePath');
+  if (dirname(authFilePath) === authFilePath || authFilePath.slice(authFilePath.lastIndexOf(sep) + 1) !== 'auth.json') fail('deliberation auth file must be a dedicated auth.json');
+  const runtimeReadFiles = Object.freeze([...(input.runtimeReadFiles ?? [])].map((path, index) => asPath(path, `runtimeReadFiles[${index}]`)));
+  const runtimeReadSubpaths = Object.freeze([...(input.runtimeReadSubpaths ?? [])].map((path, index) => asPath(path, `runtimeReadSubpaths[${index}]`)));
+  if (new Set(runtimeReadFiles).size !== runtimeReadFiles.length) fail('runtimeReadFiles must be unique');
+  if (new Set(runtimeReadSubpaths).size !== runtimeReadSubpaths.length) fail('runtimeReadSubpaths must be unique');
+  if ([...runtimeReadFiles, ...runtimeReadSubpaths].some((path) => !within('/opt/homebrew', path) && !within('/usr/local', path))) fail('runtime read inputs must be inside a sealed native runtime prefix');
+  if (runtimeReadSubpaths.some((path) => {
+    const base = within('/opt/homebrew', path) ? '/opt/homebrew' : '/usr/local';
+    return relative(base, path).split(sep).filter(Boolean).length < 3;
+  })) fail('runtimeReadSubpaths must name a narrow versioned runtime subtree');
+  if ([targetWorkspace, scratchRoot, evidenceRoot].some((root) => [codexPath, workerSchemaPath, authFilePath, ...runtimeReadFiles, ...runtimeReadSubpaths].some((path) => within(root, path) || within(path, root)))) fail('deliberation runtime/auth inputs must be outside protected roots');
+  return Object.freeze({
+    schema: 'lunacy-codex-deliberation-policy/v1', profile: 'deliberation',
+    targetWorkspace, scratchRoot, evidenceRoot, readIsolation: 'darwin-seatbelt/v1', sandboxExecPath: '/usr/bin/sandbox-exec',
+    codexPath, codexVersion: CODEX_VERSION,
+    codexBinaryDigest: asDigest(input.codexBinaryDigest, 'codexBinaryDigest'),
+    authFilePath,
+    authFileDigest: asDigest(input.authFileDigest, 'authFileDigest'),
+    runtimeReadFiles,
+    runtimeReadSubpaths,
+    workerSchemaPath,
+    workerSchemaDigest: asDigest(input.workerSchemaDigest, 'workerSchemaDigest'),
+    model: DELIBERATION_CODEX_MODEL, effort: DELIBERATION_REASONING_EFFORT,
+    effectDenied: true, targetWrite: false, network: false, fallback: false,
+    timeoutMs: asPositiveInteger(input.timeoutMs ?? 60_000, 'timeoutMs'),
+    maxOutputBytes: asPositiveInteger(input.maxOutputBytes ?? 512 * 1024, 'maxOutputBytes'),
+  });
+}
+
+export function validateCodexDeliberationHostPolicy(policy: CodexDeliberationHostPolicy): CodexDeliberationHostPolicy {
+  if (!policy || typeof policy !== 'object' || Array.isArray(policy)) fail('deliberation policy is malformed');
+  const expected = ['authFileDigest', 'authFilePath', 'codexBinaryDigest', 'codexPath', 'codexVersion', 'effectDenied', 'effort', 'evidenceRoot', 'fallback', 'maxOutputBytes', 'model', 'network', 'profile', 'readIsolation', 'runtimeReadFiles', 'runtimeReadSubpaths', 'sandboxExecPath', 'schema', 'scratchRoot', 'targetWorkspace', 'targetWrite', 'timeoutMs', 'workerSchemaDigest', 'workerSchemaPath'].sort();
+  const keys = Object.keys(policy).sort();
+  if (keys.length !== expected.length || keys.some((key, index) => key !== expected[index])) fail('deliberation policy fields are not closed');
+  if (policy.schema !== 'lunacy-codex-deliberation-policy/v1' || policy.profile !== 'deliberation' || policy.codexVersion !== CODEX_VERSION || policy.model !== DELIBERATION_CODEX_MODEL || policy.effort !== DELIBERATION_REASONING_EFFORT || policy.effectDenied !== true || policy.targetWrite !== false || policy.network !== false || policy.fallback !== false || policy.readIsolation !== 'darwin-seatbelt/v1' || policy.sandboxExecPath !== '/usr/bin/sandbox-exec') fail('deliberation policy profile is invalid');
+  return createCodexDeliberationHostPolicy(policy);
+}
+
+/** Build the sole managed-deliberation provider argv. The target workspace is
+ * intentionally absent: the provider receives only a sealed role view on
+ * stdin, writes only its isolated output file, and has network disabled. */
+export function buildCodexDeliberationArguments(policy: CodexDeliberationHostPolicy, outputPath: string): string[] {
+  const checked = validateCodexDeliberationHostPolicy(policy);
+  const output = asPath(outputPath, 'deliberation outputPath');
+  if (!within(checked.scratchRoot, output) || output === checked.scratchRoot) fail('deliberation outputPath must be under scratchRoot');
+  const attemptRoot = dirname(output);
+  if (attemptRoot === checked.scratchRoot) fail('deliberation outputPath must be under a private attempt root');
+  const args = [
+    'exec', '-', '--model', DELIBERATION_CODEX_MODEL, '--sandbox', 'workspace-write', '--json',
+    '--output-schema', checked.workerSchemaPath, '--output-last-message', output,
+    '--ephemeral', '--ignore-user-config', '--strict-config', '--cd', attemptRoot,
+    '--skip-git-repo-check',
+    '--config', 'approval_policy="never"', '--config', `model_reasoning_effort="${DELIBERATION_REASONING_EFFORT}"`,
+    '--config', 'sandbox_workspace_write.network_access=false',
+    '--disable', 'shell_tool', '--disable', 'unified_exec', '--disable', 'code_mode_host',
+    '--disable', 'apps', '--disable', 'browser_use', '--disable', 'browser_use_external',
+    '--disable', 'browser_use_full_cdp_access', '--disable', 'computer_use', '--disable', 'in_app_browser',
+    '--disable', 'image_generation', '--disable', 'plugins', '--disable', 'remote_plugin',
+    '--disable', 'skill_search', '--disable', 'workspace_dependencies', '--disable', 'tool_suggest',
+    '--disable', 'goals', '--disable', 'multi_agent', '--disable', 'multi_agent_v2',
+    '--disable', 'hooks', '--disable', 'standalone_web_search',
+  ];
+  if (args.includes('--add-dir') || args.includes(checked.targetWorkspace) || args.some((arg) => FORBIDDEN_ARGUMENTS.has(arg) || arg === 'danger-full-access')) fail('deliberation invocation escaped its effect-denied profile');
+  return Object.freeze(args) as unknown as string[];
+}
+
+function seatbeltLiteral(path: string): string { return `"${path.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`; }
+
+function seatbeltAncestors(paths: readonly string[]): string[] {
+  const ancestors = new Set<string>();
+  for (const path of paths) {
+    let current = dirname(path);
+    while (current !== dirname(current)) { ancestors.add(current); current = dirname(current); }
+  }
+  return [...ancestors].sort();
+}
+
+function runtimeSymlinkInputs(paths: readonly string[]): string[] {
+  const links = new Set<string>();
+  for (const path of paths) {
+    const parts = path.split(sep).filter(Boolean); let current: string = sep;
+    for (const part of parts) {
+      current = join(current, part);
+      try { if (lstatSync(current).isSymbolicLink()) links.add(current); }
+      catch { /* policy validation/attestation reports missing runtime inputs */ }
+    }
+  }
+  return [...links].sort();
+}
+
+/** Deny-default native capability for the attested Codex image. Model
+ * transport is limited to one exact host-owned loopback adapter; generated subprocesses,
+ * tools, non-transport IPC, ambient credentials, and every non-enumerated
+ * filesystem input remain denied. The credential capsule is not part of the
+ * model-visible attempt. */
+export function buildCodexDeliberationIsolationProfile(policy: CodexDeliberationHostPolicy, attemptRoot: string, transportPort = 1): string {
+  const checked = validateCodexDeliberationHostPolicy(policy);
+  const attempt = asPath(attemptRoot, 'deliberation attemptRoot');
+  if (!within(checked.scratchRoot, attempt) || attempt === checked.scratchRoot) fail('deliberation attemptRoot must be private scratch');
+  if (!Number.isSafeInteger(transportPort) || transportPort < 1 || transportPort > 65_535) fail('deliberation transport port is invalid');
+  const authHome = `${attempt}.codex-home`;
+  const timezone = realpathSync('/private/etc/localtime');
+  const runtimePhysicalFiles = checked.runtimeReadFiles.map((path) => realpathSync(path));
+  const runtimeLinks = runtimeSymlinkInputs(checked.runtimeReadFiles);
+  const exactReads = [...new Set(['/usr/bin/true', '/etc/ssl/cert.pem', '/private/etc/ssl/cert.pem', '/private/etc/localtime', timezone, checked.codexPath, checked.workerSchemaPath, ...checked.runtimeReadFiles, ...runtimePhysicalFiles, ...runtimeLinks])];
+  const metadata = [...new Set([...seatbeltAncestors([...exactReads, attempt, authHome]), '/tmp', '/var'])].sort();
+  const exactFilters = exactReads.map((path) => `(literal ${seatbeltLiteral(path)})`).join(' ');
+  const metadataFilters = metadata.map((path) => `(literal ${seatbeltLiteral(path)})`).join(' ');
+  const executableFilters = [...new Set([checked.codexPath, '/usr/bin/true', ...checked.runtimeReadFiles, ...runtimePhysicalFiles])].map((path) => `(literal ${seatbeltLiteral(path)})`).join(' ');
+  const runtimeSubpathFilters = checked.runtimeReadSubpaths.map((path) => `(subpath ${seatbeltLiteral(path)}) (subpath ${seatbeltLiteral(realpathSync(path))})`).join(' ');
+  return `(version 1)\n(deny default)\n(allow sysctl-read)\n(import "dyld-support.sb")\n(allow process-exec)\n(allow network-outbound (remote tcp "localhost:${transportPort}"))\n(allow file-map-executable ${executableFilters} ${runtimeSubpathFilters})\n(allow file-read* ${exactFilters} ${runtimeSubpathFilters} (literal "/dev/null") (literal "/dev/random") (literal "/dev/urandom"))\n(allow file-read* file-write* (subpath ${seatbeltLiteral(attempt)}) (subpath ${seatbeltLiteral(authHome)}))\n(allow file-read-metadata ${metadataFilters})`;
 }
 
 /** Construct and validate a closed policy.  The returned object is frozen so
@@ -510,6 +683,37 @@ export type CodexBinaryAttestation = Readonly<{
   version: string;
 }>;
 
+export type CodexDeliberationHostAttestation = Readonly<{
+  policyDigest: string;
+  executable: CodexBinaryAttestation;
+  authFile: Readonly<{ path: string; dev: number; ino: number; uid: number; gid: number; mode: number; digest: string }>;
+  runtimeReadFiles: ReadonlyArray<Readonly<{ requestedPath: string; physicalPath: string; requestedPathIsSymlink: boolean; requestedDev: number; requestedIno: number; requestedMode: number; dev: number; ino: number; uid: number; gid: number; mode: number; digest: string }>>;
+  runtimeReadSubpaths: ReadonlyArray<Readonly<{ requestedPath: string; physicalPath: string; requestedPathIsSymlink: boolean; requestedDev: number; requestedIno: number; requestedMode: number; dev: number; ino: number; uid: number; gid: number; mode: number }>>;
+  runtimeReadLinks: ReadonlyArray<Readonly<{ path: string; dev: number; ino: number; uid: number; gid: number; mode: number; target: string; digest: string }>>;
+  workerSchema: Readonly<{ path: string; dev: number; ino: number; uid: number; gid: number; mode: number; digest: string }>;
+  targetWorkspace: Readonly<{ path: string; dev: number; ino: number; uid: number; gid: number; mode: number }>;
+  scratchRoot: Readonly<{ path: string; dev: number; ino: number; uid: number; gid: number; mode: number }>;
+  evidenceRoot: Readonly<{ path: string; dev: number; ino: number; uid: number; gid: number; mode: number }>;
+  readIsolation: Readonly<{
+    schema: 'darwin-seatbelt/v1';
+    executable: Readonly<{ path: string; dev: number; ino: number; uid: number; gid: number; mode: number; digest: string }>;
+    probeExecutable: Readonly<{ path: '/usr/bin/true'; dev: number; ino: number; uid: number; gid: number; mode: number; digest: string }>;
+    runtimeSupport: Readonly<{ path: string; dev: number; ino: number; uid: number; gid: number; mode: number; digest: string }>;
+    tlsRoots: Readonly<{ path: string; dev: number; ino: number; uid: number; gid: number; mode: number; digest: string }>;
+    timezone: Readonly<{ requestedPath: '/private/etc/localtime'; physicalPath: string; dev: number; ino: number; uid: number; gid: number; mode: number; digest: string }>;
+    profileTemplateDigest: string;
+    probe: 'PASS';
+  }>;
+  modelTransport: Readonly<{
+    schema: 'lunacy-codex-model-transport-policy/v1';
+    destinations: readonly ['chatgpt.com:443'];
+    maxConnections: 32;
+    maxBytes: number;
+    connectTimeoutMs: 10_000;
+    digest: string;
+  }>;
+}>;
+
 function boundedVersion(executable: string, timeoutMs: number): Promise<string> {
   return new Promise((resolvePromise, reject) => {
     const child = spawn(executable, ['--version'], { shell: false, stdio: ['ignore', 'pipe', 'pipe'], env: { NO_COLOR: '1' } });
@@ -550,6 +754,158 @@ export async function attestCodexExecutable(policy: CodexHostPolicy): Promise<Co
   const bytesAfter = await fs.readFile(physicalPath);
   if (createHash('sha256').update(bytesAfter).digest('hex') !== actualDigest) fail('codex executable digest changed during attestation');
   return Object.freeze({ requestedPath: policy.codexPath, physicalPath, requestedPathIsSymlink: requested.isSymbolicLink(), uid: binary.uid, gid: binary.gid, mode: (binary.mode & 0o7777).toString(8), digest: actualDigest, version: policy.codexVersion });
+}
+
+async function attestDeliberationDirectory(path: string, label: string): Promise<CodexDeliberationHostAttestation['targetWorkspace']> {
+  const physical = await fs.realpath(path);
+  if (physical !== path) fail(`${label} must not be a symlink or path alias`);
+  const stat = await fs.stat(path);
+  if (!stat.isDirectory()) fail(`${label} is not a directory`);
+  if ((stat.mode & 0o022) !== 0) fail(`${label} is group/world writable`);
+  if (typeof process.getuid === 'function' && stat.uid !== process.getuid()) fail(`${label} is not owned by the current user`);
+  return Object.freeze({ path, dev: stat.dev, ino: stat.ino, uid: stat.uid, gid: stat.gid, mode: stat.mode });
+}
+
+async function attestDeliberationRuntimeFile(path: string): Promise<CodexDeliberationHostAttestation['runtimeReadFiles'][number]> {
+  const physical = await fs.realpath(path);
+  const requested = await fs.lstat(path);
+  const stat = await fs.stat(path);
+  if (!stat.isFile() || (stat.mode & 0o022) !== 0 || ![0, typeof process.getuid === 'function' ? process.getuid() : stat.uid].includes(stat.uid)) fail('deliberation runtime file is not protected');
+  const fileDigest = createHash('sha256').update(await fs.readFile(physical)).digest('hex');
+  const requestedAfter = await fs.lstat(path); const after = await fs.stat(physical);
+  if (requestedAfter.dev !== requested.dev || requestedAfter.ino !== requested.ino || requestedAfter.mode !== requested.mode
+    || after.dev !== stat.dev || after.ino !== stat.ino || after.mode !== stat.mode || createHash('sha256').update(await fs.readFile(physical)).digest('hex') !== fileDigest) fail('deliberation runtime file changed during attestation');
+  return Object.freeze({ requestedPath: path, physicalPath: physical, requestedPathIsSymlink: requested.isSymbolicLink(), requestedDev: requested.dev, requestedIno: requested.ino, requestedMode: requested.mode, dev: stat.dev, ino: stat.ino, uid: stat.uid, gid: stat.gid, mode: stat.mode, digest: fileDigest });
+}
+
+async function attestDeliberationRuntimeLink(path: string): Promise<CodexDeliberationHostAttestation['runtimeReadLinks'][number]> {
+  const before = await fs.lstat(path); const target = await fs.readlink(path);
+  if (!before.isSymbolicLink() || (before.mode & 0o022) !== 0 || ![0, typeof process.getuid === 'function' ? process.getuid() : before.uid].includes(before.uid)) fail('deliberation runtime link is not protected');
+  const after = await fs.lstat(path); const targetAfter = await fs.readlink(path);
+  if (after.dev !== before.dev || after.ino !== before.ino || after.mode !== before.mode || targetAfter !== target) fail('deliberation runtime link changed during attestation');
+  return Object.freeze({ path, dev: before.dev, ino: before.ino, uid: before.uid, gid: before.gid, mode: before.mode, target, digest: createHash('sha256').update(target).digest('hex') });
+}
+
+function boundedIsolationProbe(executable: string, profile: string, timeoutMs: number): Promise<void> {
+  return new Promise((resolvePromise, reject) => {
+    const child = spawn(executable, ['-p', profile, '/usr/bin/true'], { shell: false, stdio: 'ignore', env: { NO_COLOR: '1' } });
+    let settled = false; let timer: ReturnType<typeof setTimeout> | undefined;
+    const finish = (error?: Error): void => { if (settled) return; settled = true; if (timer) clearTimeout(timer); if (error) reject(error); else resolvePromise(); };
+    child.once('error', finish);
+    child.once('close', (code, signal) => code === 0 && signal === null ? finish() : finish(new Error(`native read-isolation probe failed (${code ?? signal ?? 'unknown'})`)));
+    timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* best effort */ } finish(new Error('native read-isolation probe timed out')); }, timeoutMs);
+  });
+}
+
+async function attestReadIsolation(policy: CodexDeliberationHostPolicy): Promise<CodexDeliberationHostAttestation['readIsolation']> {
+  if (process.platform !== 'darwin' || policy.readIsolation !== 'darwin-seatbelt/v1') fail('sealed native read isolation is unavailable');
+  const physical = await fs.realpath(policy.sandboxExecPath);
+  if (physical !== policy.sandboxExecPath) fail('native read-isolation executable must not be a symlink or path alias');
+  const stat = await fs.stat(physical);
+  if (!stat.isFile() || (stat.mode & 0o111) === 0 || (stat.mode & 0o022) !== 0 || ![0, typeof process.getuid === 'function' ? process.getuid() : stat.uid].includes(stat.uid)) fail('native read-isolation executable is not protected');
+  const bytes = await fs.readFile(physical); const executableDigest = createHash('sha256').update(bytes).digest('hex');
+  const probePath = '/usr/bin/true' as const; const probeStat = await fs.stat(probePath); const probeDigest = createHash('sha256').update(await fs.readFile(probePath)).digest('hex');
+  const runtimeSupportPath = '/System/Library/Sandbox/Profiles/dyld-support.sb';
+  const runtimeSupportStat = await fs.stat(runtimeSupportPath);
+  const runtimeSupportDigest = createHash('sha256').update(await fs.readFile(runtimeSupportPath)).digest('hex');
+  const tlsRootsPath = await fs.realpath('/etc/ssl/cert.pem');
+  const tlsRootsStat = await fs.stat(tlsRootsPath);
+  const tlsRootsDigest = createHash('sha256').update(await fs.readFile(tlsRootsPath)).digest('hex');
+  const timezoneRequestedPath = '/private/etc/localtime' as const;
+  const timezonePath = await fs.realpath(timezoneRequestedPath);
+  const timezoneStat = await fs.stat(timezonePath);
+  const timezoneDigest = createHash('sha256').update(await fs.readFile(timezonePath)).digest('hex');
+  if (!probeStat.isFile() || probeStat.uid !== 0 || (probeStat.mode & 0o022) !== 0
+    || !runtimeSupportStat.isFile() || runtimeSupportStat.uid !== 0 || (runtimeSupportStat.mode & 0o022) !== 0
+    || !tlsRootsStat.isFile() || tlsRootsStat.uid !== 0 || (tlsRootsStat.mode & 0o022) !== 0
+    || !timezoneStat.isFile() || timezoneStat.uid !== 0 || (timezoneStat.mode & 0o022) !== 0) fail('native runtime/TLS/timezone support is not protected');
+  const template = buildCodexDeliberationIsolationProfile(policy, join(policy.scratchRoot, '.attestation-attempt'));
+  await boundedIsolationProbe(physical, template, policy.timeoutMs);
+  const after = await fs.stat(physical);
+  const probeAfter = await fs.stat(probePath); const runtimeSupportAfter = await fs.stat(runtimeSupportPath); const tlsRootsAfter = await fs.stat(tlsRootsPath); const timezoneAfter = await fs.stat(timezonePath);
+  if (after.dev !== stat.dev || after.ino !== stat.ino || after.uid !== stat.uid || after.gid !== stat.gid || after.mode !== stat.mode || createHash('sha256').update(await fs.readFile(physical)).digest('hex') !== executableDigest
+    || probeAfter.dev !== probeStat.dev || probeAfter.ino !== probeStat.ino || probeAfter.mode !== probeStat.mode || createHash('sha256').update(await fs.readFile(probePath)).digest('hex') !== probeDigest
+    || runtimeSupportAfter.dev !== runtimeSupportStat.dev || runtimeSupportAfter.ino !== runtimeSupportStat.ino || runtimeSupportAfter.mode !== runtimeSupportStat.mode || createHash('sha256').update(await fs.readFile(runtimeSupportPath)).digest('hex') !== runtimeSupportDigest
+    || tlsRootsAfter.dev !== tlsRootsStat.dev || tlsRootsAfter.ino !== tlsRootsStat.ino || tlsRootsAfter.mode !== tlsRootsStat.mode || createHash('sha256').update(await fs.readFile(tlsRootsPath)).digest('hex') !== tlsRootsDigest
+    || timezoneAfter.dev !== timezoneStat.dev || timezoneAfter.ino !== timezoneStat.ino || timezoneAfter.mode !== timezoneStat.mode || createHash('sha256').update(await fs.readFile(timezonePath)).digest('hex') !== timezoneDigest) fail('native read-isolation identity changed during attestation');
+  return Object.freeze({
+    schema: 'darwin-seatbelt/v1',
+    executable: Object.freeze({ path: physical, dev: stat.dev, ino: stat.ino, uid: stat.uid, gid: stat.gid, mode: stat.mode, digest: executableDigest }),
+    probeExecutable: Object.freeze({ path: probePath, dev: probeStat.dev, ino: probeStat.ino, uid: probeStat.uid, gid: probeStat.gid, mode: probeStat.mode, digest: probeDigest }),
+    runtimeSupport: Object.freeze({ path: runtimeSupportPath, dev: runtimeSupportStat.dev, ino: runtimeSupportStat.ino, uid: runtimeSupportStat.uid, gid: runtimeSupportStat.gid, mode: runtimeSupportStat.mode, digest: runtimeSupportDigest }),
+    tlsRoots: Object.freeze({ path: tlsRootsPath, dev: tlsRootsStat.dev, ino: tlsRootsStat.ino, uid: tlsRootsStat.uid, gid: tlsRootsStat.gid, mode: tlsRootsStat.mode, digest: tlsRootsDigest }),
+    timezone: Object.freeze({ requestedPath: timezoneRequestedPath, physicalPath: timezonePath, dev: timezoneStat.dev, ino: timezoneStat.ino, uid: timezoneStat.uid, gid: timezoneStat.gid, mode: timezoneStat.mode, digest: timezoneDigest }),
+    profileTemplateDigest: digest(template), probe: 'PASS',
+  });
+}
+
+/** Independently attest every identity used by managed deliberation entry.
+ * Unlike policy construction, this proves real filesystem bytes and the real
+ * Codex version before a provider process can be spawned. */
+export async function attestCodexDeliberationHost(policy: CodexDeliberationHostPolicy): Promise<CodexDeliberationHostAttestation> {
+  const checked = validateCodexDeliberationHostPolicy(policy);
+  const physicalPath = await fs.realpath(checked.codexPath);
+  const requested = await fs.lstat(checked.codexPath);
+  const binary = await fs.stat(physicalPath);
+  if (!binary.isFile() || (binary.mode & 0o111) === 0) fail('codex executable is not an executable regular file');
+  if ((binary.mode & 0o022) !== 0) fail('codex executable is group/world writable');
+  if (typeof process.getuid === 'function' && binary.uid !== process.getuid()) fail('codex executable is not owned by the current user');
+  const binaryBytes = await fs.readFile(physicalPath);
+  const binaryDigest = createHash('sha256').update(binaryBytes).digest('hex');
+  if (binaryDigest !== checked.codexBinaryDigest) fail('codex executable digest changed');
+  const version = await boundedVersion(physicalPath, checked.timeoutMs);
+  if (version !== `codex-cli ${checked.codexVersion}`) fail('codex executable version changed');
+
+  const schemaPhysical = await fs.realpath(checked.workerSchemaPath);
+  if (schemaPhysical !== checked.workerSchemaPath) fail('deliberation worker schema must not be a symlink or path alias');
+  const schema = await fs.stat(schemaPhysical);
+  if (!schema.isFile() || (schema.mode & 0o022) !== 0) fail('deliberation worker schema is not a protected regular file');
+  if (typeof process.getuid === 'function' && schema.uid !== process.getuid()) fail('deliberation worker schema is not owned by the current user');
+  const schemaBytes = await fs.readFile(schemaPhysical);
+  const schemaDigest = createHash('sha256').update(schemaBytes).digest('hex');
+  if (schemaDigest !== checked.workerSchemaDigest) fail('deliberation worker schema digest changed');
+
+  const authPhysical = await fs.realpath(checked.authFilePath);
+  if (authPhysical !== checked.authFilePath) fail('deliberation auth file must not be a symlink or path alias');
+  const auth = await fs.stat(authPhysical);
+  if (!auth.isFile() || (auth.mode & 0o077) !== 0 || (typeof process.getuid === 'function' && auth.uid !== process.getuid())) fail('deliberation auth file is not a protected regular file');
+  const authDigest = createHash('sha256').update(await fs.readFile(authPhysical)).digest('hex');
+  if (authDigest !== checked.authFileDigest) fail('deliberation auth file digest changed');
+  const runtimeReadFiles = await Promise.all(checked.runtimeReadFiles.map(attestDeliberationRuntimeFile));
+  const runtimeReadSubpaths = await Promise.all(checked.runtimeReadSubpaths.map(async (path) => {
+    const requested = await fs.lstat(path); const physicalPath = await fs.realpath(path); const stat = await fs.stat(physicalPath);
+    if (!stat.isDirectory() || (stat.mode & 0o022) !== 0 || ![0, typeof process.getuid === 'function' ? process.getuid() : stat.uid].includes(stat.uid)) fail('deliberation runtime subpath is not protected');
+    return Object.freeze({ requestedPath: path, physicalPath, requestedPathIsSymlink: requested.isSymbolicLink(), requestedDev: requested.dev, requestedIno: requested.ino, requestedMode: requested.mode, dev: stat.dev, ino: stat.ino, uid: stat.uid, gid: stat.gid, mode: stat.mode });
+  }));
+  const runtimeReadLinks = await Promise.all(runtimeSymlinkInputs(checked.runtimeReadFiles).map(attestDeliberationRuntimeLink));
+
+  const targetWorkspace = await attestDeliberationDirectory(checked.targetWorkspace, 'deliberation target workspace');
+  const scratchRoot = await attestDeliberationDirectory(checked.scratchRoot, 'deliberation scratch root');
+  const evidenceRoot = await attestDeliberationDirectory(checked.evidenceRoot, 'deliberation evidence root');
+  const readIsolation = await attestReadIsolation(checked);
+  const requestedAfter = await fs.lstat(checked.codexPath);
+  const binaryAfter = await fs.stat(physicalPath);
+  const schemaAfter = await fs.stat(schemaPhysical);
+  const authAfter = await fs.stat(authPhysical);
+  if (requestedAfter.dev !== requested.dev || requestedAfter.ino !== requested.ino || binaryAfter.dev !== binary.dev || binaryAfter.ino !== binary.ino || binaryAfter.mode !== binary.mode || schemaAfter.dev !== schema.dev || schemaAfter.ino !== schema.ino || schemaAfter.mode !== schema.mode || authAfter.dev !== auth.dev || authAfter.ino !== auth.ino || authAfter.mode !== auth.mode) fail('deliberation host identity changed during attestation');
+  if (createHash('sha256').update(await fs.readFile(physicalPath)).digest('hex') !== binaryDigest || createHash('sha256').update(await fs.readFile(schemaPhysical)).digest('hex') !== schemaDigest || createHash('sha256').update(await fs.readFile(authPhysical)).digest('hex') !== authDigest) fail('deliberation host bytes changed during attestation');
+  return Object.freeze({
+    policyDigest: digest(checked),
+    executable: Object.freeze({ requestedPath: checked.codexPath, physicalPath, requestedPathIsSymlink: requested.isSymbolicLink(), uid: binary.uid, gid: binary.gid, mode: (binary.mode & 0o7777).toString(8), digest: binaryDigest, version: checked.codexVersion }),
+    authFile: Object.freeze({ path: authPhysical, dev: auth.dev, ino: auth.ino, uid: auth.uid, gid: auth.gid, mode: auth.mode, digest: authDigest }),
+    runtimeReadFiles: Object.freeze(runtimeReadFiles),
+    runtimeReadSubpaths: Object.freeze(runtimeReadSubpaths),
+    runtimeReadLinks: Object.freeze(runtimeReadLinks),
+    workerSchema: Object.freeze({ path: schemaPhysical, dev: schema.dev, ino: schema.ino, uid: schema.uid, gid: schema.gid, mode: schema.mode, digest: schemaDigest }),
+    targetWorkspace,
+    scratchRoot,
+    evidenceRoot,
+    readIsolation,
+    modelTransport: (() => {
+      const value = { schema: 'lunacy-codex-model-transport-policy/v1' as const, destinations: ['chatgpt.com:443'] as const, maxConnections: 32 as const, maxBytes: 64 * 1024 * 1024, connectTimeoutMs: 10_000 as const };
+      return Object.freeze({ ...value, digest: digest(value) });
+    })(),
+  });
 }
 
 export function canonicalPolicyBytes(policy: CodexHostPolicy): string { return canonicalString(validateCodexHostPolicy(policy)); }

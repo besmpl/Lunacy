@@ -67,8 +67,14 @@ token is pending. A parent may acknowledge `{ kind: 'ADOPT', digest }` only
 after all old `PENDING`/`CLAIMED`/`UNKNOWN` commands and `ACTIVE` steps are
 reconciled; adoption atomically advances authority/attempt/barrier epochs and
 rebuilds the new step projection without remapping old command identities.
-`PARENT_DECISION` with `FINDINGS` similarly opens a fresh attempt and barrier;
-finalized prior evidence remains immutable.
+`PARENT_DECISION` with the legacy string `FINDINGS` similarly opens a fresh
+attempt and barrier by conservatively resetting every step. An opt-in
+`{ decision: 'FINDINGS', ownerStepId }` value instead marks that known Plan
+owner `REPAIR` and resets only its transitive DAG dependents; unrelated DONE
+steps and historical command/proof identities remain unchanged. The shape and
+owner are validated before the one-shot token is consumed, and ambiguous
+topology falls back to the legacy reset. Finalized prior evidence remains
+immutable.
 
 `KernelOptions.acceleration` is composition-time configuration only. Graph,
 context, reuse, metrics, cell, and snapshot are private optional accelerators;
@@ -91,6 +97,34 @@ The private driver hook is documented in [installation](INSTALL.md). Only the
 composition subpath documented there is intentionally available for host binding;
 other `dist/` modules are not package exports and may change between releases.
 Do not persist or depend on private `MachineState` fields outside `.kernel`.
+
+### Private adaptive deliberation
+
+Adaptive Direct/Focus/Explore does not add a public lifecycle, event, store,
+or authority API. Direct is a true managed bypass. Focus/Explore use private
+composition inputs and the same `RunKernel.advance()` state machine; Wave v2
+and Report v2 are content artifacts, while topology/progress and managed
+receipt/anchor state remain private. The parent alone consumes a deliberation
+decision and adopts a complete Plan.
+
+The package/runtime has no ambient rollout policy: when the host supplies no
+managed composition inputs, the ordinary path remains the fail-safe default.
+The installed operator profile separately composes D3
+`automatic-focus` with `createManagedRolloutPolicy` only for one generation-1,
+effect-denied Wave before the acceptance pointer/Plan is sealed and before the
+first implementation spawn. It never automatically WIDENs or re-enters from a
+gate, repair, worker completion, resume, rollout, or an existing
+rollout-bearing run; an unsettled Wave returns exactly one parent decision
+boundary. Direct remains a true bypass; user-explicit ADHD/Explore remains
+available and explicit-only. Missing or nonconforming capability, Wave, role
+policy, or eligibility is disabled/refused without fallback. Shadow is synthetic/disposable and mechanically
+non-authoritative; every admitted mode requires exact closed eligibility and
+the attested Luna/max effect-denied host.
+`managedKillSwitch: true` refuses managed admission, and a strictly newer
+`disabled` policy revokes subsequent resume/admission. Diagnostics are lossy
+and cannot feed policy or authority. Do not persist, edit, or build an operator
+API around private `managed` MachineState fields. See the [adaptive operator
+contract](../orchestrator/DELIBERATION.md).
 
 ### Private decision inbox and phase handoff
 

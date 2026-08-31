@@ -91,6 +91,24 @@ canonical deployment tool's `--check` path applies the same fixed-size,
 stat-fenced reads to its mutable manifest and streams payload digests without
 retaining whole files.
 
+Private snapshot storage has one explicit, future-only
+`evidenceCopyPolicy: 'off' | 'prefer' | 'require'` option. Omission and `off`
+retain the original direct full-copy artifact bytes and emit no storage
+metadata. On macOS, eligible files of at least 1 MiB are cloned only when the
+source and private destination are on the same APFS volume, using
+`COPYFILE_FICLONE_FORCE` into an exclusive temporary sibling. The source must
+remain the same regular inode, size, mode, timestamps, and SHA-256 throughout;
+the distinct destination inode is size/SHA checked, normalized to `0500`,
+fsynced, published by a verified atomic no-replace hard link, and followed by a
+parent-directory sync. `require` aborts if that clone path is unavailable.
+`prefer` uses the same verified atomic publication for a full-copy fallback and
+includes an `evidenceCopy` receipt with exact clone/fallback counts and bounded
+reasons; the receipt is persisted with acknowledged input and survives ordinary
+receipt/recovery events without changing snapshot or Plan identity. Existing
+files are never migrated: rollback is simply `off`, and prior reflinks remain
+ordinary valid files. Reflinks are an allocation optimization, never a backup
+or independent durability copy.
+
 ## Private CLI example
 
 After `npm run build`, an active capture can be selected by the private bridge
@@ -103,6 +121,7 @@ deployment; do not resolve this launch through ambient `PATH`:
   --run-dir /abs/run --run-id run-1 --mode runtime \
   --beads-mode active --bd-path /abs/bin/bd \
   --beads-workspace /abs/workspace --beads-sha256 SHA256 \
+  --beads-evidence-copy prefer \
   --beads-ack /abs/ack.json --event /abs/start.json --event-id start
 ```
 

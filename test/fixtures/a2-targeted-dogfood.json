@@ -1,0 +1,41 @@
+{
+  "schema": "lunacy-targeted-repair-dogfood/v1",
+  "fixture": {
+    "closure": ["canonical-journey", "polish-copy", "polish-format"],
+    "plan": {
+      "phaseId": "a2-dogfood",
+      "steps": [
+        {"stepId": "foundation"},
+        {"stepId": "canonical-journey", "dependencies": ["foundation"]},
+        {"stepId": "retained-proof", "dependencies": ["foundation"]},
+        {"stepId": "polish-copy", "dependencies": ["canonical-journey"]},
+        {"stepId": "polish-format", "dependencies": ["canonical-journey"]}
+      ]
+    }
+  },
+  "before": {
+    "decision": "FINDINGS",
+    "dispatches": ["foundation", "retained-proof", "canonical-journey", "polish-copy", "polish-format"],
+    "replayAmplification": 1.666667,
+    "staleProofReplayOutsideClosurePercent": 40,
+    "preJourneyPolishDispatches": 0,
+    "correctedOutputDigest": "549992a7c3b697dd578bf41dfdb0e4c7770c7ab2b0787b50ca79cdb96ace4c5e",
+    "legacyReplayCompatibility": true
+  },
+  "after": {
+    "decision": {"decision": "FINDINGS", "ownerStepId": "canonical-journey"},
+    "dispatches": ["canonical-journey", "polish-copy", "polish-format"],
+    "replayAmplification": 1,
+    "staleProofReplayOutsideClosurePercent": 0,
+    "preJourneyPolishDispatches": 0,
+    "correctedOutputDigest": "549992a7c3b697dd578bf41dfdb0e4c7770c7ab2b0787b50ca79cdb96ace4c5e",
+    "legacyReplayCompatibility": true
+  },
+  "outcomes": {
+    "replayAmplificationAtMostOne": true,
+    "staleProofReplayOutsideClosureZero": true,
+    "preJourneyPolishDispatchesZero": true,
+    "correctedOutputIdentical": true,
+    "legacyReplayCompatibility": true
+  }
+}

@@ -7,11 +7,11 @@ description: Execute a coding plan or task with Codex, GPT-5.6 Sol, or GPT-5.6 T
 
 **Primary goal: minimize orchestrator context while preserving high-leverage judgment.** The parent owns global intent, architecture decisions, worker routing, scheduling, and acceptance. Workers own repository-heavy work.
 
-Worker routing is a closed choice: omitted route means Luna at `xhigh`; explicit `sol-high` means exactly GPT-5.6 Sol at `high`. Those are the only valid worker profiles. Never silently fall back, downgrade, substitute another pair, or switch Luna to a different reasoning effort.
+Worker routing is a closed choice: omitted route means Luna at `max`; explicit `sol-high` means exactly GPT-5.6 Sol at `high`. Those are the only valid worker profiles. Never silently fall back, downgrade, substitute another pair, or switch Luna to a different reasoning effort.
 
 ## Default role policy
 
-The simple default flow is **parent judgment/gate → Luna/xhigh repository execution/self-verification → optional Sol/high bounded judgment → Luna implementation of decisions → parent acceptance**. Luna/xhigh is the default for repository-heavy implementation, tests, ordinary repairs, documentation, read-only scouts, and ordinary adversarial reviews. Sol/high is opt-in only for bounded consequential judgment such as an architecture/contract choice, conflicting-evidence adjudication, or a narrow named acceptance question. Sol/high is not an automatic independent verifier or a generic escalation tier; independent verification is conditional on a named risk, not automatic. When Sol advice changes code, implementation returns to Luna unless the user or project explicitly assigns Sol implementation; the parent remains the acceptance owner.
+The simple default flow is **parent judgment/gate → Luna/max repository execution/self-verification → optional Sol/high bounded judgment → Luna implementation of decisions → parent acceptance**. Luna/max is the default for repository-heavy implementation, tests, ordinary repairs, documentation, read-only scouts, and ordinary adversarial reviews. Sol/high is opt-in only for bounded consequential judgment such as an architecture/contract choice, conflicting-evidence adjudication, or a narrow named acceptance question. Sol/high is not an automatic independent verifier or a generic escalation tier; independent verification is conditional on a named risk, not automatic. When Sol advice changes code, implementation returns to Luna unless the user or project explicitly assigns Sol implementation; the parent remains the acceptance owner.
 
 Host parent selection: GPT-5.6 Sol at `high` is the preferred parent/orchestrator when the host lets the user select it, because the parent owns consequential judgment. A current allowed non-Sol parent remains valid; never spawn a shadow/duplicate parent to simulate the preference. This host-level preference is separate from the explicit worker `sol-high` route and its attempt binding, and it does not create a Sol attempt binding.
 
@@ -19,7 +19,7 @@ Host parent selection: GPT-5.6 Sol at `high` is the preferred parent/orchestrato
 
 1. **Project intent is authority.** Goal, current user constraints, ethos, architecture, contracts, and authoritative plan drive decisions.
 2. **Prefer the simplest sound design.** Complexity must earn its cost. Reuse/extend sound mechanisms before inventing new ones.
-3. **Plan → phases → steps.** A step is the largest coherent unit one worker can safely own; do not micro-split for agent count.
+3. **Plan → phases → steps.** Default to the largest coherent end-to-end unit one worker can safely own. Split for measured worker context, time, or tool-capacity only when evidence requires it, using the fewest acceptance-required vertical slices; never split into planning, reporting, proof, test-count, or milestone work.
 4. **Multiple runs may coexist.** Each run lives under `Lunacy/runs/<run-id>/`; project-wide user memory lives at `Lunacy/PROJECT_NOTES.md`.
 5. **Workers get fresh context by default.** When the spawn API exposes `fork_turns`, use `fork_turns:"none"`. Do not inherit the parent conversation for convenience. Any exception requires a concise reason in run `DECISIONS.md`.
 6. **Workers own the full local loop.** Inspect → implement → verify → self-review → fix → terminal reverify → one immutable durable report.
@@ -51,13 +51,32 @@ cancellation, unsupported capability, phase/final boundaries, and hard gates.
 The existing Markdown/manual mode remains supported and is the truthful
 fallback when no conforming driver is bound.
 
+Adaptive Focus/Explore is a separate private, effect-denied Luna/max
+deliberation capability inside Plan authorship. It automatically preserves
+zero-fan-out Direct for settled decisions, keeps Reports authority-free, and
+leaves settlement, complete Plan authorship/adoption, and gates with the
+parent. The package/runtime remains rollout-disabled when the host omits or
+cannot conformingly bind managed composition. The installed operator profile
+may select D3 `automatic-focus` through `createManagedRolloutPolicy` only once:
+one generation-1, effect-denied Focus Wave before the acceptance pointer/Plan
+is sealed and before the first implementation spawn. It never automatically
+WIDENs or re-enters from a gate, repair, worker completion, resume, rollout, or
+an existing rollout-bearing run. If that Wave does not settle, return exactly
+one parent decision boundary. Direct remains a true bypass and user-explicit
+ADHD/Explore remains available and explicit-only; missing or drifted
+capability, Wave, role policy, or eligibility refuses with no fallback. Follow
+[`orchestrator/DELIBERATION.md`](orchestrator/DELIBERATION.md) for the exact
+Focus/Explore topology, eligibility corridor, capability refusal, diagnostics,
+and kill/revocation procedure. Do not hand-edit private managed state or treat
+diagnostics as rollout authority.
+
 ## Worker route and effort selection
 
 Resolve each worker route once from this exact closed table:
 
 | Route | Model | Reasoning effort | Selection |
 |---|---|---|---|
-| `luna` | `gpt-5.6-luna` | `xhigh` | Default when the route is omitted |
+| `luna` | `gpt-5.6-luna` | `max` | Default when the route is omitted |
 | `sol-high` | `gpt-5.6-sol` | `high` | Explicit only |
 
 No other model/effort pair is valid. Treat route names, model identifiers, and efforts as exact case-sensitive values: no aliases, whitespace normalization, partial declarations, extra route fields, cross-pairs, or ambient inference from the parent model, catalog, availability, or prior attempts. Reject an invalid selection before calling `agents.spawn_agent`.
@@ -65,7 +84,7 @@ No other model/effort pair is valid. Treat route names, model identifiers, and e
 Always pass the selected pair explicitly at the host boundary. The canonical default and opt-in calls are:
 
 ```text
-agents.spawn_agent({ model: "gpt-5.6-luna", reasoning_effort: "xhigh", fork_turns: "none", ... })
+agents.spawn_agent({ model: "gpt-5.6-luna", reasoning_effort: "max", fork_turns: "none", ... })
 agents.spawn_agent({ model: "gpt-5.6-sol", reasoning_effort: "high", fork_turns: "none", ... })
 ```
 
@@ -81,9 +100,9 @@ workerRoute: sol-high; phaseId: <id>; stepId: <id>; attemptEpoch: <n>
 
 Resume that exact route binding or block. An intentional route change requires a fresh attempt and new authority; malformed or stale text never authorizes Sol.
 
-Use the route's normal effort (`xhigh` for Luna, `high` for Sol) for bounded implementation, repository inventory, migrations after the architecture is decided, focused repairs, test work, read-only scouts, documentation, and most adversarial reviews.
+Use the route's normal effort (`max` for Luna, `high` for Sol) for bounded implementation, repository inventory, migrations after the architecture is decided, focused repairs, test work, read-only scouts, documentation, and most adversarial reviews.
 
-There is no Luna `max` escalation in normal Lunacy routing. Keep bounded, testable repository execution on Luna/xhigh. When a task instead requires consequential judgment, or a materially failed Luna/xhigh attempt leaves a named hard reasoning boundary unresolved, start a fresh authorized `sol-high` attempt. Do not convert the existing attempt, use Luna `max` as an intermediate tier, or escalate merely to rerun deterministic verification. The two fixed profiles deliberately avoid effort switching within the Luna route; this policy does not claim or guarantee any particular cache-hit rate. The parent may choose routes independently for each worker in a concurrent batch.
+Luna is fixed at `max`; it is not an escalation tier. When a task instead requires consequential judgment, or a materially failed Luna/max attempt leaves a named hard reasoning boundary unresolved, start a fresh authorized `sol-high` attempt. Do not convert the existing attempt, switch Luna effort, or escalate merely to rerun deterministic verification. The two fixed profiles deliberately avoid effort switching within the Luna route; this policy does not claim or guarantee any particular cache-hit rate. The parent may choose routes independently for each worker in a concurrent batch.
 
 ## Hard context / communication limits
 
@@ -125,6 +144,8 @@ There is no Luna `max` escalation in normal Lunacy routing. Keep bounded, testab
 On new run/fresh session/context recovery, read applicable project instructions plus project/run user notes. When user input materially changes requirements, update the appropriate notes **and evaluate it immediately**; update execution authority/state when needed.
 
 Create/maintain compact `<run-root>/PLAN.md`, `STATE.md`, and phase `STEPS.md`. Define phase goals, dependencies, gates, selective adversaries, and verification ownership. Avoid assigning the same expensive/global verification matrix to multiple layers without a reason.
+
+Before the first implementation dispatch, seal the existing user/project requirements, accepted observable/result, and chosen architecture spine in that existing Plan/run authority. Do not drip-feed a live implementation Plan: a material authority change requires new Plan/run authority. Work that authority requires—including documentation, accessibility, quality/polish, or similar completion work—remains required; exclude only genuinely optional work.
 
 For migration/replacement/removal work, coverage defaults to **every maintained affected surface**—production, tests, fixtures, adapters, examples, indirect/variable-mediated construction—unless explicit authority excludes something. A green selected matrix is evidence, not scope authority.
 

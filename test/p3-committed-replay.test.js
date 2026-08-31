@@ -111,6 +111,36 @@ test('processed-only collision remains visible after FileArtifactStore restart',
   assert.equal(fixture.calls.length, 0);
 });
 
+test('structured FINDINGS replays the exact committed yield and original decision bytes', async () => {
+  const rootDir = await mkdtemp(join(tmpdir(), 'lunacy-p3-targeted-findings-replay-'));
+  const repairPlan = { phaseId: 'p3-targeted-findings-replay', steps: [{ stepId: 'journey' }] };
+  const calls = [];
+  const kernel = composeKernel({ plan: repairPlan, rootDir, driver: receiptDriver(calls) });
+  const runId = 'targeted-findings-replay';
+  let y = await kernel.advance(input(runId, 'start', { kind: 'START', intentRef: ref('plan', repairPlan) }, { revision: undefined, attemptEpoch: 0, authorityEpoch: 0, barrierEpoch: 0 }));
+  y = await kernel.advance(input(runId, 'resume', { kind: 'RESUME' }, y.snapshot));
+  const launchToken = `launch-${digest({ runId, phaseId: repairPlan.phaseId, stepId: 'journey', attemptEpoch: 0 }).slice(0, 32)}`;
+  y = await kernel.advance(input(runId, 'worker', { kind: 'WORKER_ENVELOPE', ref: ref('worker', { status: 'DONE' }) }, y.snapshot, { launchToken }));
+  assert.equal(y.kind, 'FINAL');
+  const gateToken = JSON.parse(y.artifacts[0].bytes).token;
+  const value = { ownerStepId: 'journey', decision: 'FINDINGS' };
+  const event = { kind: 'PARENT_DECISION', token: gateToken, value };
+  const decision = input(runId, 'targeted-findings', event, y.snapshot);
+  const first = await kernel.advance(decision);
+  const before = await treeBytes(rootDir);
+  const exact = await composeKernel({ plan: repairPlan, rootDir, driver: receiptDriver(calls) }).advance(decision);
+  assert.deepEqual(exact, first);
+  assert.deepEqual(await treeBytes(rootDir), before);
+  assert.equal(calls.length, 1);
+  const loaded = await new FileArtifactStore(rootDir).load();
+  assert.equal(canonicalString(loaded.state.journal.at(-1).event.value), canonicalString(value));
+  assert.equal(loaded.state.steps.journey.status, 'REPAIR');
+  await assert.rejects(
+    () => kernel.advance(input(runId, 'targeted-findings', { kind: 'PARENT_DECISION', token: gateToken, value: 'FINDINGS' }, y.snapshot)),
+    (error) => error instanceof Conflict && error.message === 'eventId reused with conflicting identity',
+  );
+});
+
 test('existing generation CAS permits one same-eventId START winner and classifies loser retry', async () => {
   const rootDir = await mkdtemp(join(tmpdir(), 'lunacy-p3-race-'));
   const first = makeRunKernel({ plan, rootDir });

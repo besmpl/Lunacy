@@ -15,6 +15,11 @@ journal. The fixture intentionally has no executable host driver, so subsequent
 work that would dispatch is reported as `HumanReceiptRequired`, never as a
 provider or token launch.
 
+The fixture has one ordinary Plan node containing the work required to deliver
+the accepted outcome end to end. Optional polish is absent; it can be proposed
+as a separately authorized follow-up only after the parent gate accepts the
+outcome.
+
 Hosts that need a real effect bind the private composition module instead of
 adding lifecycle methods. `composeKernel({ plan, driver, timeoutMs, signal,
 onYield })` returns the same one-seam `RunKernel`; `RESUME` returns after the

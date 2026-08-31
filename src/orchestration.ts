@@ -2,14 +2,15 @@ import { canonicalString, digest } from './canonical.js';
 import { resolve } from 'node:path';
 import { canonicalizeDeclaration, transition, type BridgeOptions, type BridgeProjection, type BridgeResult, type BridgeTransition } from './bridge.js';
 import { FileArtifactStore, isFileArtifactStoreAbort } from './store.js';
-import { inspectTrustedPath, sameFilesystemIdentity, type FilesystemIdentity } from './filesystem.js';
+import { inspectTrustedPath } from './filesystem.js';
 import type { EffectDriver } from './driver.js';
-import type { Event, MachineState, OutboxCommand, Plan, Ref, Yield } from './model.js';
+import type { Event, MachineState, OutboxCommand, Plan, Yield } from './model.js';
 import { validateTerminalRecord, type TerminalRecord } from './codex-effect-records.js';
-import { codexHostPolicyDigest, validateCodexHostPolicy, type CodexHostPolicy } from './codex-host-policy.js';
+import { validateCodexHostPolicy, type CodexHostPolicy } from './codex-host-policy.js';
 import { makeCodexExecDriver } from './codex-exec-driver.js';
 import type { DispatcherOptions } from './public.js';
 import { assertReleaseAdmissionOpen } from './release-admission.js';
+import { selectCurrentTokenCommand, selectEligibleCommand } from './dispatch-coordinator.js';
 
 /** Optional evidence waiter implemented by managed effect drivers.  It is
  * deliberately outside EffectDriver: the kernel only needs dispatch and
@@ -18,8 +19,8 @@ export type TerminalEffectDriver = EffectDriver & {
   /** Present only on the managed Codex driver. The pump binds this immutable
    * policy to the bridge/kernel authority before it may issue RESUME. */
   readonly hostPolicy?: CodexHostPolicy;
-  waitTerminal?: (launchToken: string, signal?: AbortSignal) => Promise<TerminalRecord | undefined>;
-  terminal?: (launchToken: string, signal?: AbortSignal) => Promise<TerminalRecord | undefined>;
+  waitTerminal?: (launchToken: string, signal?: AbortSignal, retainedCommand?: OutboxCommand) => Promise<TerminalRecord | undefined>;
+  terminal?: (launchToken: string, signal?: AbortSignal, retainedCommand?: OutboxCommand) => Promise<TerminalRecord | undefined>;
   cancel?: (launchToken: string) => Promise<void>;
 };
 
@@ -46,14 +47,6 @@ export type BridgeDriveResult = BridgeResult & {
 };
 
 type Loaded = { state: MachineState | undefined };
-type ManagedDriveAuthority = Readonly<{
-  rootIdentity: FilesystemIdentity;
-  runRoot: string;
-  runId: string;
-  planDigest: string;
-  policyDigest: string;
-}>;
-
 function workerRef(token: string, status: string) {
   const payload = { status };
   const bytes = canonicalString(payload);
@@ -61,15 +54,7 @@ function workerRef(token: string, status: string) {
 }
 
 function currentCommand(state: MachineState | undefined): OutboxCommand | undefined {
-  if (!state) return undefined;
-  const commands = Object.values(state.outbox);
-  return commands.find((command) => command.state === 'PENDING' || command.state === 'CLAIMED' || command.state === 'UNKNOWN')
-    ?? commands.find((command) => command.state === 'ACKED'
-      && command.attemptEpoch === state.attemptEpoch
-      && command.authorityEpoch === state.authorityEpoch
-      && command.barrierEpoch === state.barrierEpoch
-      && command.modeEpoch === state.modeEpoch
-      && state.steps[command.stepId]?.status === 'ACTIVE');
+  return selectEligibleCommand(state, ['PENDING', 'CLAIMED', 'UNKNOWN', 'ACKED'])?.command;
 }
 
 function parentBoundary(yieldValue: Yield): boolean {
@@ -92,14 +77,6 @@ function transitionInput(runId: string, state: MachineState | undefined, eventId
 
 function aborted(signal: AbortSignal | undefined): boolean { return signal?.aborted === true; }
 
-function validReceiptRef(value: unknown): value is Ref {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const ref = value as Record<string, unknown>;
-  if (typeof ref.id !== 'string' || ref.id.length === 0 || typeof ref.scope !== 'string' || ref.scope.length === 0 || typeof ref.digest !== 'string' || !/^[0-9a-f]{64}$/.test(ref.digest) || typeof ref.bytes !== 'string') return false;
-  try { const parsed = JSON.parse(ref.bytes); return canonicalString(parsed) === ref.bytes && digest(parsed) === ref.digest; }
-  catch { return false; }
-}
-
 function abortError(): Error { const error = new Error('drive cancelled'); error.name = 'AbortError'; return error; }
 
 /**
@@ -114,7 +91,6 @@ export class BridgeDrivePump {
   private readonly signal?: AbortSignal;
   private readonly maxTransitions: number;
   private readonly managedPolicy?: CodexHostPolicy;
-  private managedAuthority?: ManagedDriveAuthority;
   private transitions = 0;
   private last?: BridgeResult;
   /**
@@ -161,6 +137,7 @@ export class BridgeDrivePump {
         // caller view as a parent wake-up, never as a second launch or a retry.
         const code = (error as { code?: unknown }).code;
         if (code === 'Conflict' || (error instanceof Error && /stale|barrier is closed|epoch fence/i.test(error.message))) {
+          if (this.transitions < this.maxTransitions && !aborted(this.signal)) return await this.runLoop();
           if (this.last) return this.finish('parent-boundary', this.last);
           return this.emptyResult('parent-boundary');
         }
@@ -186,21 +163,26 @@ export class BridgeDrivePump {
       result = await this.invoke(transitionInput(this.options.runId, undefined, 'drive-start', startEvent));
     } else {
       const initialCommand = currentCommand(loaded.state);
-      result = await this.resume(loaded.state, initialCommand, initialCommand?.state === 'UNKNOWN');
+      result = await this.resume(loaded.state, initialCommand);
     }
     this.last = result;
 
     for (;;) {
       if (aborted(this.signal)) { await this.cancelCurrentEffect(); return this.finish('cancelled', result); }
-      if (result.yield?.kind === 'BLOCKED' && result.yield.code === 'UnknownDispatch') {
-        // A restart recovery call intentionally returns UnknownDispatch while
-        // the exact old token is UNKNOWN. Give observe() one bounded chance to
-        // prove the immutable launch before waking the parent; this is not a
-        // retry or a new claim.
-        const recovered = await this.reconcileUnknown();
-        if (aborted(this.signal)) { await this.cancelCurrentEffect(); return this.finish('cancelled', result); }
-        if (recovered) { result = recovered; this.last = result; continue; }
-        return this.finish('parent-boundary', result);
+      if (result.yield?.kind === 'BLOCKED' && result.yield.code === 'UnknownDispatch' && result.yield.launchToken && typeof this.driver.observe === 'function') {
+        const unknownToken = result.yield.launchToken;
+        try {
+          const wake = await this.waitNotification(unknownToken);
+          result = { ...result, yield: wake };
+          this.last = result;
+          continue;
+        } catch (error) {
+          if ((error as Error).name === 'AbortError') {
+            await this.cancel(unknownToken);
+            return this.finish('cancelled', result);
+          }
+          throw error;
+        }
       }
       if (result.yield && parentBoundary(result.yield)) return this.finish('parent-boundary', result);
       if (this.transitions >= this.maxTransitions) return this.finish('limit', result);
@@ -217,20 +199,11 @@ export class BridgeDrivePump {
         continue;
       }
       if (command.state === 'PENDING' || command.state === 'CLAIMED' || command.state === 'UNKNOWN') {
-        // Kernel UNKNOWN recovery is intentionally suppressed here. The pump
-        // performs the one exact-token observe itself, so an async/absent
-        // observer cannot be started twice by repeated RESUME calls.
-        result = await this.resume(state, command, command.state === 'UNKNOWN');
+        result = await this.resume(state, command);
         this.last = result;
         if (result.yield?.kind === 'WAITING' && (command.state === 'PENDING' || command.state === 'CLAIMED')) {
-          // A competing pump may have entered the same claimed lease. If its
-          // immutable launch receipt is already visible, reconcile that exact
-          // token directly instead of waiting on a callback owned by another
-          // in-process pump.
           const latest = await this.load();
-          const current = latest.state && Object.values(latest.state.outbox).find((candidate) => candidate.launchToken === command.launchToken && candidate.commandDigest === command.commandDigest);
-          const observed = command.state === 'CLAIMED' && current && await this.observeReceipt(current);
-          if (observed) { result = observed; this.last = result; continue; }
+          const current = selectCurrentTokenCommand(latest.state, ['PENDING', 'CLAIMED', 'UNKNOWN', 'ACKED'], command)?.command;
           // A synchronous receipt may have ACKED before this load. Only wait
           // while the exact command is still CLAIMED; PENDING means the
           // kernel's claim/dispatch transition has not published its wake yet.
@@ -253,7 +226,7 @@ export class BridgeDrivePump {
       }
 
       let rawTerminal: unknown;
-      try { rawTerminal = await this.waitTerminal(command.launchToken); }
+      try { rawTerminal = await this.waitTerminal(command); }
       catch (error) {
         if ((error as Error).name === 'AbortError') {
           await this.cancel(command.launchToken);
@@ -271,9 +244,21 @@ export class BridgeDrivePump {
       if (terminal.launchToken !== command.launchToken || terminal.commandDigest !== command.commandDigest) return this.finish('terminal-invalid', result, terminal);
       if (terminal.status === 'UNKNOWN') return this.finish('terminal-invalid', result, terminal);
       if (terminal.status === 'PASS' && terminal.outcome !== 'normal-completion') return this.finish('terminal-invalid', result, terminal);
+      const terminalState = (await this.load()).state;
+      const terminalSelection = selectCurrentTokenCommand(terminalState, ['ACKED'], command);
+      if (!terminalState) return this.finish('terminal-invalid', result, terminal);
       const workerStatus = terminal.status === 'PASS' ? 'DONE' : terminal.status;
       const event: Event = { kind: 'WORKER_ENVELOPE', ref: workerRef(command.launchToken, workerStatus) };
-      result = await this.invoke(transitionInput(this.options.runId, state, `drive-worker:${command.launchToken}`, event, command.launchToken));
+      const workerInput = transitionInput(this.options.runId, terminalState, `drive-worker:${command.launchToken}`, event, command.launchToken);
+      if (!terminalSelection) {
+        // A competing pump may already have committed this exact envelope.
+        // Ask the kernel's processed-identity replay path; never infer success
+        // from the terminal record or current gate in the pump.
+        workerInput.attemptEpoch = command.attemptEpoch;
+        workerInput.authorityEpoch = command.authorityEpoch;
+        workerInput.barrierEpoch = command.barrierEpoch;
+      }
+      result = await this.invoke(workerInput);
       this.last = result;
       if (terminal.status !== 'PASS') return this.finish('parent-boundary', result, terminal);
       // PASS only mechanically permits another kernel call. The next loop
@@ -287,21 +272,14 @@ export class BridgeDrivePump {
     const trusted = await inspectTrustedPath(this.options.runDir, 'drive run root', { allowMissing: true, surface: true, kind: 'directory' });
     if (!trusted) return { state: undefined };
     const snapshot = await new FileArtifactStore(this.options.runDir, trusted.identity).load(this.signal);
-    await this.verifyManagedAuthority(snapshot.state);
     return { state: snapshot.state };
   }
 
-  private async resume(state: MachineState, command?: OutboxCommand, suppressObserve = false): Promise<BridgeResult> {
-    await this.verifyManagedAuthority(state);
+  private async resume(state: MachineState, command?: OutboxCommand): Promise<BridgeResult> {
     const token = command?.launchToken;
     const event: Event = { kind: 'RESUME' };
     const id = command === undefined ? `drive-resume:${state.revision}` : `drive-resume:${token}`;
-    if (!suppressObserve) return this.invoke(transitionInput(this.options.runId, state, id, event, token));
-    // For an UNKNOWN command, use a driver view without observe() only for
-    // this kernel call. The durable RESUME records the blocked boundary;
-    // reconcileUnknown() below owns the single direct evidence lookup.
-    const noObserve: TerminalEffectDriver = { dispatch: this.driver.dispatch };
-    return this.invoke(transitionInput(this.options.runId, state, id, event, token), noObserve);
+    return this.invoke(transitionInput(this.options.runId, state, id, event, token));
   }
 
   private async invoke(input: BridgeTransition, driverOverride: TerminalEffectDriver = this.driver): Promise<BridgeResult> {
@@ -413,13 +391,13 @@ export class BridgeDrivePump {
     } catch { /* the durable claimed/unknown token remains the successor fence */ }
   }
 
-  private async waitTerminal(token: string): Promise<unknown> {
-    await this.verifyManagedAuthority((await this.load()).state);
+  private async waitTerminal(command: OutboxCommand): Promise<unknown> {
     if (aborted(this.signal)) throw abortError();
+    const token = command.launchToken;
     const task = typeof this.driver.waitTerminal === 'function'
-      ? this.driver.waitTerminal(token, this.signal)
+      ? this.driver.waitTerminal(token, this.signal, command)
       : typeof this.driver.terminal === 'function'
-        ? this.driver.terminal(token, this.signal)
+        ? this.driver.terminal(token, this.signal, command)
         : undefined;
     if (!task) return undefined;
     let onAbort: (() => void) | undefined;
@@ -435,29 +413,6 @@ export class BridgeDrivePump {
     finally { if (this.signal && onAbort) this.signal.removeEventListener('abort', onAbort); }
     if (aborted(this.signal)) throw abortError();
     return terminal;
-  }
-
-  private async reconcileUnknown(): Promise<BridgeResult | undefined> {
-    const loaded = await this.load();
-    const command = loaded.state && Object.values(loaded.state.outbox).find((candidate) => candidate.state === 'UNKNOWN');
-    if (!command) return undefined;
-    return this.observeReceipt(command, loaded.state);
-  }
-
-  private async observeReceipt(command: OutboxCommand, state?: MachineState): Promise<BridgeResult | undefined> {
-    try { await this.verifyManagedAuthority(state ?? (await this.load()).state); }
-    catch { return undefined; }
-    if (typeof this.driver.observe !== 'function') return undefined;
-    let observed: Awaited<ReturnType<NonNullable<EffectDriver['observe']>>>;
-    try { observed = await this.driver.observe(command.launchToken, this.signal); }
-    catch { return undefined; }
-    try {
-      if (!observed || observed.launchToken !== command.launchToken || observed.commandDigest !== command.commandDigest || !validReceiptRef(observed.ref)) return undefined;
-    } catch { return undefined; }
-    const value = { launchToken: command.launchToken, commandDigest: command.commandDigest, receipt: observed.ref };
-    const event: Event = { kind: 'DISPATCH_RECEIPT', ref: { id: `receipt:${command.launchToken}`, scope: 'outbox/receipt', digest: digest(value), bytes: canonicalString(value) } };
-    try { return await this.invoke(transitionInput(this.options.runId, state, `drive-receipt:${command.launchToken}`, event, command.launchToken)); }
-    catch { return undefined; }
   }
 
   private finish(stopped: BridgeDriveStop, result: BridgeResult, terminal?: TerminalRecord): BridgeDriveResult {
@@ -479,33 +434,6 @@ export class BridgeDrivePump {
     if (this.managedPolicy.runRoot !== runRoot) throw new Error('BridgeDrivePump: managed policy run root mismatch');
     if (this.managedPolicy.runId !== this.options.runId) throw new Error('BridgeDrivePump: managed policy run id mismatch');
     if (this.managedPolicy.planDigest !== planDigest) throw new Error('BridgeDrivePump: managed policy input plan mismatch');
-    this.managedAuthority = Object.freeze({
-      rootIdentity: root.identity,
-      runRoot,
-      runId: this.options.runId,
-      planDigest,
-      policyDigest: codexHostPolicyDigest(this.managedPolicy),
-    });
-  }
-
-  /** Recheck both sides of the private composition. This runs on every load
-   * and immediately before restart observation/terminal acceptance, so a
-   * caller cannot swap policy, root, or committed plan after the first check. */
-  private async verifyManagedAuthority(state: MachineState | undefined): Promise<void> {
-    const authority = this.managedAuthority;
-    if (!authority) return;
-    const currentPolicy = this.driver.hostPolicy;
-    if (currentPolicy === undefined) throw new Error('BridgeDrivePump: managed policy disappeared');
-    let checked: CodexHostPolicy;
-    try { checked = validateCodexHostPolicy(currentPolicy); }
-    catch { throw new Error('BridgeDrivePump: managed policy is invalid'); }
-    if (codexHostPolicyDigest(checked) !== authority.policyDigest
-      || checked.runRoot !== authority.runRoot
-      || checked.runId !== authority.runId
-      || checked.planDigest !== authority.planDigest) throw new Error('BridgeDrivePump: managed policy changed');
-    const root = await inspectTrustedPath(authority.runRoot, 'managed drive run root', { surface: true, kind: 'directory' });
-    if (!root || !sameFilesystemIdentity(authority.rootIdentity, root.identity)) throw new Error('BridgeDrivePump: managed drive run root identity changed');
-    if (state && (state.runId !== authority.runId || state.planDigest !== authority.planDigest)) throw new Error('BridgeDrivePump: committed run/plan differs from managed authority');
   }
 }
 
