@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { authorPlan, validateWave } from '../dist/deliberation.js';
 import { canonicalString, digest, digestBytes } from '../dist/canonical.js';
 
@@ -16,6 +18,9 @@ const retainedLimitKeys = [
 ];
 const legacyLimitKeys = ['maxInputTokens', 'maxOutputTokens', 'maxWallClockMs'];
 const allLimitKeys = [...retainedLimitKeys, ...legacyLimitKeys].sort();
+const repo = fileURLToPath(new URL('..', import.meta.url));
+const deployTool = fileURLToPath(new URL('../tools/deploy-skill.mjs', import.meta.url));
+const deliberationArtifacts = ['deliberation.js', 'deliberation.js.map', 'deliberation.d.ts', 'deliberation.d.ts.map'];
 
 const ref = (id, value) => ({ id, digest: digest(value), scope: 'l3a', bytes: canonicalString(value) });
 const frames = [
@@ -130,4 +135,30 @@ test('L3a six-key reader compatibility', async (t) => {
   await Promise.all(roots.map((root) => writeFile(join(root, 'inventory.json'), inventoryBytes)));
   const replayDigests = await Promise.all(roots.map(async (root) => digestBytes(new TextEncoder().encode(await readFile(join(root, 'inventory.json'), 'utf8')))));
   assert.equal(replayDigests[0], replayDigests[1]);
+});
+
+test('L3a deployment inventory', async (t) => {
+  const target = await mkdtemp(join(tmpdir(), 'lunacy-l3a-deploy-'));
+  t.after(() => rm(target, { recursive: true, force: true }));
+  const deployed = spawnSync(process.execPath, [deployTool, '--target', target], { cwd: repo, encoding: 'utf8' });
+  assert.equal(deployed.status, 0, deployed.stderr);
+  const manifest = JSON.parse(await readFile(join(target, 'runtime', 'DEPLOYMENT.json'), 'utf8'));
+  for (const name of deliberationArtifacts) {
+    await access(join(repo, 'dist', name));
+    await access(join(target, 'runtime', 'dist', name));
+    assert.equal(manifest.files.includes(`runtime/dist/${name}`), true, name);
+  }
+  assert.equal(manifest.files.filter((path) => path.startsWith('runtime/dist/deliberation.')).length, 4);
+});
+
+test('L3a rollback reader smoke', () => {
+  const { wave: archivedNineKeyWave, waveRef } = authoredWave();
+  expectNormalized(validateWave(waveRef, context));
+  const archivedMixedWave = structuredClone(archivedNineKeyWave);
+  delete archivedMixedWave.limits.maxInputTokens;
+  expectNormalized(validateWave(ref('archived-mixed', archivedMixedWave), context));
+  const futureSixKeyWave = structuredClone(archivedMixedWave);
+  delete futureSixKeyWave.limits.maxOutputTokens;
+  delete futureSixKeyWave.limits.maxWallClockMs;
+  expectNormalized(validateWave(ref('future-six', futureSixKeyWave), context));
 });
