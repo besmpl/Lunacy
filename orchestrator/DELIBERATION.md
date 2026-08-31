@@ -34,6 +34,11 @@ Reports cannot select, write the workspace, launch children or tools, or grant
 effects. The parent alone selects or synthesizes a settlement, authors the
 complete Plan, adopts authority, handles approvals, and closes gates.
 
+New Waves author exactly `maxModelCalls`, `maxWaveBytes`, `maxRefs`,
+`maxResolvedRoleInputBytes`, `maxReportBytes`, and `maxTotalReportBytes`.
+Readers still normalize archived decorations. After six-key publication,
+rollback is only to an L3a or later compatible reader, never pre-L3 strict-nine.
+
 Effect-denied adaptive work is pinned to the attested `gpt-5.6-luna`/`max`
 host profile. Writable managed action remains on its separate attested
 `gpt-5.6-sol`/`high` boundary. Direct/manual routes are separate again. A

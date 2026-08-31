@@ -75,6 +75,10 @@ function withLegacySubset(sixKeyWave, nineKeyWave, mask) {
   return { ...sixKeyWave, limits };
 }
 
+function withArchivedLegacy(sixKeyWave) {
+  return { ...sixKeyWave, limits: { ...sixKeyWave.limits, maxInputTokens: 1, maxOutputTokens: 2, maxWallClockMs: 3 } };
+}
+
 function expectNormalized(result) {
   assert.equal(result.ok, true, result.ok ? '' : `${result.code}: ${result.path}: ${result.message}`);
   assert.deepEqual(Object.keys(result.value.limits).sort(), retainedLimitKeys.slice().sort());
@@ -82,7 +86,9 @@ function expectNormalized(result) {
 }
 
 test('L3a six-key reader compatibility', async (t) => {
-  const { wave: nineKeyWave, waveRef } = authoredWave();
+  const { wave: sixKeyWave, waveRef } = authoredWave();
+  assert.deepEqual(Object.keys(sixKeyWave.limits).sort(), retainedLimitKeys.slice().sort());
+  const nineKeyWave = withArchivedLegacy(sixKeyWave);
   assert.deepEqual(Object.keys(nineKeyWave.limits).sort(), allLimitKeys);
 
   const originalBytes = waveRef.bytes;
@@ -92,7 +98,6 @@ test('L3a six-key reader compatibility', async (t) => {
   assert.equal(waveRef.bytes, originalBytes);
   assert.equal(waveRef.digest, originalDigest);
 
-  const sixKeyWave = { ...nineKeyWave, limits: Object.fromEntries(retainedLimitKeys.map((key) => [key, nineKeyWave.limits[key]])) };
   expectNormalized(validateWave(sixKeyWave, context));
   expectNormalized(validateWave(canonicalString(sixKeyWave), context));
   expectNormalized(validateWave(nineKeyWave, context));
@@ -126,7 +131,7 @@ test('L3a six-key reader compatibility', async (t) => {
   assert.equal(digestFirst.code, 'INVALID_REF');
 
   const authoredAgain = authoredWave();
-  assert.deepEqual(Object.keys(JSON.parse(authoredAgain.waveRef.bytes).limits).sort(), allLimitKeys);
+  assert.deepEqual(Object.keys(JSON.parse(authoredAgain.waveRef.bytes).limits).sort(), retainedLimitKeys.slice().sort());
   assert.equal(digestBytes(new TextEncoder().encode(authoredAgain.waveRef.bytes)), authoredAgain.waveRef.digest);
 
   const roots = await Promise.all([mkdtemp(join(tmpdir(), 'lunacy-l3a-journey-a-')), mkdtemp(join(tmpdir(), 'lunacy-l3a-journey-b-'))]);
@@ -152,8 +157,9 @@ test('L3a deployment inventory', async (t) => {
 });
 
 test('L3a rollback reader smoke', () => {
-  const { wave: archivedNineKeyWave, waveRef } = authoredWave();
+  const { wave: authoredSixKeyWave, waveRef } = authoredWave();
   expectNormalized(validateWave(waveRef, context));
+  const archivedNineKeyWave = withArchivedLegacy(authoredSixKeyWave);
   const archivedMixedWave = structuredClone(archivedNineKeyWave);
   delete archivedMixedWave.limits.maxInputTokens;
   expectNormalized(validateWave(ref('archived-mixed', archivedMixedWave), context));

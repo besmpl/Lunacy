@@ -33,7 +33,7 @@ export type DeliberationWave = {
   schema: 'lunacy-deliberation-wave/v2';
   authorship: { runId: string; phaseId: string; intent: Ref; evidenceSnapshot: Ref; authorityDigest: Sha256; policyVersion: Ref; settlementPrefixDigest: Sha256; decisionKey: string; prospectiveEffectFrontierOrdinal: number };
   question: { text: string; decisionImpact: string; discriminator?: string; evidence: readonly Ref[]; constraints: readonly Ref[] };
-  limits: { maxModelCalls: number; maxInputTokens: number; maxOutputTokens: number; maxWallClockMs: number; maxWaveBytes: number; maxRefs: number; maxResolvedRoleInputBytes: number; maxReportBytes: number; maxTotalReportBytes: number };
+  limits: { maxModelCalls: number; maxWaveBytes: number; maxRefs: number; maxResolvedRoleInputBytes: number; maxReportBytes: number; maxTotalReportBytes: number };
 } & ({ gear: 'FOCUS'; generatorLenses: readonly { text: string }[] } | { gear: 'EXPLORE'; generatorLenses: readonly { frameId: string }[] });
 
 export type SlotRole = 'GENERATOR' | 'CRITIC' | 'DEEPENER';
@@ -164,7 +164,7 @@ export function proposeGear(input: { frontier: readonly DecisionFrontier[]; pred
 
 function defaultLimits(policy: DeliberationPolicy, gear: Gear): DeliberationWave['limits'] {
   const slots = gear === 'EXPLORE' ? 9 : gear === 'FOCUS' ? 4 : 1; const reportBytes = Math.max(1, Math.floor(policy.maxSettlementBytes / slots));
-  return { maxModelCalls: gear === 'EXPLORE' ? 9 : gear === 'FOCUS' ? 4 : 0, maxInputTokens: 0, maxOutputTokens: 0, maxWallClockMs: 0, maxWaveBytes: policy.maxSettlementBytes, maxRefs: 128, maxResolvedRoleInputBytes: policy.maxResolvedRoleInputBytes, maxReportBytes: reportBytes, maxTotalReportBytes: policy.maxSettlementBytes };
+  return { maxModelCalls: gear === 'EXPLORE' ? 9 : gear === 'FOCUS' ? 4 : 0, maxWaveBytes: policy.maxSettlementBytes, maxRefs: 128, maxResolvedRoleInputBytes: policy.maxResolvedRoleInputBytes, maxReportBytes: reportBytes, maxTotalReportBytes: policy.maxSettlementBytes };
 }
 
 export function authorPlan(input: PlanAuthorshipInput, predicates: GearPredicates, policy?: DeliberationPolicy): PlanAuthorshipResult {
