@@ -71,17 +71,18 @@ test('partial predecessor deletion is idempotent across restart', async () => {
   assert.deepEqual(await generations(root), ['g2', 'g3']);
 });
 
-test('load does not create absent reuse namespace but preserves existing reconciliation', async () => {
+test('load does not create absent reuse namespace and leaves legacy decoration inert', async () => {
   const { root } = await makeTwoGenerations();
   const reuse = join(root, '.kernel', 'reuse');
   assert.equal(await readdir(join(root, '.kernel')).then((entries) => entries.includes('reuse')), false);
   await new FileArtifactStore(root).load();
   assert.equal(await readdir(join(root, '.kernel')).then((entries) => entries.includes('reuse')), false);
   await mkdir(reuse);
+  const decoration = join(reuse, 'legacy.json');
+  await writeFile(decoration, 'legacy decoration bytes');
+  const before = { entries: await readdir(reuse), bytes: await readFile(decoration) };
   await new FileArtifactStore(root).load();
-  assert.ok((await readdir(reuse)).includes('blobs'));
-  assert.ok((await readdir(reuse)).includes('pins'));
-  assert.ok((await readdir(reuse)).includes('quarantine'));
+  assert.deepEqual({ entries: await readdir(reuse), bytes: await readFile(decoration) }, before);
 });
 
 test('filesystem and memory stores preserve the same deterministic yields under retention', async () => {

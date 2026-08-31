@@ -4,12 +4,10 @@ import { mkdir, mkdtemp, readFile, readdir, rm, symlink, unlink, writeFile } fro
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { canonicalString, digest } from '../dist/canonical.js';
-import { ContextCompiler } from '../dist/compiler.js';
 import { composeKernel } from '../dist/composition.js';
 import { Conflict, InvalidEvent, InvalidPlan, KernelError, makeRunKernel } from '../dist/index.js';
 import { appendJournal, createInitialState } from '../dist/reducer.js';
 import { FileArtifactStore } from '../dist/store.js';
-import { FixedCellReuse, makeCellHandle, makeSnapshotHandle } from '../dist/reuse.js';
 
 const plan = { phaseId: 'p', steps: [{ stepId: 'a' }] };
 const ref = (id, value) => ({ id, scope: 'test', digest: digest(value), bytes: canonicalString(value) });
@@ -168,26 +166,16 @@ test('filesystem rejects root/current/generation/lock symlink escapes and reclai
   await symlink(outsideGeneration, join(generationRoot, '.kernel', 'generations', `g${generationCurrent.generation}`));
   await assert.rejects(() => makeRunKernel({ plan, rootDir: generationRoot }).advance(input('generation', 'late', { kind: 'RESUME' }, { revision: 1, authorityEpoch: 0, attemptEpoch: 0, barrierEpoch: 0 })), (error) => error instanceof KernelError && error.code === 'ManifestMismatch');
 
-  const reuseRoot = await mkdtemp(join(tmpdir(), 'lunacy-s5-reuse-dir-'));
-  await makeRunKernel({ plan, rootDir: reuseRoot }).advance(start('reuse-dir'));
-  const outsideReuse = await mkdtemp(join(tmpdir(), 'lunacy-s5-reuse-outside-'));
-  await mkdir(join(reuseRoot, '.kernel', 'reuse', 'pins'), { recursive: true });
-  await rm(join(reuseRoot, '.kernel', 'reuse', 'pins'), { recursive: true, force: true });
-  await symlink(outsideReuse, join(reuseRoot, '.kernel', 'reuse', 'pins'));
-  await assert.rejects(() => makeRunKernel({ plan, rootDir: reuseRoot }).advance(input('reuse-dir', 'late', { kind: 'RESUME' }, { revision: 1, authorityEpoch: 0, attemptEpoch: 0, barrierEpoch: 0 })), (error) => error instanceof KernelError && error.code === 'ManifestMismatch');
+  const decorationRoot = await mkdtemp(join(tmpdir(), 'lunacy-s5-inert-decoration-'));
+  const decorationKernel = makeRunKernel({ plan, rootDir: decorationRoot });
+  const decorationStart = await decorationKernel.advance(start('inert-decoration'));
+  const decorationDir = join(decorationRoot, '.kernel', 'reuse');
+  await mkdir(decorationDir, { recursive: true });
+  const decorationPath = join(decorationDir, 'legacy.json');
+  await writeFile(decorationPath, 'untrusted legacy decoration');
+  await decorationKernel.advance(input('inert-decoration', 'resume', { kind: 'RESUME' }, decorationStart.snapshot));
+  assert.equal(await readFile(decorationPath, 'utf8'), 'untrusted legacy decoration');
 
-  const pinRoot = await mkdtemp(join(tmpdir(), 'lunacy-s5-reuse-pin-'));
-  const pinKernel = makeRunKernel({ plan, rootDir: pinRoot });
-  const pinStart = await pinKernel.advance(start('reuse-pin'));
-  const outsidePin = join(outsideReuse, 'pin-target'); await writeFile(outsidePin, 'must-survive');
-  const pinName = `${'a'.repeat(64)}-${'b'.repeat(64)}.pin`;
-  await mkdir(join(pinRoot, '.kernel', 'reuse', 'pins'), { recursive: true });
-  await mkdir(join(pinRoot, '.kernel', 'reuse', 'blobs'));
-  await mkdir(join(pinRoot, '.kernel', 'reuse', 'quarantine'));
-  await symlink(outsidePin, join(pinRoot, '.kernel', 'reuse', 'pins', pinName));
-  await pinKernel.advance(input('reuse-pin', 'resume', { kind: 'RESUME' }, pinStart.snapshot));
-  assert.equal(await readFile(outsidePin, 'utf8'), 'must-survive');
-  assert.ok((await readdir(join(pinRoot, '.kernel', 'reuse', 'quarantine'))).some((name) => name.startsWith(pinName)));
 });
 
 test('appendJournal refuses a byte-ceiling crossing without mutating the candidate', () => {
@@ -205,40 +193,4 @@ test('file store refuses a malformed candidate journal before publication', asyn
   candidate.journal = [{ bad: true }];
   await assert.rejects(() => store.commit(0, candidate), /ManifestMismatch/);
   assert.equal((await store.load()).state, undefined);
-});
-
-test('forged fixed-cell handles fail closed without a cache hit', async () => {
-  const snapshot = makeSnapshotHandle({ generation: 1, treeDigest: digest('t'), symlinkDigest: digest('s'), mountDigest: digest('m'), readSetDigest: digest('r'), sourceDigests: [] });
-  const valid = makeCellHandle({ tenant: 't', principal: 'p', workspace: 'w', sensitivity: 'RUN_PRIVATE', accessEpoch: 0, policyEpoch: 0 });
-  const forged = { ...valid, identity: digest('not-the-tuple') };
-  const metrics = (await import('../dist/metrics.js')).AccelerationMetrics;
-  const counters = new metrics();
-  const kernel = makeRunKernel({ plan, acceleration: { context: 'ON', reuse: 'ON', cell: forged, snapshot, metrics: counters } });
-  const y = await kernel.advance(start('forged'));
-  assert.equal(y.kind, 'WAITING'); assert.equal(counters.snapshot().reuseHit, 0); assert.ok(counters.snapshot().contextCorrupt >= 1);
-});
-
-test('self-consistent but forged BASE bytes are a cold miss, not a cache hit', async () => {
-  const cell = makeCellHandle({ tenant: 't', principal: 'p', workspace: 'w', sensitivity: 'RUN_PRIVATE', accessEpoch: 0, policyEpoch: 0 });
-  const snapshot = makeSnapshotHandle({ generation: 1, treeDigest: digest('tree'), symlinkDigest: digest('symlink'), mountDigest: digest('mount'), readSetDigest: digest('read'), sourceDigests: [] });
-  const request = { runId: 'r', generation: 1, writerFence: 'wf', cell, snapshot, authorityDigest: digest(plan), authorityEpoch: 0, derivation: { id: 's5', version: '1', schema: 'v1' }, sources: [], build: () => '{"stable":"expected"}' };
-  const cold = new FixedCellReuse('OFF').prepare(request);
-  const forged = { key: cold.lookupKey, contentAddress: digest('{"stable":"forged"}'), bytes: '{"stable":"forged"}', runId: 'r', generation: 1, authorityDigest: digest(plan), authorityEpoch: 0, cellDigest: cell.identity, snapshotDigest: digest(snapshot), reuseEpoch: cell.reuseEpoch, writerFence: 'wf', schema: 'safe-fixed-base/v1' };
-  let quarantined = false;
-  const result = await new FixedCellReuse('ON').prepareWithStore(request, {
-    reuseLookup: async () => forged,
-    reuseStage: async () => undefined,
-    reuseQuarantine: async () => { quarantined = true; },
-  });
-  assert.equal(result.hit, false); assert.equal(result.bytes, cold.bytes); assert.equal(quarantined, true);
-});
-
-test('BASE and VIEW stable prefixes never alias in the fixed-cell key', async () => {
-  const cell = makeCellHandle({ tenant: 't', principal: 'p', workspace: 'w', sensitivity: 'RUN_PRIVATE', accessEpoch: 0, policyEpoch: 0 });
-  const snapshot = makeSnapshotHandle({ generation: 1, treeDigest: digest('tree'), symlinkDigest: digest('symlink'), mountDigest: digest('mount'), readSetDigest: digest('read'), sourceDigests: [] });
-  const compiler = new ContextCompiler({ mode: 'ON', reuseMode: 'ON' });
-  const common = { proof: { runId: 'r', authorityDigest: digest(plan), authorityEpoch: 0, generation: 1, revision: 0 }, scope: { tenant: 't', principal: 'p', workspace: 'w', sensitivity: 'RUN_PRIVATE' }, sources: [], derivation: { id: 'same', version: '1', schema: 'v1' }, snapshot, cell, dynamicTail: { bytes: 'tail', eventId: 'e', snapshotDigest: digest(snapshot) } };
-  const base = await compiler.prepare({ ...common, kind: 'BASE' });
-  const view = await compiler.prepare({ ...common, kind: 'VIEW', dynamicTail: { ...common.dynamicTail, eventId: 'view' } });
-  assert.notEqual(base.lookupKey, view.lookupKey); assert.notEqual(base.stableDigest, view.stableDigest); assert.equal(view.hit, false);
 });

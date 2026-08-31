@@ -39,36 +39,19 @@ test('segmented/v2 reconstructs a journal-free state and reuses its sealed prefi
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test('segmented/v2 read-only inspection and reuse fences accept the journal-free projection', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'lunacy-p3-v2-readonly-reuse-'));
+test('segmented/v2 read-only inspection tolerates inert legacy decoration', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'lunacy-p3-v2-readonly-decoration-'));
   try {
     const state = makeState(3);
     const store = new FileArtifactStore(root, undefined, { format: 'segmented/v2', segmentEventCeiling: 2 });
     await store.commit(0, state);
-    // loadReadOnly is a managed-runtime seam; provide the exact bridge
-    // metadata it authenticates without adding a public writer dependency.
-    await writeFile(join(root, '.kernel', 'BRIDGE.json'), canonicalString({
-      bridgeVersion: 'test', mode: 'runtime', planDigest: state.planDigest,
-      rootPath: root, runId: state.runId, phaseId: state.phaseId,
-      runtimeVersion: 'test', schema: 1,
-      sourceDigest: digest('lunacy-runtime-skill-bridge/v1'), status: 'enabled',
-    }));
+    await writeFile(join(root, '.kernel', 'BRIDGE.json'), canonicalString({ bridgeVersion: 'test', mode: 'runtime', planDigest: state.planDigest, rootPath: root, runId: state.runId, phaseId: state.phaseId, runtimeVersion: 'test', schema: 1, sourceDigest: digest('lunacy-runtime-skill-bridge/v1'), status: 'enabled' }));
+    const decorationDir = join(root, '.kernel', 'reuse');
+    await (await import('node:fs/promises')).mkdir(decorationDir, { recursive: true });
+    const decorationPath = join(decorationDir, 'index.json');
+    await writeFile(decorationPath, '{legacy-decoration}');
     const readonly = await new FileArtifactStore(root).loadReadOnly(state.runId);
-    assert.equal(readonly.generation, 1);
-    assert.equal(readonly.state.revision, state.revision);
-
-    const loaded = await store.load();
-    const bytes = 'v2-reuse-base';
-    const record = {
-      key: digest('v2-reuse-key'), contentAddress: digest(bytes), bytes,
-      runId: state.runId, generation: loaded.generation,
-      authorityDigest: digest('authority'), authorityEpoch: state.authorityEpoch,
-      cellDigest: null, snapshotDigest: null, reuseEpoch: null,
-      writerFence: state.writerFence, schema: 'safe-fixed-base/v1',
-    };
-    await store.reuseStage(record);
-    await store.reusePublish(record);
-    assert.deepEqual(await store.reuseLookup(record.key), record);
+    assert.equal(readonly.generation, 1); assert.equal(readonly.state.revision, state.revision); assert.equal(await readFile(decorationPath, 'utf8'), '{legacy-decoration}');
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
