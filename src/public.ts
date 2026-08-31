@@ -8,14 +8,12 @@ import type { FilesystemIdentity } from './filesystem.js';
 import { validatePlan } from './validator.js';
 import { isDispatchableStepStatus } from './dependency.js';
 import { compileWavePlan, deriveTopology, shadowPolicy, validateRef as validateDeliberationRef, validateWave, verifyWavePlan, type DeliberationPolicy, type DeliberationWave } from './deliberation.js';
-import { ContextCompiler, publishPreparedContext, type CompilerMode, type PreparedContext } from './compiler.js';
 import { verifyReadSet } from './authority.js';
 import { DispatchCoordinator, type DispatchDriverSnapshot, type ActiveDispatchTask } from './dispatch-coordinator.js';
 import { GraphAcceleration, type GraphMode } from './graph.js';
 import { AccelerationMetrics, defaultMetrics } from './metrics.js';
 import { JOURNAL_BYTE_CEILING, JOURNAL_EVENT_CEILING } from './limits.js';
 import { assertManagedGraph, createManagedCapability, createManagedRolloutPolicy, managedAdmissionAllowed, managedRolloutDecision, verifyManagedCapability, verifyManagedRolloutPolicy, type ManagedCapability, type ManagedCapabilityInput, type ManagedRolloutDecision, type ManagedRolloutPolicy, type ManagedRolloutPolicyInput } from './managed-capability.js';
-import type { CellHandle, SnapshotHandle } from './reuse.js';
 import type { AdvanceInput, CompactSnapshot, Event, EventIdentity, MachineState, Plan, Ref, Yield } from './model.js';
 export type { AdvanceInput, CompactSnapshot, Cursor, Event, EventIdentity, Plan, PlanStep, Ref, Yield, RunId, PhaseId, StepId, EventId, Sha256, LaunchToken } from './model.js';
 
@@ -45,12 +43,7 @@ export type KernelOptions = {
   /** Composition-time acceleration switches. They never add lifecycle methods or authority. */
   acceleration?: {
     graph?: GraphMode;
-    context?: CompilerMode;
-    reuse?: CompilerMode;
     metrics?: AccelerationMetrics;
-    /** Optional root-owned handles; callers cannot manufacture a cache lifecycle. */
-    cell?: CellHandle | null;
-    snapshot?: SnapshotHandle | null;
   };
   /** Private Stage-C opt-in. Omitted keeps the ordinary schema-1 path. */
   managedCapability?: ManagedCapabilityInput | ManagedCapability | null;
@@ -115,7 +108,7 @@ function validateKernelOptions(options: KernelOptions): number {
   const acceleration = options.acceleration;
   if (!acceleration) return configuredMaxInFlight;
   if (acceleration.metrics !== undefined && (!acceleration.metrics || typeof acceleration.metrics !== 'object' || typeof acceleration.metrics.increment !== 'function' || typeof acceleration.metrics.snapshot !== 'function')) throw new InvalidPlan('acceleration metrics are invalid');
-  for (const [name, mode] of Object.entries({ graph: acceleration.graph, context: acceleration.context, reuse: acceleration.reuse })) {
+  for (const [name, mode] of Object.entries({ graph: acceleration.graph })) {
     if (mode !== undefined && mode !== 'OFF' && mode !== 'SHADOW' && mode !== 'ON') throw new InvalidPlan(`${name} acceleration mode is invalid`);
   }
   return configuredMaxInFlight;
@@ -436,8 +429,6 @@ class KernelImpl implements RunKernel {
   readonly #managedKillSwitch: boolean;
   readonly #managedRolloutPolicy?: ManagedRolloutPolicy;
   readonly #managedRolloutDecision?: ManagedRolloutDecision;
-  readonly #contextMode: CompilerMode;
-  readonly #compiler: ContextCompiler;
   readonly #graphMode: GraphMode;
   readonly #graph: GraphAcceleration;
   /** In-process dispatch state is owned by the private coordinator.  These
@@ -460,8 +451,6 @@ class KernelImpl implements RunKernel {
         if (gear) this.safeMetric(gear === 'FOCUS' ? 'managedFocusProposals' : 'managedExploreProposals');
       }
     }
-    this.#contextMode = options.acceleration?.context ?? 'OFF';
-    this.#compiler = new ContextCompiler({ mode: this.#contextMode, reuseMode: options.acceleration?.reuse ?? 'OFF', metrics: this.metrics, store });
     this.#graphMode = options.acceleration?.graph ?? 'OFF';
     this.#graph = new GraphAcceleration(this.#graphMode, this.metrics);
     const timeoutMs = dispatcher.timeoutMs ?? 30_000;
@@ -590,38 +579,7 @@ class KernelImpl implements RunKernel {
     return { disposition: disposition as 'SELECTION' | 'SYNTHESIS' | 'WIDEN', settlementRef, lease };
   }
 
-  async #prepareContext(plan: Plan, current: MachineState | undefined, input: AdvanceInput, generation: number): Promise<PreparedContext | undefined> {
-    if (this.#contextMode === 'OFF') return undefined;
-    // The compiler is intentionally called only after duplicate/event/plan
-    // checks. Its output is stable-prefix material only; reducer/CURRENT remain
-    // authoritative and this method never mutates state.
-    const proof = {
-      runId: String(input.runId), authorityDigest: digest(plan), authorityEpoch: current?.authorityEpoch ?? 0,
-      generation, revision: current?.revision ?? 0, stateDigest: current ? digest(current) : undefined,
-      attemptEpoch: current?.attemptEpoch ?? 0, barrierEpoch: current?.barrierEpoch ?? 0,
-      modeEpoch: current?.modeEpoch ?? 0,
-      // The proof names the exact writer fence expected on the target
-      // generation, not merely the pre-call fence.  This makes a delayed
-      // pre-CAS writer fail closed even when another writer reaches the same
-      // generation number first.
-      writerFence: nextWriterFence(current?.writerFence ?? 'none', generation + 1, input.identity),
-    };
-    const snapshotDigest = this.options.acceleration?.snapshot
-      ? digest(this.options.acceleration.snapshot)
-      : digest({ runId: proof.runId, generation, revision: proof.revision });
-    const sources = plan.steps.map((step) => ({ id: step.stepId, scope: 'plan', digest: digest(step) }));
-    const cell = this.options.acceleration?.cell ?? null;
-    try {
-      return await this.#compiler.prepare({
-        proof, scope: { tenant: cell?.tuple.tenant, principal: cell?.tuple.principal, workspace: cell?.tuple.workspace ?? this.options.workspace, sensitivity: cell?.tuple.sensitivity ?? 'RUN_PRIVATE', accessEpoch: cell?.tuple.accessEpoch, policyEpoch: cell?.tuple.policyEpoch }, sources,
-        kind: 'BASE', derivation: { id: 'run-kernel', version: '1', schema: 'context-base/v1' },
-        dynamicTail: { bytes: canonicalString(input.event), eventId: String(input.identity.eventId), snapshotDigest },
-        cell,
-        snapshot: this.options.acceleration?.snapshot ?? null,
-        build: (stable) => canonicalString(stable),
-      });
-    } catch { /* a private accelerator failure is an ordinary cold path */ return undefined; }
-  }
+
 
   #prepareGraph(plan: Plan, current: MachineState | undefined, postState: MachineState, input: AdvanceInput, generation: number): PreparedAdmission | undefined {
     if (this.#graphMode === 'OFF') return undefined;
@@ -900,12 +858,6 @@ class KernelImpl implements RunKernel {
       catch { return asYield(emptyState(String(input.runId), plan.phaseId), { outcome: 'BLOCKED', reason: 'managed publication lease unavailable' }); }
     }
 
-    // Stable context preparation is independent of the reducer event and is
-    // retained through CURRENT commit for post-commit BASE publication.  The
-    // graph, in contrast, is built only after a pure post-event preflight so a
-    // completion can expose its newly-ready successors in this same call.
-    const preparedContext = recoveryAgainstCommittedPlan || input.event.kind === 'PARENT_DECISION' ? undefined : await this.#prepareContext(plan, current, input, loaded.generation);
-
     if (current && input.event.kind === 'PARENT_DECISION') {
       let preparedDecision: PreparedDecisionPublication | undefined;
       if (this.managedRuntimeEnabled()) {
@@ -924,7 +876,7 @@ class KernelImpl implements RunKernel {
       // RESUME, so this event never calls an external driver inline.
       if (reduced.outcome === 'WAITING' && reduced.state.gate === 'NOT-DUE' && reduced.state.barrier === 'OPEN' && !reduced.deferAdmission) refreshAdmission(reduced.state, plan, recoveryCapacity);
       if (this.managedRuntimeEnabled()) reduced.state = this.prepareManagedState(reduced.state, loaded.generation, input);
-      return this.commitYield(loaded.generation, reduced.state, key, input.identity, asYield(reduced.state, reduced), preparedContext);
+      return this.commitYield(loaded.generation, reduced.state, key, input.identity, asYield(reduced.state, reduced));
     }
 
     const hasCurrentDispatch = (command: import('./model.js').OutboxCommand): boolean => Boolean(current && commandInCurrentFrame(current, command));
@@ -939,7 +891,7 @@ class KernelImpl implements RunKernel {
       // only then discover that its journal cannot represent the outcome.
       if (!segmentedJournalEnabled(this.store) && !journalHasRecordBudget(current, maximumInternalRecords)) return asYield(current, { outcome: 'BLOCKED', reason: 'JournalCeiling' });
       try {
-        return await this.coordinator.resume({ generation: loaded.generation, current, input, key, plan, admissionOk, maxInFlight: recoveryCapacity, preparedContext });
+        return await this.coordinator.resume({ generation: loaded.generation, current, input, key, plan, admissionOk, maxInFlight: recoveryCapacity });
       } catch (error) {
         if ((error as Error).message === 'JournalCeiling') return asYield(current, { outcome: 'BLOCKED', reason: 'JournalCeiling' });
         throw error;
@@ -970,7 +922,7 @@ class KernelImpl implements RunKernel {
     }
     if (reduced.outcome === 'BLOCKED' && !reduced.state) return asYield(emptyState(String(input.runId), plan.phaseId), reduced);
     if (reduced.outcome === 'BLOCKED' && reduced.state === current && (input.event.kind === 'DISPATCH_RECEIPT' || input.event.kind === 'PARENT_DECISION')) throw new Conflict(reduced.reason ?? 'event rejected');
-    return this.commitYield(loaded.generation, reduced.state, key, input.identity, asYield(reduced.state, reduced), preparedContext, preparedAdmission);
+    return this.commitYield(loaded.generation, reduced.state, key, input.identity, asYield(reduced.state, reduced), preparedAdmission);
   }
 
   /** Persist a durable CLAIMED transition before the coordinator invokes a
@@ -1008,7 +960,7 @@ class KernelImpl implements RunKernel {
   }
 
   /** Commit the caller event without changing outbox ownership. */
-  private async commitEventOnly(generation: number, current: MachineState, input: AdvanceInput, key: string, plan: Plan, capacity: number, y: Yield, preparedContext?: PreparedContext): Promise<Yield> {
+  private async commitEventOnly(generation: number, current: MachineState, input: AdvanceInput, key: string, plan: Plan, capacity: number, y: Yield): Promise<Yield> {
     const next = clone(current);
     appendJournal(next, input.identity, input.event, segmentedJournalEnabled(this.store));
     refreshAdmission(next, plan, capacity);
@@ -1020,7 +972,7 @@ class KernelImpl implements RunKernel {
         : y.kind === 'DECISION_REQUIRED'
           ? { ...y, cursor: { revision: next.revision, authorityEpoch: next.authorityEpoch, attemptEpoch: next.attemptEpoch, barrierEpoch: next.barrierEpoch }, snapshot: snapshot(next) }
           : { ...y, snapshot: snapshot(next) };
-    return this.commitYield(generation, next, key, input.identity, rebased, preparedContext);
+    return this.commitYield(generation, next, key, input.identity, rebased);
   }
 
   /** Managed schema-2 transitions are admitted only while the exact
@@ -1039,12 +991,12 @@ class KernelImpl implements RunKernel {
     }
   }
 
-  private async commitRetireManagedAttempt(generation: number, current: MachineState, token: string, input: AdvanceInput, plan: Plan, capacity: number, status: 'TIMED_OUT' | 'CANCELLED' | 'FAILED' = 'TIMED_OUT', preparedContext?: PreparedContext): Promise<Yield> {
+  private async commitRetireManagedAttempt(generation: number, current: MachineState, token: string, input: AdvanceInput, plan: Plan, capacity: number, status: 'TIMED_OUT' | 'CANCELLED' | 'FAILED' = 'TIMED_OUT'): Promise<Yield> {
     this.assertManagedCas(current, generation);
     const reduced = retireManagedAttempt(current, input.identity, token, plan, capacity, status, segmentedJournalEnabled(this.store));
     if (reduced.outcome === 'BLOCKED' || reduced.state === current) return asYield(current, reduced);
     if (this.managedRuntimeEnabled() && this.#managedCapability) applyManagedReservations(reduced.state, this.#managedCapability);
-    return this.commitYield(generation, reduced.state, identityKey(input.identity), input.identity, asYield(reduced.state, reduced), preparedContext);
+    return this.commitYield(generation, reduced.state, identityKey(input.identity), input.identity, asYield(reduced.state, reduced));
   }
 
   /**
@@ -1193,12 +1145,11 @@ class KernelImpl implements RunKernel {
     }
   }
 
-  private async commitYield(generation: number, state: MachineState, key: string, identity: EventIdentity, y: Yield, preparedContext?: PreparedContext, preparedAdmission?: PreparedAdmission): Promise<Yield> {
+  private async commitYield(generation: number, state: MachineState, key: string, identity: EventIdentity, y: Yield, preparedAdmission?: PreparedAdmission): Promise<Yield> {
     const next = state === undefined ? state : clone(state);
     if (!next) return y;
     this.assertManagedCas(next, generation);
     // Every durable event gets a unique writer fence.  It is private state,
-    // but it is the binding that makes staged reuse publication exact.
     next.writerFence = nextWriterFence(state.writerFence, generation + 1, identity);
     if (preparedAdmission) {
       // Admission itself mutates statuses/outbox after the post-event proof;
@@ -1232,8 +1183,6 @@ class KernelImpl implements RunKernel {
       }
       catch { /* lease remains bounded and is never treated as authority */ }
     }
-    try { await publishPreparedContext(preparedContext, this.store); }
-    catch { /* the authoritative commit is already durable; the row is a miss next time */ }
     return y;
   }
 }

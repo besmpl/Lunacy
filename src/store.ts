@@ -78,36 +78,12 @@ export function isCanonicalRootPath(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0 && value.startsWith('/') && !value.includes('\0') && resolve(value) === value;
 }
 
-/** Private immutable BASE row used by ContextCompiler/FixedCellReuse.  It is
- * intentionally not part of the package's public index or lifecycle API. */
-export type ReuseRecord = {
-  key: string;
-  contentAddress: string;
-  bytes: string;
-  runId: string;
-  generation: number;
-  authorityDigest: string;
-  authorityEpoch: number;
-  cellDigest: string | null;
-  snapshotDigest: string | null;
-  reuseEpoch: number | null;
-  writerFence: string;
-  schema: 'safe-fixed-base/v1';
-};
-
 export interface ArtifactStore {
   load(): Promise<StoreSnapshot>;
   commit(previousGeneration: number, state: MachineState): Promise<number>;
   /** Private format hint used by the kernel to lift the legacy journal ceiling
    * only after an explicit segmented selection or a verified segmented head. */
   readonly journalFormat?: ArtifactFormat;
-  /** Optional private fixed-cell transaction hooks. Implementations supplied
-   * by this repository always provide them; absence is a fail-closed miss. */
-  reuseLookup?(key: string): Promise<ReuseRecord | undefined>;
-  reuseStage?(record: ReuseRecord): Promise<void>;
-  reusePublish?(record: ReuseRecord): Promise<void>;
-  reuseQuarantine?(key: string): Promise<void>;
-  reuseClear?(): Promise<void>;
   /** Private managed publication lease family.  Leases are bounded roots;
    * callers must promote only after the authoritative journal CAS succeeds. */
   acquirePublicationLease?(leaseId: string, refs: readonly Ref[], ttlMs?: number): Promise<PublicationLease>;
@@ -1353,11 +1329,7 @@ export class MemoryArtifactStore implements ArtifactStore {
   private state?: MachineState;
   private generation = 0;
   private fence: Promise<void> = Promise.resolve();
-  private readonly reuse = new Map<string, ReuseRecord>();
   private readonly publicationLeases = new Map<string, PublicationLease>();
-  /** Keep the small committed-generation fence history needed to reject a
-   * delayed publication in deterministic/in-memory tests as well as on disk. */
-  private readonly generationFences = new Map<number, { writerFence: string; runId: string; authorityEpoch: number }>();
   constructor(options: ArtifactStoreOptions = {}) {
     this.format = normalizeArtifactFormat(options.format ?? 'legacy');
     this.segmentEventCeiling = Number.isSafeInteger(options.segmentEventCeiling) && (options.segmentEventCeiling as number) > 0 ? Math.min(options.segmentEventCeiling as number, 10_000) : 1000;
@@ -1391,7 +1363,6 @@ export class MemoryArtifactStore implements ArtifactStore {
       const journalText = state.journal.map((entry) => canonicalString(entry)).join('\n') + (state.journal.length ? '\n' : '');
       validateJournal(state, journalText, { segmented: isSegmentedFormat(this.format) });
       this.state = cloneState(state); this.generation += 1;
-      this.generationFences.set(this.generation, { writerFence: state.writerFence, runId: state.runId, authorityEpoch: state.authorityEpoch });
       return this.generation;
     });
   }
@@ -1405,24 +1376,6 @@ export class MemoryArtifactStore implements ArtifactStore {
   [STORE_LINEARIZED_DISPATCH](request: StoreLinearizedDispatchRequest, marker: EntryMarker): Promise<InternalDispatchResult> {
     return this.withFence(() => invokeIfCurrent({ state: this.state, generation: this.generation }, request, marker));
   }
-  async reuseLookup(key: string): Promise<ReuseRecord | undefined> {
-    const row = this.reuse.get(key);
-    if (!row || !this.state || row.generation <= 0 || row.generation > this.generation) return undefined;
-    if (this.state.runId !== row.runId || this.state.authorityEpoch !== row.authorityEpoch) return undefined;
-    const fence = this.generationFences.get(row.generation);
-    if (!fence || fence.writerFence !== row.writerFence || fence.runId !== row.runId || fence.authorityEpoch !== row.authorityEpoch) return undefined;
-    return { ...row };
-  }
-  async reuseStage(_record: ReuseRecord): Promise<void> { /* memory has no fsync boundary */ }
-  async reusePublish(record: ReuseRecord): Promise<void> {
-    const prior = this.reuse.get(record.key);
-    const fence = this.generationFences.get(record.generation);
-    if (!fence || record.generation !== this.generation || fence.writerFence !== record.writerFence || fence.runId !== record.runId || fence.authorityEpoch !== record.authorityEpoch) throw new Error('reuse publication fence mismatch');
-    if (prior && prior.contentAddress !== record.contentAddress) { this.reuse.delete(record.key); throw new Error('reuse key has conflicting content'); }
-    this.reuse.set(record.key, { ...record });
-  }
-  async reuseQuarantine(key: string): Promise<void> { this.reuse.delete(key); }
-  async reuseClear(): Promise<void> { this.reuse.clear(); }
   async acquirePublicationLease(leaseId: string, refs: readonly Ref[], ttlMs = 60_000): Promise<PublicationLease> {
     return this.withFence(() => {
       if (!/^[A-Za-z0-9._:-]{1,200}$/.test(leaseId) || !Array.isArray(refs) || refs.length === 0 || refs.some((item) => !refIsValid(item))) throw new Error('publication lease is malformed');
@@ -1471,10 +1424,6 @@ export class FileArtifactStore implements ArtifactStore {
   private readonly kernelDir: string;
   private readonly generationsDir: string;
   private readonly lockPath: string;
-  private readonly reuseDir: string;
-  private readonly reuseBlobsDir: string;
-  private readonly reusePinsDir: string;
-  private readonly reuseIndexPath: string;
   private readonly publicationLeasesDir: string;
   private readonly expectedRootIdentity?: FilesystemIdentity;
   private readonly faultInjector?: (point: string) => void;
@@ -1492,10 +1441,6 @@ export class FileArtifactStore implements ArtifactStore {
     this.kernelDir = join(this.rootDir, '.kernel');
     this.generationsDir = join(this.kernelDir, 'generations');
     this.lockPath = join(this.kernelDir, '.writer.lock');
-    this.reuseDir = join(this.kernelDir, 'reuse');
-    this.reuseBlobsDir = join(this.reuseDir, 'blobs');
-    this.reusePinsDir = join(this.reuseDir, 'pins');
-    this.reuseIndexPath = join(this.reuseDir, 'index.json');
     this.publicationLeasesDir = join(this.kernelDir, 'publication-leases');
     const maybeOptions = expectedRootIdentity && ('format' in expectedRootIdentity || 'segmentEventCeiling' in expectedRootIdentity || 'faultInjector' in expectedRootIdentity) ? expectedRootIdentity as ArtifactStoreOptions : undefined;
     const identity = maybeOptions ? undefined : expectedRootIdentity as FilesystemIdentity | undefined;
@@ -2556,11 +2501,7 @@ export class FileArtifactStore implements ArtifactStore {
       const verified = await this.readVerifiedCurrent(true);
       if (verified.current?.format === 'segmented/v1') this.format = 'segmented';
       else if (verified.current?.format === 'segmented/v2') this.format = 'segmented/v2';
-      // A staged pin is intentionally allowed to survive the commit call so
-      // publication can consume it.  Reconcile only at a load/restart
-      // boundary, where no in-flight caller can still prove ownership.
-      await this.reconcileReusePins();
-      // Never expose the private proof or retain it if reconciliation fails.
+      // Never expose the private proof.
       if (verified.current === undefined || verified.current.format === 'segmented/v2') {
         this.verifiedGenerationMemo = undefined;
       } else {
@@ -3128,358 +3069,6 @@ export class FileArtifactStore implements ArtifactStore {
     });
   }
 
-  private validateReuseRecord(record: ReuseRecord): void {
-    invariant(record && typeof record === 'object', 'reuse record is invalid');
-    exactKeys(record as unknown as object, ['key', 'contentAddress', 'bytes', 'runId', 'generation', 'authorityDigest', 'authorityEpoch', 'cellDigest', 'snapshotDigest', 'reuseEpoch', 'writerFence', 'schema'], 'reuse record');
-    invariant(record.schema === 'safe-fixed-base/v1', 'reuse schema is invalid');
-    invariant(SHA256.test(record.key) && SHA256.test(record.contentAddress), 'reuse digest is invalid');
-    invariant(typeof record.bytes === 'string' && record.bytes.length > 0, 'reuse bytes are invalid');
-    invariant(typeof record.runId === 'string' && record.runId.length > 0, 'reuse runId is invalid');
-    nonNegativeInteger(record.generation, 'reuse generation');
-    invariant(SHA256.test(record.authorityDigest), 'reuse authority digest is invalid');
-    nonNegativeInteger(record.authorityEpoch, 'reuse authority epoch');
-    invariant(record.cellDigest === null || SHA256.test(record.cellDigest), 'reuse cell digest is invalid');
-    invariant(record.snapshotDigest === null || SHA256.test(record.snapshotDigest), 'reuse snapshot digest is invalid');
-    invariant(record.reuseEpoch === null || (Number.isSafeInteger(record.reuseEpoch) && record.reuseEpoch >= 0), 'reuse epoch is invalid');
-    invariant(typeof record.writerFence === 'string' && record.writerFence.length > 0, 'reuse writer fence is invalid');
-    invariant(digest(record.bytes) === record.contentAddress, 'reuse content digest mismatch');
-  }
-
-  private async readReuseIndex(): Promise<Record<string, ReuseRecord>> {
-    try {
-      await this.assertRegular(this.reuseIndexPath, 'reuse index');
-      const text = await this.readRegular(this.reuseIndexPath, 'reuse index');
-      const parsed = parseCanonical<Record<string, ReuseRecord>>(text);
-      invariant(parsed && typeof parsed === 'object' && !Array.isArray(parsed), 'reuse index is invalid');
-      for (const [key, row] of Object.entries(parsed)) { invariant(key === row.key, 'reuse index key mismatch'); this.validateReuseRecord(row); }
-      return parsed;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {};
-      if ((error as Error).message.startsWith('ManifestMismatch:')) throw error;
-      throw new Error(`ManifestMismatch: reuse index is malformed: ${(error as Error).message}`);
-    }
-  }
-
-  private async writeReuseIndex(index: Record<string, ReuseRecord>): Promise<void> {
-    await this.assertDirectory(this.reuseDir, 'reuse directory');
-    const temp = join(this.reuseDir, `.index.tmp-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`);
-    await this.writeRegular(temp, canonicalString(index), 'staged reuse index', true); await this.fsyncFile(temp);
-    await fs.rename(temp, this.reuseIndexPath); await this.fsyncDir(this.reuseDir);
-  }
-
-  /** Reclaim only unindexed, unpinned cache blobs. Authoritative generations,
-   * CURRENT, journal and outbox files are in a different namespace. */
-  private async gcReuseUnsafe(index: Record<string, ReuseRecord>): Promise<void> {
-    // Never enumerate a cache directory before proving that it is a real
-    // directory.  `readdir` follows symlinks; doing this check only at the
-    // public call sites left the load/restart recovery path able to inspect
-    // (and quarantine) names from an attacker-controlled directory outside
-    // the store root.
-    await this.assertDirectory(this.reuseDir, 'reuse directory');
-    await this.assertDirectory(this.reuseBlobsDir, 'reuse blobs directory');
-    await this.assertDirectory(this.reusePinsDir, 'reuse pins directory');
-    const pinned = new Set<string>();
-    for (const row of Object.values(index)) pinned.add(row.contentAddress);
-    const quarantine = await this.ensureQuarantine(this.reuseDir);
-    let pins: string[] = [];
-    try { pins = await fs.readdir(this.reusePinsDir); }
-    catch (error) {
-      // A cache directory disappearing between the trusted check and
-      // enumeration is a normal cleanup race.  Permission, ownership, and
-      // ancestor failures are not an empty cache: keep the trust error
-      // visible instead of silently skipping unsafe entries.
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-    }
-    for (const name of pins) {
-      const pinPath = join(this.reusePinsDir, name);
-      try {
-        const pinStat = await fs.lstat(pinPath);
-        if (pinStat.isSymbolicLink() || !pinStat.isFile()) {
-          await fs.rename(pinPath, join(quarantine, this.uniqueQuarantineName(name))).catch(() => undefined);
-          continue;
-        }
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-        continue;
-      }
-      const match = /^([0-9a-f]{64})-([0-9a-f]{64})\.pin$/i.exec(name);
-      if (!match) {
-        // Even an unaddressed debris file is quarantined only after its own
-        // trust surface has been proven.  Otherwise a mode/ownership drift
-        // would be hidden by the disposable-cache cleanup path.
-        await this.assertRegular(pinPath, 'reuse pin');
-        await fs.rename(pinPath, join(quarantine, this.uniqueQuarantineName(name))).catch(() => undefined);
-        continue;
-      }
-      let pinText: string;
-      try {
-        pinText = await this.readRegular(pinPath, 'reuse pin');
-      } catch (error) {
-        // Only ordinary disappearance is a cleanup race.  A trust-boundary
-        // failure must not be converted into permission to quarantine a pin
-        // whose ownership, mode, type, or ancestry cannot be proven.
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-        continue;
-      }
-      try {
-        const row = parseCanonical<ReuseRecord>(pinText);
-        this.validateReuseRecord(row);
-        if (row.key !== match[1] || row.contentAddress !== match[2]) throw new Error('reuse pin name/content mismatch');
-        pinned.add(match[2]);
-      } catch {
-        await fs.rename(pinPath, join(quarantine, this.uniqueQuarantineName(name))).catch(() => undefined);
-      }
-    }
-    let blobs: string[] = [];
-    try { blobs = await fs.readdir(this.reuseBlobsDir); }
-    catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-    }
-    for (const name of blobs) {
-      const blobPath = join(this.reuseBlobsDir, name);
-      let blobStat;
-      try { blobStat = await fs.lstat(blobPath); }
-      catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-        continue;
-      }
-      if (blobStat.isSymbolicLink()) { await fs.rename(blobPath, join(quarantine, this.uniqueQuarantineName(name))).catch(() => undefined); continue; }
-      const match = /^([0-9a-f]{64})\.blob$/i.exec(name); if (!match || pinned.has(match[1])) continue;
-      // Before moving a disposable regular blob, still prove it belongs to
-      // the trusted cache surface.  A malformed but unsafe object is not
-      // allowed to turn a trust failure into a successful quarantine.
-      await this.assertRegular(blobPath, 'reuse blob');
-      await fs.rename(blobPath, join(quarantine, this.uniqueQuarantineName(name))).catch(() => undefined);
-    }
-  }
-
-  /** Remove staged pins that cannot be proven to be the exact row already
-   * published in the disposable index.  Recovery deliberately chooses a
-   * quarantine/miss over guessing that a CURRENT commit happened: an orphan
-   * pin must never keep an unindexed blob alive forever. */
-  private async reconcileReusePins(): Promise<void> {
-    // A cold/default-OFF load must not create an accelerator namespace merely
-    // to discover that it is empty.  If the namespace already exists, retain
-    // the full trust and reconciliation behavior below; unsafe types, modes,
-    // ownership, and ancestry still fail closed through inspectTrustedPath.
-    let reuse;
-    try { reuse = await inspectTrustedPath(this.reuseDir, 'reuse directory', { allowMissing: true, surface: true, kind: 'directory' }); }
-    catch (error) { throw new Error(`ManifestMismatch: ${(error as Error).message.replace(/^FilesystemTrust:\s*/, '')}`); }
-    if (!reuse) return;
-    await this.ensureDirectory(this.reuseDir, 'reuse directory');
-    // This helper runs during `load()` before the normal lookup path has had
-    // a chance to establish the cache directories.  Establish and verify all
-    // three directories here before any readdir/rename so a symlinked cache
-    // subtree cannot turn restart recovery into an outside-root operation.
-    await this.ensureDirectory(this.reuseBlobsDir, 'reuse blobs directory');
-    await this.ensureDirectory(this.reusePinsDir, 'reuse pins directory');
-    let index: Record<string, ReuseRecord>;
-    try {
-      index = await this.readReuseIndex();
-    } catch (error) {
-      // Only malformed cache bytes are disposable.  Ownership, mode, path,
-      // and descriptor failures must remain visible instead of becoming an
-      // implicit quarantine/delete operation on an unsafe object.
-      if (!isMalformedReuseIndex(error)) throw error;
-      const quarantine = await this.ensureQuarantine(this.reuseDir);
-      await fs.rename(this.reuseIndexPath, join(quarantine, this.uniqueQuarantineName('index.json'))).catch(() => undefined);
-      index = {};
-      await this.writeReuseIndex(index);
-    }
-    let pins: string[] = [];
-    try { pins = await fs.readdir(this.reusePinsDir); } catch { pins = []; }
-    const quarantine = await this.ensureQuarantine(this.reuseDir);
-    for (const name of pins) {
-      const pinPath = join(this.reusePinsDir, name);
-      try { if ((await fs.lstat(pinPath)).isSymbolicLink()) { await fs.rename(pinPath, join(quarantine, this.uniqueQuarantineName(name))).catch(() => undefined); continue; } } catch { continue; }
-      let row: ReuseRecord | undefined;
-      try {
-        const bytes = await this.readRegular(pinPath, 'reuse pin');
-        try {
-          const parsed = parseCanonical<ReuseRecord>(bytes);
-          this.validateReuseRecord(parsed); row = parsed;
-        } catch { /* malformed pin bytes are quarantined below */ }
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-        continue;
-      }
-      const indexed = row ? index[row.key] : undefined;
-      if (row && indexed && canonicalString(indexed) === canonicalString(row)) {
-        // Publication completed but cleanup did not.  It is safe to drop the
-        // duplicate pin because the exact immutable row is already indexed.
-        await fs.unlink(pinPath).catch(() => undefined);
-      } else {
-        await fs.rename(pinPath, join(quarantine, this.uniqueQuarantineName(name))).catch(() => undefined);
-      }
-    }
-    await this.gcReuseUnsafe(index);
-  }
-
-  private async generationFence(generation: number): Promise<{ writerFence: string; runId: string; authorityEpoch: number } | undefined> {
-    if (!Number.isSafeInteger(generation) || generation <= 0) return undefined;
-    const generationDir = join(this.generationsDir, `g${generation}`);
-    const statePath = join(this.generationsDir, `g${generation}`, 'state.json');
-    try {
-      await this.assertDirectory(generationDir, `generation ${generation}`);
-      // segmented/v2 stores intentionally persist a journal-free state
-      // projection.  Reuse publication still needs an authoritative fence,
-      // but must not reject that projection as a malformed legacy state.  A
-      // v2 CURRENT is re-verified through the immutable head/segment proof so
-      // a cache row can never use a projection detached from its journal.
-      const current = await this.readCurrent();
-      if (current?.generation === generation && current.format === 'segmented/v2') {
-        const verified = await this.readVerifiedSegmentedGeneration(current);
-        return { writerFence: verified.state.writerFence, runId: verified.state.runId, authorityEpoch: verified.state.authorityEpoch };
-      }
-      const state = parseCanonical<MachineState>(await this.readRegular(statePath, 'reuse generation state'));
-      validateStateShape(state);
-      return { writerFence: state.writerFence, runId: state.runId, authorityEpoch: state.authorityEpoch };
-    } catch (error) {
-      // A generation that disappeared before the fence read is an ordinary
-      // stale accelerator row.  Every other failure is an authoritative
-      // generation-state error (including ownership/mode/ancestry and
-      // descriptor identity drift) and must remain visible.  In particular,
-      // do not let reusePublish treat trust failure as permission to mutate
-      // quarantine, blobs, or pins.
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
-      throw error;
-    }
-  }
-
-  private async reuseRowIsCommitted(row: ReuseRecord, current: StoreSnapshot): Promise<boolean> {
-    if (!current.state || row.generation <= 0 || row.generation > current.generation) return false;
-    // Historical generation directories are disposable and may already have
-    // been quarantined.  The target generation bound at publication is still
-    // valid for later calls in the same run; only a future generation or a
-    // different run/authority is rejected here.  The writer fence is checked
-    // strictly at publication, where exact CURRENT identity is available.
-    return current.state.runId === row.runId && current.state.authorityEpoch === row.authorityEpoch;
-  }
-
-  /** Stage the immutable BASE blob and an in-flight root pin.  Publication of
-   * the disposable index is intentionally a separate post-CURRENT operation. */
-  async reuseStage(record: ReuseRecord): Promise<void> {
-    this.validateReuseRecord(record);
-    await this.withFence(async () => {
-      if (record.generation <= 0) throw new Error('reuse stage generation must be positive');
-      await this.ensureDirectory(this.reuseDir, 'reuse directory'); await this.ensureDirectory(this.reuseBlobsDir, 'reuse blobs directory'); await this.ensureDirectory(this.reusePinsDir, 'reuse pins directory'); await this.fsyncDir(this.reuseDir);
-      const blobPath = join(this.reuseBlobsDir, `${record.contentAddress}.blob`);
-      try {
-        await this.assertRegular(blobPath, 'reuse blob');
-        const existing = await this.readRegular(blobPath, 'reuse blob');
-        if (existing !== record.bytes) throw new Error('reuse blob has conflicting content');
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-        const temp = join(this.reuseBlobsDir, `.${record.contentAddress}.tmp-${process.pid}-${Date.now()}`);
-        await this.writeRegular(temp, record.bytes, 'staged reuse blob', true); await this.fsyncFile(temp); await fs.rename(temp, blobPath); await this.fsyncDir(this.reuseBlobsDir);
-      }
-      const pinPath = join(this.reusePinsDir, `${record.key}-${record.contentAddress}.pin`);
-      try { await this.assertRegular(pinPath, 'reuse pin'); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
-      await this.writeRegular(pinPath, canonicalString(record), 'reuse pin'); await this.fsyncFile(pinPath); await this.fsyncDir(this.reusePinsDir);
-    });
-  }
-
-  async reuseLookup(key: string): Promise<ReuseRecord | undefined> {
-    invariant(SHA256.test(key), 'reuse lookup key is invalid');
-    return this.withFence(async () => {
-      await this.ensureDirectory(this.reuseDir, 'reuse directory');
-      await this.ensureDirectory(this.reuseBlobsDir, 'reuse blobs directory');
-      await this.ensureDirectory(this.reusePinsDir, 'reuse pins directory');
-      const current = await this.readVerifiedCurrent();
-      await this.reconcileReusePins();
-      let index: Record<string, ReuseRecord>;
-      try { index = await this.readReuseIndex(); }
-      catch (error) {
-        if (!isMalformedReuseIndex(error)) throw error;
-        const quarantine = await this.ensureQuarantine(this.reuseDir);
-        await fs.rename(this.reuseIndexPath, join(quarantine, this.uniqueQuarantineName('index.json'))).catch(() => undefined);
-        await this.writeReuseIndex({});
-        throw error;
-      }
-      const row = index[key];
-      if (!row) return undefined;
-      if (!(await this.reuseRowIsCommitted(row, current))) {
-        await this.reuseQuarantineUnsafe(index, key);
-        return undefined;
-      }
-      const blobPath = join(this.reuseBlobsDir, `${row.contentAddress}.blob`);
-      let bytes: string | undefined;
-      try {
-        await this.assertRegular(blobPath, 'reuse blob');
-        bytes = await this.readRegular(blobPath, 'reuse blob');
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      }
-      if (bytes === undefined || bytes !== row.bytes || digest(bytes) !== row.contentAddress) {
-        delete index[key]; await this.writeReuseIndex(index);
-        const quarantine = await this.ensureQuarantine(this.reuseDir);
-        await fs.rename(blobPath, join(quarantine, this.uniqueQuarantineName(`${row.contentAddress}.blob`))).catch(() => undefined);
-        return undefined;
-      }
-      return { ...row };
-    });
-  }
-
-  private async reuseQuarantineUnsafe(index: Record<string, ReuseRecord>, key: string): Promise<void> {
-    const row = index[key]; if (!row) return;
-    const quarantine = await this.ensureQuarantine(this.reuseDir);
-    await this.writeRegular(join(quarantine, this.uniqueQuarantineName(`${key}.row`)), canonicalString(row), 'quarantined reuse row', true).catch(() => undefined);
-    delete index[key]; await this.writeReuseIndex(index); await this.gcReuseUnsafe(index);
-  }
-
-  async reusePublish(record: ReuseRecord): Promise<void> {
-    this.validateReuseRecord(record);
-    await this.withFence(async () => {
-      await this.ensureDirectory(this.reuseDir, 'reuse directory');
-      await this.ensureDirectory(this.reuseBlobsDir, 'reuse blobs directory');
-      await this.ensureDirectory(this.reusePinsDir, 'reuse pins directory');
-      // Publication is valid only for the exact CURRENT generation/fence the
-      // staged row named.  This closes the delayed-old-writer window: a row
-      // staged against generation N cannot publish after N+1 wins.
-      const current = await this.readCurrent();
-      const committed = current && current.generation === record.generation && current.writerFence === record.writerFence
-        ? await this.generationFence(record.generation)
-        : undefined;
-      if (!current || !committed || committed.writerFence !== record.writerFence || committed.runId !== record.runId || committed.authorityEpoch !== record.authorityEpoch) {
-        const quarantine = await this.ensureQuarantine(this.reuseDir);
-        await this.writeRegular(join(quarantine, this.uniqueQuarantineName(`${record.key}.stale`)), canonicalString(record), 'quarantined stale reuse row', true).catch(() => undefined);
-        await fs.rename(join(this.reuseBlobsDir, `${record.contentAddress}.blob`), join(quarantine, this.uniqueQuarantineName(`${record.contentAddress}.blob`))).catch(() => undefined);
-        await fs.unlink(join(this.reusePinsDir, `${record.key}-${record.contentAddress}.pin`)).catch(() => undefined);
-        throw new Error('reuse publication fence mismatch');
-      }
-      const index = await this.readReuseIndex(); const prior = index[record.key];
-      const pinPath = join(this.reusePinsDir, `${record.key}-${record.contentAddress}.pin`);
-      try {
-        await this.assertRegular(pinPath, 'reuse pin');
-        const staged = parseCanonical<ReuseRecord>(await this.readRegular(pinPath, 'reuse pin'));
-        this.validateReuseRecord(staged);
-        invariant(canonicalString(staged) === canonicalString(record), 'reuse staged pin proof mismatch');
-      } catch (error) {
-        throw new Error(`reuse staged pin is invalid: ${(error as Error).message}`);
-      }
-      if (prior && prior.contentAddress !== record.contentAddress) {
-        const quarantine = await this.ensureQuarantine(this.reuseDir);
-        // Deterministic conflict has no winner. Remove the prior index row
-        // before surfacing the conflict, and quarantine both materials.
-        delete index[record.key]; await this.writeReuseIndex(index);
-        await this.writeRegular(join(quarantine, this.uniqueQuarantineName(`${record.key}.prior.conflict`)), canonicalString(prior), 'quarantined prior reuse row', true).catch(() => undefined);
-        await this.writeRegular(join(quarantine, this.uniqueQuarantineName(`${record.key}.conflict`)), canonicalString(record), 'quarantined conflicting reuse row', true);
-        await fs.rename(join(this.reuseBlobsDir, `${record.contentAddress}.blob`), join(quarantine, this.uniqueQuarantineName(`${record.contentAddress}.blob`))).catch(() => undefined);
-        await fs.rename(join(this.reuseBlobsDir, `${prior.contentAddress}.blob`), join(quarantine, this.uniqueQuarantineName(`${prior.contentAddress}.blob`))).catch(() => undefined);
-        await fs.unlink(join(this.reusePinsDir, `${record.key}-${record.contentAddress}.pin`)).catch(() => undefined);
-        await fs.unlink(join(this.reusePinsDir, `${prior.key}-${prior.contentAddress}.pin`)).catch(() => undefined);
-        await this.fsyncDir(this.reusePinsDir); await this.gcReuseUnsafe(index);
-        throw new Error('reuse key has conflicting content');
-      }
-      const blobPath = join(this.reuseBlobsDir, `${record.contentAddress}.blob`);
-      await this.assertRegular(blobPath, 'reuse blob');
-      const bytes = await this.readRegular(blobPath, 'reuse blob'); invariant(bytes === record.bytes && digest(bytes) === record.contentAddress, 'reuse staged blob is invalid');
-      index[record.key] = { ...record }; await this.writeReuseIndex(index);
-      await fs.unlink(pinPath).catch(() => undefined); await this.fsyncDir(this.reusePinsDir);
-      await this.gcReuseUnsafe(index);
-    });
-  }
-
   private publicationLeasePath(leaseId: string): string { return join(this.publicationLeasesDir, `${digest(leaseId)}.json`); }
   private validatePublicationLease(lease: PublicationLease): void {
     if (!lease || !/^[A-Za-z0-9._:-]{1,200}$/.test(lease.leaseId) || !Array.isArray(lease.refs) || lease.refs.length === 0 || lease.refs.some((item) => !refIsValid(item)) || !Number.isSafeInteger(lease.expiresAt) || lease.expiresAt < 0 || !['ACTIVE', 'PROMOTED', 'EXPIRED'].includes(lease.status)) throw new Error('publication lease is malformed');
@@ -3562,24 +3151,7 @@ export class FileArtifactStore implements ArtifactStore {
     });
   }
 
-  async reuseQuarantine(key: string): Promise<void> {
-    if (!SHA256.test(key)) return;
-    await this.withFence(async () => {
-      await this.ensureDirectory(this.reuseDir, 'reuse directory');
-      const index = await this.readReuseIndex(); if (!index[key]) return;
-      const quarantine = await this.ensureQuarantine(this.reuseDir);
-      await this.writeRegular(join(quarantine, this.uniqueQuarantineName(`${key}.row`)), canonicalString(index[key]), 'quarantined reuse row', true);
-      delete index[key]; await this.writeReuseIndex(index);
-    });
-  }
 
-  async reuseClear(): Promise<void> {
-    await this.withFence(async () => {
-      try { await this.assertDirectory(this.reuseDir, 'reuse directory'); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
-      await fs.rm(this.reuseDir, { recursive: true, force: true });
-      await this.ensureDirectory(this.reuseDir, 'reuse directory'); await this.ensureDirectory(this.reuseBlobsDir, 'reuse blobs directory'); await this.ensureDirectory(this.reusePinsDir, 'reuse pins directory'); await this.fsyncDir(this.reuseDir);
-    });
-  }
 }
 
 export function storeForRoot(rootDir?: string, expectedRootIdentity?: FilesystemIdentity, options?: ArtifactStoreOptions): ArtifactStore { return rootDir ? new FileArtifactStore(rootDir, expectedRootIdentity, options) : new MemoryArtifactStore(options); }

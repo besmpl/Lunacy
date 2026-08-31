@@ -76,10 +76,10 @@ owner are validated before the one-shot token is consumed, and ambiguous
 topology falls back to the legacy reset. Finalized prior evidence remains
 immutable.
 
-`KernelOptions.acceleration` is composition-time configuration only. Graph,
-context, reuse, metrics, cell, and snapshot are private optional accelerators;
-there is no public graph/cache lifecycle. All modes preserve the direct
-validator/reducer/store path. The default for every accelerator is `OFF`.
+`KernelOptions.acceleration` is composition-time configuration only. Graph and
+metrics are private optional accelerators; there is no public graph lifecycle.
+All modes preserve the direct validator/reducer/store path. The default graph
+accelerator mode is `OFF`.
 
 The package-root `KernelOptions` intentionally has no journal-format switch.
 Long-lived local runs may select the private `FileArtifactStore` format through

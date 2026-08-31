@@ -3,7 +3,6 @@ import { claim, commandInCurrentFrame, unknown, type DriverReceipt } from './out
 import { ProseDriver, type EffectDriver } from './driver.js';
 import { appendJournal, commandForToken, reduce, refreshAdmission, type PreparedAdmission } from './reducer.js';
 import { normalizeDriverResult, storeLinearizedDispatch, type ArtifactStore, type StoreLinearizedDispatchRequest } from './store.js';
-import type { PreparedContext } from './compiler.js';
 import type { AdvanceInput, CompactSnapshot, Event, EventIdentity, MachineState, OutboxCommand, OutboxState, Plan, Ref, Yield } from './model.js';
 
 export type CurrentCommandSelection = Readonly<{ command: OutboxCommand; authorityAnchor?: Ref }>;
@@ -75,10 +74,10 @@ export type DispatchCoordinatorOptions = {
   onYield?: (value: Yield) => void | Promise<void>;
 };
 
-type CommitEventOnly = (generation: number, current: MachineState, input: AdvanceInput, key: string, plan: Plan, capacity: number, y: Yield, preparedContext?: PreparedContext) => Promise<Yield>;
-type CommitYield = (generation: number, state: MachineState, key: string, identity: EventIdentity, y: Yield, preparedContext?: PreparedContext, preparedAdmission?: PreparedAdmission) => Promise<Yield>;
+type CommitEventOnly = (generation: number, current: MachineState, input: AdvanceInput, key: string, plan: Plan, capacity: number, y: Yield) => Promise<Yield>;
+type CommitYield = (generation: number, state: MachineState, key: string, identity: EventIdentity, y: Yield, preparedAdmission?: PreparedAdmission) => Promise<Yield>;
 type CommitDispatcherOutcome = (token: string, expectedDigest: string, plan: Plan, capacity: number, receipt?: DriverReceipt, expectedLeaseId?: string, receiptLeaseId?: string, teardownEvidence?: Ref) => Promise<Yield | undefined>;
-type RetireManagedAttempt = (generation: number, current: MachineState, token: string, input: AdvanceInput, plan: Plan, capacity: number, status?: 'TIMED_OUT' | 'CANCELLED' | 'FAILED', preparedContext?: PreparedContext) => Promise<Yield>;
+type RetireManagedAttempt = (generation: number, current: MachineState, token: string, input: AdvanceInput, plan: Plan, capacity: number, status?: 'TIMED_OUT' | 'CANCELLED' | 'FAILED') => Promise<Yield>;
 type FinalizeImmediateYield = (key: string, identity: EventIdentity, value: Yield) => Promise<Yield | undefined>;
 type CommitClaim = (generation: number, claimed: MachineState, claimedCommand: OutboxCommand, key: string, input: AdvanceInput, waiting: Yield) => Promise<{ generation: number; authority: StoreLinearizedDispatchRequest['authority'] } | { replay: Yield }>;
 
@@ -107,7 +106,6 @@ export type DispatchResumeArgs = {
   plan: Plan;
   admissionOk: boolean;
   maxInFlight: number;
-  preparedContext?: PreparedContext;
 };
 
 /**
@@ -132,12 +130,12 @@ export class DispatchCoordinator {
   get dispatchOptions(): DispatchCoordinatorOptions { return this.options; }
 
   async resume(args: DispatchResumeArgs): Promise<Yield> {
-    const { generation, current, input, key, plan, admissionOk, maxInFlight, preparedContext } = args;
+    const { generation, current, input, key, plan, admissionOk, maxInFlight } = args;
     // Historical rows remain durable recovery evidence but are inert after an
     // epoch/frame transition. Select only the exact current frame so a retired
     // UNKNOWN attempt cannot shadow its fresh reservation.
     const command = selectEligibleCommand(current, ['PENDING', 'CLAIMED', 'UNKNOWN'])?.command;
-    if (!command) return this.host.commitYield(generation, current, key, input.identity, this.host.asYield(current, { outcome: 'WAITING' }), preparedContext);
+    if (!command) return this.host.commitYield(generation, current, key, input.identity, this.host.asYield(current, { outcome: 'WAITING' }));
     // The deadline starts when this RESUME claims ownership, not after a slow
     // durable claim commit.  The post-CAS launch fence rechecks it.
     const dispatchDeadline = Date.now() + this.options.timeoutMs;
@@ -152,16 +150,16 @@ export class DispatchCoordinator {
     if (command.state === 'UNKNOWN') {
       if (!admissionOk) {
         const reduced = reduce(current, plan, input.identity, input.event, maxInFlight, admissionOk, undefined, this.host.segmentedJournalEnabled());
-        return this.host.commitYield(generation, reduced.state, key, input.identity, this.host.asYield(reduced.state, reduced), preparedContext);
+        return this.host.commitYield(generation, reduced.state, key, input.identity, this.host.asYield(reduced.state, reduced));
       }
       if (!this.host.driver?.observe || this.options.signal?.aborted) {
         if (current.schema === 2 && current.managed && this.host.retireManagedAttempt) {
-          return this.host.retireManagedAttempt(generation, current, command.launchToken, input, plan, maxInFlight, this.options.signal?.aborted ? 'CANCELLED' : 'TIMED_OUT', preparedContext);
+          return this.host.retireManagedAttempt(generation, current, command.launchToken, input, plan, maxInFlight, this.options.signal?.aborted ? 'CANCELLED' : 'TIMED_OUT');
         }
         const y: Yield = { kind: 'BLOCKED', code: 'UnknownDispatch', reason: 'UnknownDispatch', retryable: false, launchToken: command.launchToken, snapshot: this.host.snapshot(current) };
-        return this.host.commitEventOnly(generation, current, input, key, plan, maxInFlight, y, preparedContext);
+        return this.host.commitEventOnly(generation, current, input, key, plan, maxInFlight, y);
       }
-      const waiting = await this.host.commitEventOnly(generation, current, input, key, plan, maxInFlight, { kind: 'BLOCKED', code: 'UnknownDispatch', reason: 'UnknownDispatch', retryable: false, launchToken: command.launchToken, snapshot: this.host.snapshot(current) }, preparedContext);
+      const waiting = await this.host.commitEventOnly(generation, current, input, key, plan, maxInFlight, { kind: 'BLOCKED', code: 'UnknownDispatch', reason: 'UnknownDispatch', retryable: false, launchToken: command.launchToken, snapshot: this.host.snapshot(current) });
       const committed = await this.host.store.load();
       const selection = selectCurrentTokenCommand(committed.state, ['UNKNOWN'], command);
       const committedCommand = selection?.command;
@@ -185,12 +183,12 @@ export class DispatchCoordinator {
         }
         if (!managedTeardown) {
           const y: Yield = { kind: 'BLOCKED', code: 'UnknownDispatch', reason: 'managed provider teardown is unproven', retryable: false, launchToken: command.launchToken, snapshot: this.host.snapshot(current) };
-          return this.host.commitEventOnly(generation, current, input, key, plan, maxInFlight, y, preparedContext);
+          return this.host.commitEventOnly(generation, current, input, key, plan, maxInFlight, y);
         }
         try { this.host.validateRef(managedTeardown); } catch { managedTeardown = undefined; }
         if (!managedTeardown || managedTeardown.scope !== 'outbox/teardown') {
           const y: Yield = { kind: 'BLOCKED', code: 'UnknownDispatch', reason: 'managed provider teardown is invalid', retryable: false, launchToken: command.launchToken, snapshot: this.host.snapshot(current) };
-          return this.host.commitEventOnly(generation, current, input, key, plan, maxInFlight, y, preparedContext);
+          return this.host.commitEventOnly(generation, current, input, key, plan, maxInFlight, y);
         }
       }
       // No in-process owner exists (for example after restart). Recovery is
@@ -220,7 +218,7 @@ export class DispatchCoordinator {
       }
       refreshAdmission(uncertain, plan, maxInFlight);
       const y: Yield = { kind: 'BLOCKED', code: 'UnknownDispatch', reason: 'UnknownDispatch', retryable: false, launchToken: command.launchToken, snapshot: this.host.snapshot(uncertain) };
-      const waiting = await this.host.commitYield(generation, uncertain, key, input.identity, y, preparedContext);
+      const waiting = await this.host.commitYield(generation, uncertain, key, input.identity, y);
       const committed = await this.host.store.load();
       const recovered = selectCurrentTokenCommand(committed.state, ['UNKNOWN'], command);
       const committedCommand = recovered?.command;
@@ -235,15 +233,15 @@ export class DispatchCoordinator {
     if (this.options.signal?.aborted || !admissionOk) {
       if (!admissionOk) {
         const reduced = reduce(current, plan, input.identity, input.event, maxInFlight, admissionOk, undefined, this.host.segmentedJournalEnabled());
-        return this.host.commitYield(generation, reduced.state, key, input.identity, this.host.asYield(reduced.state, reduced), preparedContext);
+        return this.host.commitYield(generation, reduced.state, key, input.identity, this.host.asYield(reduced.state, reduced));
       }
-      return this.host.commitEventOnly(generation, current, input, key, plan, maxInFlight, this.host.asYield(current, { outcome: 'WAITING' }), preparedContext);
+      return this.host.commitEventOnly(generation, current, input, key, plan, maxInFlight, this.host.asYield(current, { outcome: 'WAITING' }));
     }
     if (!this.host.driver) {
       const request = new ProseDriver().request(command);
       const requestRef: Ref = { id: `human-receipt:${command.launchToken}`, scope: 'outbox', digest: digest(request), bytes: canonicalString(request) };
       const y: Yield = { kind: 'BLOCKED', code: 'HumanReceiptRequired', reason: 'ProseDriver cannot prove launch-token dispatch; submit a receipt', receipt: requestRef, launchToken: command.launchToken, retryable: false, snapshot: this.host.snapshot(current) };
-      return this.host.commitEventOnly(generation, current, input, key, plan, maxInFlight, y, preparedContext);
+      return this.host.commitEventOnly(generation, current, input, key, plan, maxInFlight, y);
     }
 
     const claimed = JSON.parse(JSON.stringify(current)) as MachineState;

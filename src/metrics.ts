@@ -8,15 +8,6 @@ export type AccelerationCounter =
   | 'graphFallback'
   | 'graphCorrupt'
   | 'graphCandidates'
-  | 'contextPrepare'
-  | 'contextHit'
-  | 'contextMiss'
-  | 'contextBypass'
-  | 'contextCorrupt'
-  | 'reuseHit'
-  | 'reuseMiss'
-  | 'reuseBypass'
-  | 'reuseQuarantine'
   | 'managedDirectProposals'
   | 'managedFocusProposals'
   | 'managedExploreProposals'
@@ -46,8 +37,6 @@ export type MetricsSnapshot = Readonly<Record<AccelerationCounter, number>>;
 
 const COUNTERS: readonly AccelerationCounter[] = [
   'graphPrepare', 'graphFallback', 'graphCorrupt', 'graphCandidates',
-  'contextPrepare', 'contextHit', 'contextMiss', 'contextBypass', 'contextCorrupt',
-  'reuseHit', 'reuseMiss', 'reuseBypass', 'reuseQuarantine',
   'managedDirectProposals', 'managedFocusProposals', 'managedExploreProposals',
   'managedWavesAdmitted', 'managedWavesRefused', 'managedWavesKilled',
   'managedParentOverride', 'managedAllRejected', 'managedFallback', 'managedAuthorityEscape',
