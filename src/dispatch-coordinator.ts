@@ -205,9 +205,29 @@ export class DispatchCoordinator {
       const recovery: Event = { kind: 'OBSERVATION', category: 'RECOVERY', ref: evidence };
       appendJournal(uncertain, this.host.internalIdentity(uncertain, uncertainCommand, `dispatcher-recover:${command.launchToken}:${uncertain.revision + 1}`, recovery), recovery, this.host.segmentedJournalEnabled());
       appendJournal(uncertain, input.identity, input.event, this.host.segmentedJournalEnabled());
+      // A same-drive observer may immediately add the receipt row after this
+      // recovery commit.  Probe that third append before mutating CURRENT so a
+      // legacy journal with only the two recovery slots left refuses without
+      // stranding a newly-UNKNOWN command at the ceiling.
+      if (this.host.driver?.observe && !this.options.signal?.aborted) {
+        const probe = JSON.parse(JSON.stringify(uncertain)) as MachineState;
+        const probeCommand = commandForToken(probe, command.launchToken)!;
+        const probeReceipt: Event = {
+          kind: 'DISPATCH_RECEIPT',
+          ref: this.host.ref(`receipt-capacity:${command.launchToken}`, { launchToken: command.launchToken, commandDigest: command.commandDigest }, 'outbox'),
+        };
+        appendJournal(probe, this.host.internalIdentity(probe, probeCommand, `dispatcher-receipt-capacity:${command.launchToken}:${probe.revision + 1}`, probeReceipt), probeReceipt, this.host.segmentedJournalEnabled());
+      }
       refreshAdmission(uncertain, plan, maxInFlight);
       const y: Yield = { kind: 'BLOCKED', code: 'UnknownDispatch', reason: 'UnknownDispatch', retryable: false, launchToken: command.launchToken, snapshot: this.host.snapshot(uncertain) };
-      return this.host.commitYield(generation, uncertain, key, input.identity, y, preparedContext);
+      const waiting = await this.host.commitYield(generation, uncertain, key, input.identity, y, preparedContext);
+      const committed = await this.host.store.load();
+      const recovered = selectCurrentTokenCommand(committed.state, ['UNKNOWN'], command);
+      const committedCommand = recovered?.command;
+      if (!committedCommand || canonicalString(committedCommand) !== canonicalString(uncertainCommand) || this.options.signal?.aborted) return waiting;
+      const observed = this.launchObserve(committed.generation, committedCommand, plan, maxInFlight, key, input, recovered.authorityAnchor);
+      if (observed) return (await observed) ?? waiting;
+      return waiting;
     }
 
     // PENDING: cancellation before claim records no effect and leaves command
