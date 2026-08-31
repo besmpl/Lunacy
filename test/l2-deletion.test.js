@@ -44,6 +44,10 @@ test('L2 graph acceleration parity', async () => {
   assert.deepEqual(Object.keys(metrics.snapshot()).filter((name) => name.startsWith('graph')), []);
 });
 
+test('L2 source graph implementation is absent', async () => {
+  assert.equal(await absent(join(repo, 'src', 'graph.ts')), true);
+});
+
 test('L2 deployment inventory', async (t) => {
   const target = await mkdtemp(join(tmpdir(), 'lunacy-l2-deploy-'));
   t.after(() => rm(target, { recursive: true, force: true }));
