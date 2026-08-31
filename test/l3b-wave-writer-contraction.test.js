@@ -58,9 +58,11 @@ test('L3b six-key writer contraction', () => {
   assert.equal(archivedNineRef.bytes, originalBytes);
   assert.equal(archivedNineRef.digest, originalDigest);
 
-  const archivedMixed = structuredClone(archivedNine);
-  delete archivedMixed.limits.maxOutputTokens;
-  expectNormalized(validateWave, ref('archived-mixed', archivedMixed));
+  for (let mask = 1; mask < 8; mask += 1) {
+    const limits = { ...wave.limits };
+    legacy.forEach((key, index) => { if (mask & (1 << index)) limits[key] = archivedNine.limits[key]; });
+    expectNormalized(validateWave, ref(`archived-mixed-${mask}`, { ...wave, limits }));
+  }
 });
 
 test('L3b deployment inventory', async (t) => {
