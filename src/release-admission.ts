@@ -645,3 +645,11 @@ export async function discoverManagedRunRoots(parents: readonly string[]): Promi
 export function assertExactDiscoveredRoots(manifest: ReleaseManifest, discovered: readonly string[]): void {
   if (discovered.length !== manifest.runRoots.length || discovered.some((root, index) => root !== manifest.runRoots[index])) fail(`discovered run-root set differs from release manifest`);
 }
+
+/** Re-prove the manifest's closed discovery-parent/run-root census. */
+export async function verifyClosedReleaseRoots(manifestInput: ReleaseManifest): Promise<readonly string[]> {
+  const manifest = validateReleaseManifest(manifestInput);
+  const discovered = await discoverManagedRunRoots(manifest.discoveryParents);
+  assertExactDiscoveredRoots(manifest, discovered);
+  return discovered;
+}

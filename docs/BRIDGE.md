@@ -30,6 +30,31 @@ before publishing bridge metadata.
 The host declaration and event are snapshotted once at the boundary, so a
 mutable caller object cannot be read once for identity and again for effects.
 
+## Private pre-Plan resolver
+
+The installed verified bridge is the sole host adapter for adaptive Plan
+authorship:
+
+```sh
+"$NODE" runtime/bridge.mjs resolve-plan \
+  --input /tmp/request.json \
+  --deliberation-policy /tmp/deliberation-policy.json \
+  --rollout-policy /tmp/rollout-policy.json \
+  --run-dir /absolute/run/root --capability /tmp/capability.json \
+  --host-policy /tmp/deliberation-host-policy.json
+```
+
+The request contains exactly one typed `DIRECT`, `AUTO`, or `EXPLORE` variant authored by the trusted parent. The route does not parse prose or accept synthetic decision booleans. All input files are canonical, closed documents and selection runs exactly once. Direct returns its
+complete Plan without requiring or constructing the three managed-only inputs.
+Focus/Explore validate the exact authored Wave/Plan/capability/policies and
+invoke existing managed START in the same process.
+
+Current Explore additionally consumes a private invocation-local authorization
+bound to its intent Ref, authority digest, Wave digest, run/phase, and rollout
+policy digest. It is never written to disk, state, a manifest, or output. The
+retained `managedRollout.explicitExplore` boolean alone, stale requests, Report
+text, and diagnostics cannot authorize a new Explore admission.
+
 ## One-event command
 
 After `npm run build`, run the private CLI directly (or use the installed

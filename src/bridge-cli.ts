@@ -3,13 +3,23 @@
 import { readFile } from 'node:fs/promises';
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { canonicalString, parseCanonical } from './canonical.js';
+import { resolve } from 'node:path';
+import { canonicalString, digest, parseCanonical } from './canonical.js';
 import type { BeadsBridgeMode, BridgeMode, BridgeOptions, BridgeTransition } from './bridge.js';
 import type { BeadsAcknowledgement } from './beads.js';
 import type { EvidenceCopyPolicy } from './evidence-copy.js';
 import type { Event, Plan } from './model.js';
 import { drive, type TerminalEffectDriver } from './orchestration.js';
 import { lifecycle, type LifecycleCommand, type LifecycleResult } from './orchestration.js';
+import { composeKernelForBridge } from './composition.js';
+import { compileWavePlan, deliberationPolicyFromAsset, deriveTopology, resolveWaveSemanticClosure, validateWave, verifyWavePlan, type DeliberationWave } from './deliberation.js';
+import { verifyManagedCapability, verifyManagedRolloutPolicy, type ManagedCapability, type ManagedRolloutPolicy } from './managed-capability.js';
+import { attestCodexDeliberationHost, validateCodexDeliberationHostPolicy, type CodexDeliberationHostPolicy } from './codex-host-policy.js';
+import { mintExploreAuthorization } from './explore-authorization.js';
+import { ONE_SHOT_ROLLOUT_GENERATION_FLOOR } from './one-shot.js';
+import { validatePlan } from './validator.js';
+import { withBridgeOperationLock } from './bridge.js';
+import { parsePrePlanRequest, resolveTypedPrePlan } from './pre-plan-request.js';
 
 type Flags = {
   runDir?: string; runId?: string; mode?: BridgeMode; modeProvided: boolean; plan?: string; event?: string; eventId?: string; phaseId?: string; stepId?: string;
@@ -23,6 +33,9 @@ function usage(): string {
        lunacy-bridge drive --run-dir RUN --run-id ID --mode runtime --plan PLAN.json --policy POLICY.json [options]
        lunacy-bridge init|run|resume --run-dir RUN --run-id ID --mode runtime --plan PLAN.json [--policy POLICY.json]
        lunacy-bridge lifecycle --command init|run|resume --run-dir RUN --run-id ID --mode runtime --plan PLAN.json [options]
+
+Private pre-Plan resolver (trusted parent intent only; no prose parsing):
+       lunacy-bridge resolve-plan --input REQUEST.json [--deliberation-policy POLICY-ASSET.json --rollout-policy ROLLOUT.json --run-dir RUN --capability CAPABILITY.json --host-policy HOST_POLICY.json]
 
 Read-only dependency explanation:
        lunacy-bridge workfront --run-root RUN --run-id ID [--limit 16] [--focus STEP]
@@ -65,6 +78,107 @@ Options:
   --help                  Show this help
 
 All JSON files must be canonical. Use '-' for one JSON document from stdin.`;
+}
+
+type ResolvePlanFlags = {
+  input?: string;
+  deliberationPolicy?: string;
+  rolloutPolicy?: string;
+  capability?: string;
+  hostPolicy?: string;
+  runDir?: string;
+  help: boolean;
+};
+
+function parseResolvePlanArgs(argv: string[]): ResolvePlanFlags {
+  const flags: ResolvePlanFlags = { help: false };
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === '--help' || arg === '-h') { flags.help = true; continue; }
+    if (!arg.startsWith('--')) throw new Error(`unknown resolve-plan argument ${arg}`);
+    const value = argv[++index];
+    if (value === undefined || value.startsWith('--')) throw new Error(`${arg} requires a value`);
+    if (arg === '--input') flags.input = value;
+    else if (arg === '--deliberation-policy') flags.deliberationPolicy = value;
+    else if (arg === '--rollout-policy') flags.rolloutPolicy = value;
+    else if (arg === '--capability') flags.capability = value;
+    else if (arg === '--host-policy') flags.hostPolicy = value;
+    else if (arg === '--run-dir') flags.runDir = value;
+    else throw new Error(`unknown resolve-plan option ${arg}`);
+  }
+  return flags;
+}
+
+async function runResolvePlanCli(argv: string[]): Promise<number> {
+  const flags = parseResolvePlanArgs(argv);
+  if (flags.help) {
+    await writeOutput('Usage: lunacy-bridge resolve-plan --input REQUEST.json [--deliberation-policy POLICY.json --rollout-policy ROLLOUT.json --run-dir RUN --capability CAPABILITY.json --host-policy HOST_POLICY.json]\nREQUEST is one exact private DIRECT | AUTO | EXPLORE document. Managed files are required only after AUTO selects Focus or EXPLORE is explicit.\n');
+    return 0;
+  }
+  if (!flags.input) throw new Error('--input is required');
+  if ([flags.input, flags.deliberationPolicy, flags.rolloutPolicy, flags.capability, flags.hostPolicy].filter((path) => path === '-').length > 1) throw new Error("'-' may name only one resolve-plan JSON document");
+
+  // Route selection happens before any managed-policy, host, capability,
+  // rollout, artifact-store, or kernel preparation.
+  const request = parsePrePlanRequest(await readCanonical(flags.input));
+  const earliestAuto = request.mode === 'AUTO' ? request.frontier.find((item) => item.status === 'UNSETTLED') : undefined;
+  const managedSelected = request.mode === 'EXPLORE' || earliestAuto?.discriminator !== undefined;
+  if (!managedSelected) {
+    const resolution = resolveTypedPrePlan(request);
+    await writeOutput(`${canonicalString(resolution)}\n`);
+    return 0;
+  }
+  if (!flags.deliberationPolicy || !flags.rolloutPolicy || !flags.runDir || !flags.capability || !flags.hostPolicy) throw new Error('--deliberation-policy, --rollout-policy, --run-dir, --capability, and --host-policy are required for Focus/Explore');
+  if (!flags.runDir.startsWith('/') || resolve(flags.runDir) !== flags.runDir) throw new Error('--run-dir must be absolute and normalized');
+  const result = await withBridgeOperationLock(flags.runDir, async (lockedRootIdentity) => {
+    const input = request.authorship;
+    const policyValidation = deliberationPolicyFromAsset(await readCanonical(flags.deliberationPolicy!), input.policyVersion);
+    if (!policyValidation.ok) throw new Error(`deliberation policy asset is invalid: ${policyValidation.path} ${policyValidation.message}`.trim());
+    const deliberationPolicy = policyValidation.value;
+    const rolloutPolicyValue = await readCanonical(flags.rolloutPolicy!);
+    if (!verifyManagedRolloutPolicy(rolloutPolicyValue)) throw new Error('rollout policy must be the exact closed current document');
+    const rolloutPolicy = rolloutPolicyValue as ManagedRolloutPolicy;
+    if (rolloutPolicy.mode === 'disabled') throw new Error('managed rollout is disabled');
+    if (rolloutPolicy.generation < ONE_SHOT_ROLLOUT_GENERATION_FLOOR) throw new Error('new managed admission requires the current rollout generation floor');
+    const capabilityValue = await readCanonical(flags.capability!);
+    if (!verifyManagedCapability(capabilityValue)) throw new Error('managed capability must be the exact closed document');
+    const capability = capabilityValue as ManagedCapability;
+    const hostPolicyValue = await readCanonical(flags.hostPolicy!);
+    let hostPolicy: CodexDeliberationHostPolicy;
+    try { hostPolicy = validateCodexDeliberationHostPolicy(hostPolicyValue as CodexDeliberationHostPolicy); }
+    catch (error) { throw new Error(`managed deliberation host policy is invalid: ${(error as Error).message}`); }
+
+    const resolution = resolveTypedPrePlan(request, deliberationPolicy);
+    if (resolution.kind !== 'DELIBERATION_REQUIRED') return resolution;
+    if (typeof resolution.wave.bytes !== 'string') throw new Error('authored Wave bytes are unavailable');
+    const wave = parseCanonical<DeliberationWave>(resolution.wave.bytes);
+    const closure = resolveWaveSemanticClosure(wave);
+    if (!closure.ok) throw new Error(`authored Wave semantic closure is invalid: ${closure.path} ${closure.message}`.trim());
+    const checkedWave = validateWave(wave, { runId: input.runId, phaseId: input.phaseId, policy: deliberationPolicy, committedEvidence: closure.value.committedEvidence, reachableConstraints: closure.value.reachableConstraints });
+    if (!checkedWave.ok) throw new Error(`authored Wave is invalid: ${checkedWave.path} ${checkedWave.message}`.trim());
+    const compiled = compileWavePlan(resolution.wave, checkedWave.value);
+    if (!compiled.ok) throw new Error(`authored Wave Plan is invalid: ${compiled.path} ${compiled.message}`.trim());
+    const plan = validatePlan(compiled.value).plan;
+    const verifiedPlan = verifyWavePlan(plan, deriveTopology(resolution.wave, checkedWave.value));
+    if (!verifiedPlan.ok) throw new Error(`authored Wave topology is invalid: ${verifiedPlan.path} ${verifiedPlan.message}`.trim());
+    // Host attestation and complete cohort preparation precede durable START.
+    await attestCodexDeliberationHost(hostPolicy);
+    const exploreAuthorization = resolution.gear === 'EXPLORE' ? mintExploreAuthorization({
+      intent: input.intent, authorityDigest: input.authorityDigest, waveDigest: resolution.wave.digest,
+      runId: input.runId, phaseId: input.phaseId, rolloutPolicyDigest: rolloutPolicy.digest,
+    }) : undefined;
+    const kernel = composeKernelForBridge({
+      plan, rootDir: flags.runDir!, workspace: hostPolicy.targetWorkspace, maxInFlight: resolution.gear === 'EXPLORE' ? 5 : 2,
+      managedCapability: capability,
+      managedRollout: { policy: rolloutPolicy, wave: resolution.wave, deliberationPolicy, decisionUnsettled: true, ...(resolution.gear === 'EXPLORE' ? { explicitExplore: true } : {}) },
+      managedDeliberationPolicy: hostPolicy, ...(exploreAuthorization === undefined ? {} : { exploreAuthorization }),
+    }, lockedRootIdentity);
+    const event: Event = { kind: 'START', intentRef: { id: 'plan', digest: digest(plan), bytes: canonicalString(plan) } };
+    const start = await kernel.advance({ runId: input.runId, event, identity: { runId: input.runId, phaseId: input.phaseId, stepId: 'run', attemptEpoch: 0, authorityEpoch: 0, barrierEpoch: 0, eventId: 'resolve-plan:start', payloadDigest: digest(event) } });
+    return { ...resolution, start };
+  });
+  await writeOutput(`${canonicalString(result)}\n`);
+  return 0;
 }
 
 type LifecycleFlags = { command: LifecycleCommand; runDir?: string; runId?: string; mode?: BridgeMode; modeProvided: boolean; plan?: string; policy?: string; state?: string; steps?: string; maxTransitions?: number; help: boolean };
@@ -256,6 +370,7 @@ async function runRecoveryCli(argv: string[]): Promise<number> {
 }
 
 export async function runBridgeCli(argv = process.argv.slice(2), injectedDriver?: TerminalEffectDriver, externalSignal?: AbortSignal): Promise<number> {
+  if (argv[0] === 'resolve-plan') return runResolvePlanCli(argv.slice(1));
   if (argv[0] === 'drive') return runDriveCli(argv.slice(1), injectedDriver, externalSignal);
   if (argv[0] === 'lifecycle') return runLifecycleCli(argv.slice(1), injectedDriver, externalSignal);
   if (argv[0] === 'init' || argv[0] === 'run' || argv[0] === 'resume') return runLifecycleCli(argv.slice(1), injectedDriver, externalSignal, argv[0]);

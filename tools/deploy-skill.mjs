@@ -413,7 +413,7 @@ const managedRootFiles = new Set([
   'runtime/retention-platform-helpers.json',
   'runtime/retention-policy.json',
 ]);
-const managedDirectories = new Set(['runtime/dist', 'runtime/schemas', 'runtime/tools']);
+const managedDirectories = new Set(['runtime/assets', 'runtime/assets/deliberation-policy', 'runtime/assets/deliberation-policy-compatibility', 'runtime/dist', 'runtime/schemas', 'runtime/tools']);
 function isDeploymentOwnedPath(path) {
   if (managedRootFiles.has(path)) return true;
   for (const directory of managedDirectories) if (path === directory || path.startsWith(`${directory}/`)) return true;
@@ -1113,7 +1113,7 @@ async function buildManagedStage(target, payloadFiles, manifestBytes, expectedIn
   }
 }
 
-async function publishManagedTree(target, payloadFiles, manifestBytes, expectedInventory, preservedFiles, owner = { pid: process.pid, id: randomUUID() }, expectedPrevious = undefined) {
+async function publishManagedTree(target, payloadFiles, manifestBytes, expectedInventory, preservedFiles, owner = { pid: process.pid, id: randomUUID() }, expectedPrevious = undefined, beforePublication = undefined) {
   const runtimeTarget = join(target, 'runtime');
   const transactionId = randomUUID();
   const fullInventory = [...expectedInventory, ...preservedFiles.map((file) => ({ path: file.path, digest: file.digest }))].sort((a, b) => stableCompare(a.path, b.path));
@@ -1164,12 +1164,13 @@ async function publishManagedTree(target, payloadFiles, manifestBytes, expectedI
       if (!currentRuntime || !sameStatIdentity(currentRuntime, existingRuntimeIdentity)) throw new Error('managed runtime changed before publication');
       if (expectedPrevious) await verifyManagedTree(runtimeTarget, expectedPrevious.inventory, 'previous exact managed tree before publication', expectedPrevious.aggregate);
       await assertPreservedRuntimeFence(runtimeTarget, expectedInventory, preservedFiles);
+      if (beforePublication) await beforePublication();
       await fs.rename(runtimeTarget, transactionPath(target, backupName));
       await syncParent(target);
       transactionCrashRequested('old-tree-renamed');
       transaction.phase = 'old-moved';
       await writeTransaction(target, transaction);
-    }
+    } else if (beforePublication) await beforePublication();
     if (existingRuntime) transactionCrashRequested('marker-old-moved');
     await fs.rename(stage.stagePath, runtimeTarget);
     await syncParent(target);
@@ -1485,7 +1486,7 @@ function makeWrapper(expectedDigest, expectedFiles, expectedRuntimeVersion, expe
   ].join('\n');
 }
 
-async function executeOperation({ target, check, restore, exactLegacyDeploy, payload, inventory, aggregate, candidatePayload, candidateInventory, candidateAggregate, exactLegacyManifest, exactLegacyBundles, retentionAdmission, retentionAbandonment, retentionCensus }, targetLock) {
+async function executeOperation({ target, check, restore, exactLegacyDeploy, payload, inventory, aggregate, candidatePayload, candidateInventory, candidateAggregate, exactLegacyManifest, exactLegacyBundles, retentionAdmission, retentionAbandonment, retentionCensus, releaseGenerationCensus, releaseGenerationFence }, targetLock) {
   // Complete any durable transaction left by a previous crash before taking
   // a new source snapshot.  Recovery touches only our marker/stage/backup
   // names and preserves every non-runtime skill-root path.
@@ -1500,9 +1501,9 @@ async function executeOperation({ target, check, restore, exactLegacyDeploy, pay
     const runtimeTarget = join(target, 'runtime');
     const current = await verifyManagedTree(runtimeTarget, installed.expectedInventory, 'installed exact 0.2.12 tree', installed.identity.inventoryAggregate);
     if (current.aggregate !== installed.identity.inventoryAggregate) throw new Error('installed exact 0.2.12 aggregate drift');
-    const verified = await publishManagedTree(target, candidate.payloadFiles, candidate.manifestBytes, candidate.expectedInventory, [], targetLock.owner, { inventory: installed.expectedInventory, aggregate: installed.identity.inventoryAggregate });
+    const verified = await publishManagedTree(target, candidate.payloadFiles, candidate.manifestBytes, candidate.expectedInventory, [], targetLock.owner, { inventory: installed.expectedInventory, aggregate: installed.identity.inventoryAggregate }, releaseGenerationFence);
     if (verified.aggregate !== candidate.identity.inventoryAggregate) throw new Error('published candidate aggregate drift');
-    console.log(JSON.stringify({ status: 'deployed-exact-predecessor', target, installedDeployment: installed.identity, candidateDeployment: candidate.identity, managedFiles: verified.files, managedDirectories: verified.directories, managedAggregate: verified.aggregate }));
+    console.log(JSON.stringify({ status: 'deployed-exact-predecessor', target, installedDeployment: installed.identity, candidateDeployment: candidate.identity, managedFiles: verified.files, managedDirectories: verified.directories, managedAggregate: verified.aggregate, ...(releaseGenerationCensus ? { releaseGenerationCensusDigest: releaseGenerationCensus.digest, oneShotRolloutGenerationFloor: releaseGenerationCensus.candidateFloor } : {}) }));
     return;
   }
   if (restore) {
@@ -1532,8 +1533,11 @@ async function executeOperation({ target, check, restore, exactLegacyDeploy, pay
   // managed bridge launcher must carry its exact compiled modules so the
   // installed `inspect-recovery` route is a real, verifiable deployment.
   const distFiles = await collect(distRoot);
+  const policyAssetFiles = await collect(join(sourceRoot, 'assets', 'deliberation-policy'));
   const sourceFiles = [
     ...distFiles.map((item) => ({ source: item.source, relative: `runtime/dist/${item.relative}` })),
+    ...policyAssetFiles.map((item) => ({ source: item.source, relative: `runtime/assets/deliberation-policy/${item.relative}` })),
+    { source: join(sourceRoot, 'assets', 'deliberation-policy-compatibility', 'map.json'), relative: 'runtime/assets/deliberation-policy-compatibility/map.json' },
     { source: packagePath, relative: 'runtime/package.json' },
     { source: join(sourceRoot, 'docs', 'BRIDGE.md'), relative: 'runtime/BRIDGE.md' },
     { source: join(sourceRoot, 'docs', 'BEADS.md'), relative: 'runtime/BEADS.md' },
@@ -1614,6 +1618,12 @@ Use "$NODE" runtime/bridge.mjs drive --help for the private event-driven Codex
 drive route.  The managed runtime also carries the exact closed Codex result,
 launch-intent, launch, and terminal schemas plus the capability probe under runtime/schemas/
 and runtime/tools/; all are covered by DEPLOYMENT.json.
+Use "$NODE" runtime/bridge.mjs resolve-plan --help for the trusted private
+pre-Plan AUTO/DIRECT/EXPLORE resolver. It accepts canonical structured inputs
+and exact policy files only; it never parses free-form user text. Direct has no
+managed inputs, while Focus/Explore validate and enter managed START in that
+same verified bridge process. Explore authority is invocation-local and is not
+written to the runtime tree or run state.
 Use "$NODE" runtime/bridge.mjs workfront --help for a read-only dependency capsule.
 Use "$NODE" runtime/bridge.mjs inbox --help for explicitly selected,
 digest-bound decision entries; submit-decision and promote-phase remain
@@ -1644,8 +1654,8 @@ or --mode markdown explicitly for each run.
     console.log(JSON.stringify({ status: 'current', target, sourceDigest, managedFiles: verified.files, managedDirectories: verified.directories, managedAggregate, retentionCensusDigest: retentionCensus.digest, retentionStateSchemas: retentionCensus.stateSchemas }));
     return;
   }
-  const verified = await publishManagedTree(target, payloadFiles, manifestBytes, expectedInventory, preservedFiles, targetLock.owner);
-  console.log(JSON.stringify({ status: 'deployed', target, sourceDigest, files: sourceRecords.length, managedFiles: verified.files, managedDirectories: verified.directories, managedAggregate, retentionCensusDigest: retentionCensus.digest, retentionStateSchemas: retentionCensus.stateSchemas }));
+  const verified = await publishManagedTree(target, payloadFiles, manifestBytes, expectedInventory, preservedFiles, targetLock.owner, undefined, releaseGenerationFence);
+  console.log(JSON.stringify({ status: 'deployed', target, sourceDigest, files: sourceRecords.length, managedFiles: verified.files, managedDirectories: verified.directories, managedAggregate, retentionCensusDigest: retentionCensus.digest, retentionStateSchemas: retentionCensus.stateSchemas, ...(releaseGenerationCensus ? { releaseGenerationCensusDigest: releaseGenerationCensus.digest, oneShotRolloutGenerationFloor: releaseGenerationCensus.candidateFloor } : {}) }));
 }
 
 async function readProductionSnapshot(path, ownership) {
@@ -1691,9 +1701,9 @@ async function executeMain(args) {
   const [admission, releaseOperation, quiescence] = await Promise.all([
     import('../dist/release-admission.js'), import('../dist/release-operation.js'), import('../dist/release-quiescence.js'),
   ]);
-  const { readReleaseManifest, releaseOwnerIsLive, currentReleaseOwner } = admission;
+  const { readReleaseManifest, releaseOwnerIsLive, currentReleaseOwner, verifyClosedReleaseRoots } = admission;
   const { withReleaseExclusion, createReleaseOperationEnvelope, readReleaseOperationEnvelope, transitionReleaseOperationEnvelope, writeReleaseOperationEnvelope } = releaseOperation;
-  const { verifyReleaseQuiescence, verifyExactLegacyDeployQuiescence } = quiescence;
+  const { verifyReleaseQuiescence, verifyExactLegacyDeployQuiescence, verifyReleaseGenerationCensus } = quiescence;
   const release = await readReleaseManifest(args.releaseManifest);
   const expectedOperation = args.exactLegacyDeploy ? 'deploy-exact-0.2.12' : args.restore ? 'restore' : args.check ? 'check' : 'deploy';
   if (release.manifest.installedTarget !== args.target || release.manifest.operation !== expectedOperation) throw new Error('release manifest target/operation differs from invocation');
@@ -1778,8 +1788,29 @@ async function executeMain(args) {
           targetLock: { path: targetLock.path, bytes: targetLock.bytes },
         },
       };
-      if (args.exactLegacyDeploy) await verifyExactLegacyDeployQuiescence(quiescenceInput);
-      else await verifyReleaseQuiescence(quiescenceInput);
+      const quiescenceReport = args.exactLegacyDeploy
+        ? await verifyExactLegacyDeployQuiescence(quiescenceInput)
+        : await verifyReleaseQuiescence(quiescenceInput);
+      let releaseGenerationCensus;
+      let releaseGenerationFence;
+      if (expectedOperation === 'deploy' || expectedOperation === 'deploy-exact-0.2.12') {
+        const { ONE_SHOT_ROLLOUT_GENERATION_FLOOR } = await import('../dist/one-shot.js');
+        if (ONE_SHOT_ROLLOUT_GENERATION_FLOOR !== 22) throw new Error('built one-shot rollout generation floor differs from release floor 22');
+        await verifyClosedReleaseRoots(release.manifest);
+        const censusInput = {
+          installedTarget: args.target,
+          runRoots: release.manifest.runRoots,
+          candidateFloor: ONE_SHOT_ROLLOUT_GENERATION_FLOOR,
+          quiescence: quiescenceReport,
+          releaseOwnership: quiescenceInput.releaseOwnership,
+        };
+        releaseGenerationCensus = await verifyReleaseGenerationCensus(censusInput);
+        releaseGenerationFence = async () => {
+          await verifyClosedReleaseRoots(release.manifest);
+          const repeated = await verifyReleaseGenerationCensus(censusInput);
+          if (canonical(repeated) !== canonical(releaseGenerationCensus)) throw new Error('supported-root generation census changed before candidate publication');
+        };
+      }
       if (outer) {
         const currentTarget = await inspectTrustedPath(args.target, 'release installed target', { surface: true, kind: 'directory' });
         if (!currentTarget || currentTarget.identity.dev !== outer.envelope.installedTarget.dev || currentTarget.identity.ino !== outer.envelope.installedTarget.ino) throw new Error('release operation target identity changed before delegation');
@@ -1789,7 +1820,7 @@ async function executeMain(args) {
         outer = await transitionReleaseOperationEnvelope(args.target, outer, quiesced);
         outer = await transitionReleaseOperationEnvelope(args.target, outer, { ...outer.envelope, phase: 'delegated', status: 'READY' });
       }
-      const result = await executeOperation({ ...args, exactLegacyManifest: args.exactLegacyDeploy ? release.manifest : undefined, exactLegacyBundles }, targetLock);
+      const result = await executeOperation({ ...args, exactLegacyManifest: args.exactLegacyDeploy ? release.manifest : undefined, exactLegacyBundles, releaseGenerationCensus, releaseGenerationFence }, targetLock);
       if (outer) {
         let aggregate = null;
         try { const runtime = join(args.target, 'runtime'); const inventory = await captureRuntimeInventory(runtime, 'outer committed managed tree'); aggregate = inventory.aggregate; } catch { aggregate = null; }

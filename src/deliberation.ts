@@ -12,11 +12,24 @@ export type ValidationCode = 'NON_CANONICAL' | 'EXTRA_KEY' | 'MISSING_KEY' | 'IN
 export type Validation<T> = { ok: true; value: T } | { ok: false; code: ValidationCode; path: string; message: string };
 
 export type PlanAuthorshipInput = { runId: string; phaseId: string; intent: Ref; evidenceSnapshot: Ref; authorityDigest: Sha256; policyVersion: Ref; settlements: readonly Ref[] };
+export type DecisionContext = Readonly<{ problem: string; decisionImpact: string; evidence: readonly Ref[]; constraints: readonly Ref[] }>;
+export type ManagedWaveRequest = Readonly<{
+  gear: 'FOCUS' | 'EXPLORE';
+  decisionKey: string;
+  prospectiveEffectFrontierOrdinal: number;
+  context: DecisionContext;
+  discriminator?: string;
+  taskProfile?: 'CODE' | 'PRODUCT';
+}>;
 export type DecisionFrontier = { key: string; prospectiveEffectFrontierOrdinal: number; settled: boolean; witness: boolean; unresolvedDiscriminator?: string };
 export type GearPredicates = { decisionUnsettled: boolean; explicitExplore: boolean; citedWitness: boolean; planEquivalent: boolean; containedDiscovery: boolean; openEnded: boolean; highStakes: boolean; openlyPhrased: boolean; namedDiscriminator: boolean };
 export type DeliberationPolicy = Readonly<{ version: Ref; frameCatalog: readonly { frameId: string; tag: 'code' | 'design' | 'wild'; text: string }[]; maxMaterialDecisions: number; maxSettlementBytes: number; maxResolvedRoleInputBytes: number; convergeCount: number; nonObviousNovelty: number; viableFloor: number }>;
 export type GearProposal = { gear: 'DIRECT' } | { gear: 'FOCUS' | 'EXPLORE'; decisionKey: string; frontierOrdinal: number } | { gear: 'NO_SETTLEMENT'; reason: Ref };
 export type PlanAuthorshipResult = { kind: 'COMPLETE_PLAN'; plan: Plan } | { kind: 'DELIBERATION_REQUIRED'; wave: Ref } | { kind: 'NO_SETTLEMENT'; reason: Ref };
+export type PrePlanResolution =
+  | { kind: 'COMPLETE_PLAN'; plan: Plan; gear: 'DIRECT' }
+  | { kind: 'DELIBERATION_REQUIRED'; wave: Ref; gear: 'FOCUS' | 'EXPLORE' }
+  | { kind: 'NO_SETTLEMENT'; reason: Ref };
 /** Closed parent dissent disposition carried by managed settlement records.
  * The v1 profile intentionally admits only an explicit no-dissent value; a
  * future profile may add a typed winner-relative rival without reopening this
@@ -62,7 +75,7 @@ export type RoleCriticReport = Omit<CriticReport, 'wave' | 'scores' | 'clusters'
 };
 export type RoleBoundReport<T> = { ref: RoleRef; report: T };
 export type ReconcileResult = { architecture: 'COMPLETE' | 'MISSING' | 'CONFLICT' | 'STALE'; reports: readonly DeliberationReport[]; refs: readonly Ref[]; missingSlots: readonly number[]; reason?: string };
-export type GeneratorView = { kind: 'GENERATOR'; question: string; decisionImpact: string; discriminator?: string; evidence: readonly ResolvedRef[]; constraints: readonly ResolvedRef[]; lens: { text: string }; contract: string };
+export type GeneratorView = { kind: 'GENERATOR'; question: string; decisionImpact: string; discriminator?: string; evidence: readonly ResolvedRef[]; constraints: readonly ResolvedRef[]; lens: { text: string; tags?: readonly ('code' | 'design' | 'general' | 'wild')[] }; contract: string };
 export type CriticView = { kind: 'CRITIC'; question: string; decisionImpact: string; discriminator?: string; evidence: readonly ResolvedRef[]; constraints: readonly ResolvedRef[]; generators: readonly RoleBoundReport<RoleGeneratorReport>[]; contract: string };
 export type DeepenerView = { kind: 'DEEPENER'; question: string; decisionImpact: string; discriminator?: string; evidence: readonly ResolvedRef[]; constraints: readonly ResolvedRef[]; critic: RoleBoundReport<RoleCriticReport>; selected: { idea: Idea; generatorReport: RoleRef; oneBasedOrdinal: number }; contract: string };
 
@@ -94,6 +107,66 @@ const roleCriticReport = (report: CriticReport): RoleCriticReport => ({
   clusters: report.clusters.map((cluster) => ({ label: cluster.label, ideas: cluster.ideas.map(roleLocator) })),
 });
 
+export type SemanticClosure = Readonly<{
+  committedEvidence: ReadonlySet<string>;
+  reachableConstraints: ReadonlySet<string>;
+  resolved: ReadonlyMap<string, ResolvedRef>;
+}>;
+
+/** Resolve the private payload of the existing evidenceSnapshot Ref.  The
+ * closure is retained authority; it is never reconstructed from the Wave's
+ * own question lists. */
+export function semanticClosure(snapshot: Ref): Validation<SemanticClosure> {
+  const checked = validateRef(snapshot); if (!checked.ok) return checked as Validation<SemanticClosure>;
+  if (checked.value.bytes === undefined) return ok({ committedEvidence: new Set(), reachableConstraints: new Set(), resolved: new Map() });
+  let value: unknown;
+  try { value = parseCanonical(checked.value.bytes); } catch { return fail('NON_CANONICAL', 'evidenceSnapshot.bytes', 'semantic closure is not canonical'); }
+  if (!isObj(value)) return fail('INVALID_REF', 'evidenceSnapshot.bytes', 'semantic closure must be an object');
+  const keys = exact(value, ['evidence', 'constraints'], 'evidenceSnapshot.bytes'); if (!keys.ok) return keys as Validation<SemanticClosure>;
+  const read = (items: unknown, path: string): Validation<Set<string>> => {
+    if (!Array.isArray(items)) return fail('INVALID_REF', path, 'closure list must be an array');
+    const result = new Set<string>(); let prior: string | undefined;
+    for (const item of items) {
+      if (!isObj(item) || Object.keys(item).sort().join(',') !== 'digest,id,scope') return fail('INVALID_REF', path, 'closure entries must be projected Refs');
+      const projected = projectRef(item); if (!projected.ok) return projected as Validation<Set<string>>;
+      const key = provenanceKey(projected.value);
+      if (result.has(key) || (prior !== undefined && compareStable(prior, key) >= 0)) return fail('INVALID_REF', path, 'closure entries must be unique and UTF-8 sorted');
+      result.add(key); prior = key;
+    }
+    return ok(result);
+  };
+  const evidence = read(value.evidence, 'evidenceSnapshot.evidence'); if (!evidence.ok) return evidence as Validation<SemanticClosure>;
+  const constraints = read(value.constraints, 'evidenceSnapshot.constraints'); if (!constraints.ok) return constraints as Validation<SemanticClosure>;
+  return ok({ committedEvidence: evidence.value, reachableConstraints: constraints.value, resolved: new Map() });
+}
+
+export function resolveWaveSemanticClosure(wave: DeliberationWave): Validation<SemanticClosure> {
+  let closure = semanticClosure(wave.authorship.evidenceSnapshot);
+  // Historical census-supported Waves predate the closure payload. Their
+  // already-retained question refs remain the byte-compatible reader source;
+  // fresh content-addressed writers never receive this fallback.
+  if (!closure.ok && !assetForVersion(wave.authorship.policyVersion)) {
+    closure = ok({
+      committedEvidence: new Set(wave.question.evidence.map(provenanceKey)),
+      reachableConstraints: new Set(wave.question.constraints.map(provenanceKey)),
+      resolved: new Map(),
+    });
+  }
+  if (!closure.ok) return closure;
+  const resolved = new Map<string, ResolvedRef>();
+  for (const [kind, refs, allowed] of [
+    ['evidence', wave.question.evidence, closure.value.committedEvidence],
+    ['constraints', wave.question.constraints, closure.value.reachableConstraints],
+  ] as const) {
+    for (const ref of refs) {
+      const checked = validateRef(ref); if (!checked.ok || checked.value.bytes === undefined) return fail('INVALID_REF', `question.${kind}`, 'fresh semantic input must retain canonical bytes');
+      const key = provenanceKey(checked.value); if (!allowed.has(key)) return fail('FOREIGN_REF', `question.${kind}`, 'semantic input is outside retained closure');
+      resolved.set(key, { ref: checked.value, bytes: checked.value.bytes, size: Buffer.byteLength(checked.value.bytes, 'utf8') });
+    }
+  }
+  return ok({ ...closure.value, resolved });
+}
+
 export function validateRef(value: unknown): Validation<Ref> {
   if (!isObj(value)) return fail('INVALID_REF', '', 'ref must be a plain object');
   const keys = exact(value, ['id', 'digest', 'scope', 'bytes'].filter((k) => value[k] !== undefined), 'ref');
@@ -111,6 +184,11 @@ export function validateRef(value: unknown): Validation<Ref> {
 }
 
 export function projectRef(value: unknown): Validation<ProjectedRef> {
+  if (isObj(value) && value.scope === null) {
+    const projected = { ...value }; delete projected.scope;
+    const result = validateRef(projected);
+    return result.ok ? ok({ id: result.value.id, digest: result.value.digest, scope: null }) : result as Validation<ProjectedRef>;
+  }
   const result = validateRef(value); return result.ok ? ok({ id: result.value.id, digest: result.value.digest, scope: result.value.scope ?? null }) : result as Validation<ProjectedRef>;
 }
 
@@ -146,12 +224,12 @@ export function selectGear(predicates: GearPredicates): Gear {
   if (!predicates.decisionUnsettled) return 'DIRECT';
   if (predicates.explicitExplore) return 'EXPLORE';
   if (predicates.citedWitness || predicates.planEquivalent || predicates.containedDiscovery) return 'DIRECT';
-  if (predicates.openEnded && predicates.highStakes && predicates.openlyPhrased) return 'EXPLORE';
   if (predicates.namedDiscriminator) return 'FOCUS';
   return 'FOCUS';
 }
 
 const reasonRef = (reason: string, input?: unknown): Ref => { const value = { domain: 'lunacy/no-settlement/v1', reason, ...(input === undefined ? {} : { input }) }; return { id: `no-settlement:${digest(value).slice(0, 16)}`, digest: digest(value), scope: 'deliberation', bytes: canonicalString(value) }; };
+export const noSettlement = (reason: string, input?: unknown): PrePlanResolution => ({ kind: 'NO_SETTLEMENT', reason: reasonRef(reason, input) });
 
 export function proposeGear(input: { frontier: readonly DecisionFrontier[]; predicates: GearPredicates; decisionKey: string; frontierOrdinal: number; policyAvailable: boolean; budgetAvailable: boolean }): GearProposal {
   if (!input.predicates.decisionUnsettled) return { gear: 'DIRECT' };
@@ -163,25 +241,44 @@ export function proposeGear(input: { frontier: readonly DecisionFrontier[]; pred
 }
 
 function defaultLimits(policy: DeliberationPolicy, gear: Gear): DeliberationWave['limits'] {
-  const slots = gear === 'EXPLORE' ? 9 : gear === 'FOCUS' ? 4 : 1; const reportBytes = Math.max(1, Math.floor(policy.maxSettlementBytes / slots));
-  return { maxModelCalls: gear === 'EXPLORE' ? 9 : gear === 'FOCUS' ? 4 : 0, maxWaveBytes: policy.maxSettlementBytes, maxRefs: 128, maxResolvedRoleInputBytes: policy.maxResolvedRoleInputBytes, maxReportBytes: reportBytes, maxTotalReportBytes: policy.maxSettlementBytes };
+  const asset = assetForVersion(policy.version);
+  if (asset && (gear === 'FOCUS' || gear === 'EXPLORE')) return {
+    maxModelCalls: gear === 'EXPLORE' ? 9 : 3,
+    maxWaveBytes: asset.ceilings.maxWaveBytes,
+    maxRefs: asset.ceilings.maxRefs,
+    maxResolvedRoleInputBytes: asset.ceilings.maxResolvedRoleInputBytes,
+    maxReportBytes: gear === 'FOCUS' ? asset.ceilings.focusReportBytes : asset.ceilings.exploreCriticReportBytes,
+    maxTotalReportBytes: gear === 'FOCUS' ? asset.ceilings.focusTotalReportBytes : asset.ceilings.exploreTotalReportBytes,
+  };
+  const slots = gear === 'EXPLORE' ? 9 : gear === 'FOCUS' ? 3 : 1; const reportBytes = Math.max(1, Math.floor(policy.maxSettlementBytes / slots));
+  return { maxModelCalls: gear === 'EXPLORE' ? 9 : gear === 'FOCUS' ? 3 : 0, maxWaveBytes: policy.maxSettlementBytes, maxRefs: 128, maxResolvedRoleInputBytes: policy.maxResolvedRoleInputBytes, maxReportBytes: reportBytes, maxTotalReportBytes: policy.maxSettlementBytes };
 }
 
-export function authorPlan(input: PlanAuthorshipInput, predicates: GearPredicates, policy?: DeliberationPolicy): PlanAuthorshipResult {
-  const gear = selectGear(predicates);
-  if (gear === 'DIRECT') {
-    try {
-      const bound = validateRef(input.intent); if (!bound.ok) return { kind: 'NO_SETTLEMENT', reason: reasonRef('DIRECT_INTENT_INVALID') };
-      if (typeof input.intent.bytes !== 'string') return { kind: 'NO_SETTLEMENT', reason: reasonRef('DIRECT_INTENT_UNAVAILABLE') };
-      const parsed = parseCanonical<Plan>(input.intent.bytes); const plan = validatePlan(parsed).plan; if (plan.phaseId !== input.phaseId) return { kind: 'NO_SETTLEMENT', reason: reasonRef('DIRECT_PLAN_PHASE_MISMATCH', { expected: input.phaseId, actual: plan.phaseId }) }; return { kind: 'COMPLETE_PLAN', plan };
-    } catch { return { kind: 'NO_SETTLEMENT', reason: reasonRef('DIRECT_INTENT_INVALID') }; }
-  }
+export function completeDirectPlan(input: PlanAuthorshipInput): PrePlanResolution {
+  try {
+    if (!isObj(input.intent)) return { kind: 'NO_SETTLEMENT', reason: reasonRef('DIRECT_INTENT_INVALID') };
+    const intentRecord = input.intent as unknown as Record<string, unknown>;
+    const keys = exact(intentRecord, ['id', 'digest', ...(input.intent.scope === undefined ? [] : ['scope']), ...(input.intent.bytes === undefined ? [] : ['bytes'])], 'intent');
+    if (!keys.ok || typeof input.intent.id !== 'string' || input.intent.id.length === 0 || typeof input.intent.digest !== 'string' || !/^[0-9a-f]{64}$/.test(input.intent.digest) || (input.intent.scope !== undefined && (typeof input.intent.scope !== 'string' || input.intent.scope.length === 0))) return { kind: 'NO_SETTLEMENT', reason: reasonRef('DIRECT_INTENT_INVALID') };
+    if (typeof input.intent.bytes !== 'string') return { kind: 'NO_SETTLEMENT', reason: reasonRef('DIRECT_INTENT_UNAVAILABLE') };
+    // This is the resolver's only Plan parse. Validation consumes the parsed
+    // value rather than reparsing caller bytes through a second authority path.
+    const parsed = parseCanonical<Plan>(input.intent.bytes); if (digest(parsed) !== input.intent.digest) return { kind: 'NO_SETTLEMENT', reason: reasonRef('DIRECT_INTENT_INVALID') }; const plan = validatePlan(parsed).plan;
+    if (canonicalString(parsed) !== canonicalString(plan)) return { kind: 'NO_SETTLEMENT', reason: reasonRef('DIRECT_PLAN_NORMALIZATION_REQUIRED') };
+    if (plan.phaseId !== input.phaseId) return { kind: 'NO_SETTLEMENT', reason: reasonRef('DIRECT_PLAN_PHASE_MISMATCH', { expected: input.phaseId, actual: plan.phaseId }) };
+    return { kind: 'COMPLETE_PLAN', plan: parsed, gear: 'DIRECT' };
+  } catch { return { kind: 'NO_SETTLEMENT', reason: reasonRef('DIRECT_INTENT_INVALID') }; }
+}
+
+function authorWave(input: PlanAuthorshipInput, gear: 'FOCUS' | 'EXPLORE', policy?: DeliberationPolicy): PrePlanResolution {
   if (!policy) return { kind: 'NO_SETTLEMENT', reason: reasonRef('POLICY_UNAVAILABLE') };
   const admittedPolicy = policyBinding(policy, input.policyVersion);
   if (!admittedPolicy.ok) return { kind: 'NO_SETTLEMENT', reason: reasonRef('POLICY_INVALID') };
   const frontierKey = input.intent.id; const ordinal = 0;
-  const codeDesign = policy.frameCatalog.filter((f) => f.tag === 'code' || f.tag === 'design'); const wild = policy.frameCatalog.filter((f) => f.tag === 'wild');
-  if (codeDesign.length < 4 || wild.length < 1) return { kind: 'NO_SETTLEMENT', reason: reasonRef('FRAME_CATALOG_INSUFFICIENT') };
+  if (gear === 'EXPLORE') {
+    const codeDesign = policy.frameCatalog.filter((f) => f.tag === 'code' || f.tag === 'design'); const wild = policy.frameCatalog.filter((f) => f.tag === 'wild');
+    if (codeDesign.length < 4 || wild.length < 1) return { kind: 'NO_SETTLEMENT', reason: reasonRef('FRAME_CATALOG_INSUFFICIENT') };
+  }
   const wave: DeliberationWave = {
     schema: 'lunacy-deliberation-wave/v2',
     authorship: { runId: input.runId, phaseId: input.phaseId, intent: input.intent, evidenceSnapshot: input.evidenceSnapshot, authorityDigest: input.authorityDigest, policyVersion: input.policyVersion, settlementPrefixDigest: settlementPrefixDigest(input.settlements), decisionKey: frontierKey, prospectiveEffectFrontierOrdinal: ordinal },
@@ -191,7 +288,83 @@ export function authorPlan(input: PlanAuthorshipInput, predicates: GearPredicate
   } as DeliberationWave;
   const admittedWave = validateWave(wave, { runId: input.runId, phaseId: input.phaseId, policy, committedEvidence: new Set(), reachableConstraints: new Set() });
   if (!admittedWave.ok) return { kind: 'NO_SETTLEMENT', reason: reasonRef('WAVE_NOT_ADMISSIBLE') };
-  const bytes = canonicalString(wave); const d = digest(wave); const ref: Ref = { id: `wave:${d.slice(0, 16)}`, digest: d, scope: 'deliberation/wave', bytes }; return { kind: 'DELIBERATION_REQUIRED', wave: ref };
+  const bytes = canonicalString(wave); const d = digest(wave); const ref: Ref = { id: `wave:${d.slice(0, 16)}`, digest: d, scope: 'deliberation/wave', bytes }; return { kind: 'DELIBERATION_REQUIRED', wave: ref, gear };
+}
+
+function normalizedNonBlank(value: string): boolean {
+  return value.length > 0 && value === value.trim().replace(/\s+/g, ' ');
+}
+
+function rotated<T>(items: readonly T[], offset: number): T[] {
+  if (!items.length) return [];
+  const start = offset % items.length;
+  return [...items.slice(start), ...items.slice(0, start)];
+}
+
+function frameTag(frame: DeliberationPolicy['frameCatalog'][number]): 'code' | 'design' | 'wild' {
+  return frame.tag;
+}
+
+/** Strict fresh writer used by the private typed bridge request.  Historical
+ * callers retain authorWave/resolvePrePlan compatibility, while this seam
+ * carries real semantic context and deterministic v2 frame choice. */
+export function authorManagedWave(input: PlanAuthorshipInput, request: ManagedWaveRequest, policy?: DeliberationPolicy): PrePlanResolution {
+  if (!policy) return { kind: 'NO_SETTLEMENT', reason: reasonRef('POLICY_UNAVAILABLE') };
+  const admittedPolicy = policyBinding(policy, input.policyVersion);
+  if (!admittedPolicy.ok) return { kind: 'NO_SETTLEMENT', reason: reasonRef('POLICY_INVALID') };
+  if (!normalizedNonBlank(request.decisionKey) || !safeInt(request.prospectiveEffectFrontierOrdinal)
+    || !normalizedNonBlank(request.context.problem) || !normalizedNonBlank(request.context.decisionImpact)
+    || request.context.problem === input.intent.id || request.context.decisionImpact === 'prospective effect') return { kind: 'NO_SETTLEMENT', reason: reasonRef('SEMANTIC_CONTEXT_INVALID') };
+  const discriminator = request.gear === 'FOCUS' ? request.discriminator : undefined;
+  if (request.gear === 'FOCUS' && !normalizedNonBlank(discriminator ?? '')) return { kind: 'NO_SETTLEMENT', reason: reasonRef('FOCUS_DISCRIMINATOR_INVALID') };
+  const asset = assetForVersion(policy.version);
+  if (!asset) return { kind: 'NO_SETTLEMENT', reason: reasonRef('CONTENT_ADDRESSED_POLICY_REQUIRED') };
+  if (Buffer.byteLength(request.context.problem, 'utf8') > asset.ceilings.problemBytes || Buffer.byteLength(request.context.decisionImpact, 'utf8') > asset.ceilings.decisionImpactBytes
+    || (discriminator !== undefined && Buffer.byteLength(discriminator, 'utf8') > asset.ceilings.discriminatorBytes)) return { kind: 'NO_SETTLEMENT', reason: reasonRef('SEMANTIC_CONTEXT_TOO_LARGE') };
+  let generatorLenses: DeliberationWave['generatorLenses'];
+  if (request.gear === 'FOCUS') generatorLenses = [{ text: 'counterexample' }, { text: 'simplify' }];
+  else {
+    const catalog = policy.frameCatalog;
+    const seed = Number.parseInt(authorshipInputDigest(input).slice(0, 12), 16);
+    const wild = rotated(catalog.filter((frame) => frameTag(frame) === 'wild'), seed);
+    const ordinary = rotated(catalog.filter((frame) => frameTag(frame) !== 'wild'), Math.floor(seed / 7));
+    if (!wild.length || ordinary.length < 4) return { kind: 'NO_SETTLEMENT', reason: reasonRef('FRAME_CATALOG_INSUFFICIENT') };
+    const selected = [...ordinary.slice(0, 4), wild[0]];
+    if (request.taskProfile === 'PRODUCT' && new Set(selected.map(frameTag)).size < 2) return { kind: 'NO_SETTLEMENT', reason: reasonRef('FRAME_CATALOG_INSUFFICIENT') };
+    generatorLenses = selected.map((frame) => ({ frameId: frame.frameId }));
+  }
+  const evidence = request.context.evidence.map((ref) => ({ ...ref }));
+  const constraints = request.context.constraints.map((ref) => ({ ...ref }));
+  const closure = semanticClosure(input.evidenceSnapshot);
+  if (!closure.ok || evidence.some((ref) => !closure.value.committedEvidence.has(provenanceKey(ref))) || constraints.some((ref) => !closure.value.reachableConstraints.has(provenanceKey(ref)))) return { kind: 'NO_SETTLEMENT', reason: reasonRef('SEMANTIC_CLOSURE_INVALID') };
+  const wave: DeliberationWave = {
+    schema: 'lunacy-deliberation-wave/v2',
+    authorship: { runId: input.runId, phaseId: input.phaseId, intent: { ...input.intent }, evidenceSnapshot: { ...input.evidenceSnapshot }, authorityDigest: input.authorityDigest, policyVersion: { ...input.policyVersion }, settlementPrefixDigest: settlementPrefixDigest(input.settlements), decisionKey: request.decisionKey, prospectiveEffectFrontierOrdinal: request.prospectiveEffectFrontierOrdinal },
+    question: { text: request.context.problem, decisionImpact: request.context.decisionImpact, ...(discriminator === undefined ? {} : { discriminator }), evidence, constraints },
+    limits: defaultLimits(policy, request.gear), gear: request.gear, generatorLenses,
+  } as DeliberationWave;
+  const admitted = validateWave(wave, { runId: input.runId, phaseId: input.phaseId, policy, committedEvidence: closure.value.committedEvidence, reachableConstraints: closure.value.reachableConstraints });
+  if (!admitted.ok) return { kind: 'NO_SETTLEMENT', reason: reasonRef('WAVE_NOT_ADMISSIBLE', { code: admitted.code, path: admitted.path }) };
+  const bytes = canonicalString(admitted.value); const d = digest(admitted.value);
+  return { kind: 'DELIBERATION_REQUIRED', wave: { id: `wave:${d.slice(0, 16)}`, digest: d, scope: 'deliberation/wave', bytes }, gear: request.gear };
+}
+
+/** The sole production pre-Plan authority seam. Selection, authorship, and
+ * complete-Plan parsing each occur at most once in one deterministic pass. */
+export function resolvePrePlan(input: PlanAuthorshipInput, predicates: GearPredicates, policy?: DeliberationPolicy): PrePlanResolution {
+  if (predicates.explicitExplore) return authorWave(input, 'EXPLORE', policy);
+  if (!predicates.decisionUnsettled || predicates.citedWitness || predicates.planEquivalent || predicates.containedDiscovery) return completeDirectPlan(input);
+  if (predicates.namedDiscriminator) return authorWave(input, 'FOCUS', policy);
+  return { kind: 'NO_SETTLEMENT', reason: reasonRef('MATERIAL_DISCRIMINATOR_REQUIRED') };
+}
+
+/** Historical/test helper retained without a second selection/authorship
+ * implementation. New production callers use resolvePrePlan directly. */
+export function authorPlan(input: PlanAuthorshipInput, predicates: GearPredicates, policy?: DeliberationPolicy): PlanAuthorshipResult {
+  const result = resolvePrePlan(input, predicates, policy);
+  if (result.kind === 'COMPLETE_PLAN') return { kind: result.kind, plan: result.plan };
+  if (result.kind === 'DELIBERATION_REQUIRED') return { kind: result.kind, wave: result.wave };
+  return result;
 }
 
 type ParsedInput = { value: unknown; originalBytes: Uint8Array };
@@ -222,6 +395,78 @@ function parseInput(valueOrBytes: unknown): Validation<unknown> {
   try { canonicalString(valueOrBytes); return ok(valueOrBytes); } catch { return fail('NON_CANONICAL', '', 'value is not canonical JSON'); }
 }
 
+type PolicyAsset = Readonly<{
+  schema: 'lunacy-deliberation-policy/v2'; policyId: string;
+  contracts: Readonly<{ focusGenerator: string; focusCritic: string; exploreGenerator: string; exploreCritic: string; exploreDeepener: string }>;
+  frameCatalog: readonly Readonly<{ frameId: string; tags: readonly ('code' | 'design' | 'general' | 'wild')[]; text: string }>[];
+  ceilings: Readonly<{ problemBytes: number; decisionImpactBytes: number; discriminatorBytes: number; ideaTextBytes: number; ideaRationaleBytes: number; focusReportBytes: number; focusTotalReportBytes: number; exploreGeneratorReportBytes: number; exploreCriticReportBytes: number; exploreDeepenerReportBytes: number; exploreTotalReportBytes: number; maxResolvedRoleInputBytes: number; maxWaveBytes: number; maxRefs: number; maxMaterialDecisions: number; convergeCount: number; nonObviousNovelty: number; viableFloor: number }>;
+}>;
+
+function parsePolicyAsset(value: unknown): Validation<PolicyAsset> {
+  if (!isObj(value)) return fail('INVALID_FRAME', 'policyAsset', 'policy asset must be an object');
+  const root = exact(value, ['schema', 'policyId', 'contracts', 'frameCatalog', 'ceilings'], 'policyAsset'); if (!root.ok) return root as Validation<PolicyAsset>;
+  if (value.schema !== 'lunacy-deliberation-policy/v2' || typeof value.policyId !== 'string' || !value.policyId) return fail('INVALID_FRAME', 'policyAsset', 'policy identity is invalid');
+  if (!isObj(value.contracts)) return fail('INVALID_FRAME', 'policyAsset.contracts', 'contracts are invalid');
+  const contracts = value.contracts as Record<string, unknown>;
+  const contractKeys = ['focusGenerator', 'focusCritic', 'exploreGenerator', 'exploreCritic', 'exploreDeepener'];
+  const contractsExact = exact(contracts, contractKeys, 'policyAsset.contracts'); if (!contractsExact.ok) return contractsExact as Validation<PolicyAsset>;
+  if (contractKeys.some((key) => typeof contracts[key] !== 'string' || !normalizedNonBlank(contracts[key] as string))) return fail('INVALID_FRAME', 'policyAsset.contracts', 'contracts must be normalized nonblank text');
+  if (!Array.isArray(value.frameCatalog) || value.frameCatalog.length < 5) return fail('INVALID_FRAME', 'policyAsset.frameCatalog', 'frame catalog is insufficient');
+  const frameIds = new Set<string>(); const frames: PolicyAsset['frameCatalog'][number][] = [];
+  for (const frame of value.frameCatalog) {
+    if (!isObj(frame)) return fail('INVALID_FRAME', 'policyAsset.frameCatalog', 'frame is invalid');
+    const frameExact = exact(frame, ['frameId', 'tags', 'text'], 'policyAsset.frameCatalog'); if (!frameExact.ok) return frameExact as Validation<PolicyAsset>;
+    if (typeof frame.frameId !== 'string' || !normalizedNonBlank(frame.frameId) || frameIds.has(frame.frameId) || typeof frame.text !== 'string' || !normalizedNonBlank(frame.text)
+      || !Array.isArray(frame.tags) || frame.tags.length === 0 || frame.tags.some((tag) => !['code', 'design', 'general', 'wild'].includes(String(tag))) || new Set(frame.tags).size !== frame.tags.length) return fail('INVALID_FRAME', 'policyAsset.frameCatalog', 'frame is malformed or duplicated');
+    frameIds.add(frame.frameId); frames.push({ frameId: frame.frameId, tags: [...frame.tags] as PolicyAsset['frameCatalog'][number]['tags'], text: frame.text });
+  }
+  if (!isObj(value.ceilings)) return fail('INVALID_LIMIT', 'policyAsset.ceilings', 'ceilings are invalid');
+  const ceilings = value.ceilings as Record<string, unknown>;
+  const ceilingKeys = ['problemBytes', 'decisionImpactBytes', 'discriminatorBytes', 'ideaTextBytes', 'ideaRationaleBytes', 'focusReportBytes', 'focusTotalReportBytes', 'exploreGeneratorReportBytes', 'exploreCriticReportBytes', 'exploreDeepenerReportBytes', 'exploreTotalReportBytes', 'maxResolvedRoleInputBytes', 'maxWaveBytes', 'maxRefs', 'maxMaterialDecisions', 'convergeCount', 'nonObviousNovelty', 'viableFloor'];
+  const ceilingsExact = exact(ceilings, ceilingKeys, 'policyAsset.ceilings'); if (!ceilingsExact.ok) return ceilingsExact as Validation<PolicyAsset>;
+  if (ceilingKeys.some((key) => !safeInt(ceilings[key]))) return fail('INVALID_LIMIT', 'policyAsset.ceilings', 'ceilings must be nonnegative safe integers');
+  return ok({ schema: value.schema, policyId: value.policyId, contracts: contracts as PolicyAsset['contracts'], frameCatalog: frames, ceilings: ceilings as PolicyAsset['ceilings'] });
+}
+
+export function policyVersionForAsset(value: unknown): Validation<Ref> {
+  const asset = parsePolicyAsset(value); if (!asset.ok) return asset as Validation<Ref>;
+  const bytes = canonicalString(asset.value); const assetDigest = digest(asset.value);
+  return ok({ id: `deliberation-policy:${assetDigest}`, scope: 'deliberation/policy', digest: assetDigest, bytes });
+}
+
+export function deliberationPolicyFromAsset(value: unknown, expectedVersion: Ref): Validation<DeliberationPolicy> {
+  const asset = parsePolicyAsset(value); if (!asset.ok) return asset as Validation<DeliberationPolicy>;
+  const version = policyVersionForAsset(asset.value); if (!version.ok || !sameRef(version.value, expectedVersion) || expectedVersion.bytes !== version.value.bytes) return fail('FOREIGN_REF', 'policyVersion', 'policy asset does not equal the authority-bound content address');
+  const primary = (tags: readonly string[]): 'code' | 'design' | 'wild' => tags.includes('wild') ? 'wild' : tags.includes('design') ? 'design' : 'code';
+  return ok({ version: { ...expectedVersion }, frameCatalog: asset.value.frameCatalog.map((frame) => ({ frameId: frame.frameId, tag: primary(frame.tags), text: frame.text })), maxMaterialDecisions: asset.value.ceilings.maxMaterialDecisions, maxSettlementBytes: asset.value.ceilings.exploreTotalReportBytes, maxResolvedRoleInputBytes: asset.value.ceilings.maxResolvedRoleInputBytes, convergeCount: asset.value.ceilings.convergeCount, nonObviousNovelty: asset.value.ceilings.nonObviousNovelty, viableFloor: asset.value.ceilings.viableFloor });
+}
+
+function assetForVersion(version: Ref): PolicyAsset | undefined {
+  if (typeof version.bytes !== 'string') return undefined;
+  try { const value = parseCanonical(version.bytes); const asset = parsePolicyAsset(value); return asset.ok && digest(asset.value) === version.digest && canonicalString(asset.value) === version.bytes ? asset.value : undefined; }
+  catch { return undefined; }
+}
+
+/** Reader policy derives from retained content-addressed bytes.  The one
+ * census-supported v1 digest uses its packaged legacy asset semantics; other
+ * synthetic compatibility fixtures retain only their already-authored IDs. */
+export function retainedDeliberationPolicy(wave: DeliberationWave): DeliberationPolicy {
+  const asset = assetForVersion(wave.authorship.policyVersion);
+  if (asset) {
+    const retained = deliberationPolicyFromAsset(asset, wave.authorship.policyVersion);
+    if (retained.ok) return retained.value;
+  }
+  const legacyGenerationOne = wave.authorship.policyVersion.digest === 'fa02354bd70e0b908b245c66be4bbc6626f0e5c7dae4b4953d802d0b647b1ffb';
+  const frameCatalog = wave.gear === 'EXPLORE' ? wave.generatorLenses.map((frame, index) => ({ frameId: frame.frameId, tag: index === 4 ? 'wild' as const : 'code' as const, text: legacyGenerationOne && /^f[0-3]$/.test(frame.frameId) ? `frame-${frame.frameId.slice(1)}` : frame.frameId })) : [];
+  return { version: wave.authorship.policyVersion, frameCatalog, maxMaterialDecisions: 0, maxSettlementBytes: wave.limits.maxTotalReportBytes, maxResolvedRoleInputBytes: wave.limits.maxResolvedRoleInputBytes, convergeCount: 3, nonObviousNovelty: 0, viableFloor: 0 };
+}
+
+function roleContract(wave: DeliberationWave, role: SlotRole): string {
+  const asset = assetForVersion(wave.authorship.policyVersion);
+  if (!asset) return role === 'GENERATOR' ? (wave.gear === 'FOCUS' ? 'Return exactly one candidate idea.' : 'Return exactly six candidate ideas.') : role === 'CRITIC' ? (wave.gear === 'FOCUS' ? 'Score both candidates exactly once and partition them into one or two non-empty comparison groups.' : 'Score every idea exactly once and partition the full pool into three to six non-empty mechanism clusters.') : 'Return a 4–8 sentence sketch, risk, first step, and 3–5 child ideas.';
+  return role === 'GENERATOR' ? (wave.gear === 'FOCUS' ? asset.contracts.focusGenerator : asset.contracts.exploreGenerator) : role === 'CRITIC' ? (wave.gear === 'FOCUS' ? asset.contracts.focusCritic : asset.contracts.exploreCritic) : asset.contracts.exploreDeepener;
+}
+
 function policyValid(policy: DeliberationPolicy): Validation<true> {
   if (!policy || !isObj(policy)) return fail('INVALID_LIMIT', 'policy', 'policy malformed');
   const pk = exact(policy, ['version', 'frameCatalog', 'maxMaterialDecisions', 'maxSettlementBytes', 'maxResolvedRoleInputBytes', 'convergeCount', 'nonObviousNovelty', 'viableFloor'], 'policy'); if (!pk.ok) return pk as Validation<true>;
@@ -241,6 +486,11 @@ function policyBinding(policy: DeliberationPolicy, wavePolicyVersion: unknown): 
   const waveVersion = validateRef(wavePolicyVersion); if (!waveVersion.ok) return fail('INVALID_REF', 'wave.authorship.policyVersion', 'wave policy version is malformed');
   if (!sameRef(waveVersion.value, policy.version)) return fail('FOREIGN_REF', 'wave.authorship.policyVersion', 'policy version is not the admitted policy');
   return ok(true);
+}
+
+/** Private host-boundary validator for the exact existing policy document. */
+export function validateDeliberationPolicy(policy: DeliberationPolicy, policyVersion: unknown): Validation<true> {
+  return policyBinding(policy, policyVersion);
 }
 
 export function validateWave(valueOrBytes: unknown, ctx: { runId: string; phaseId: string; policy: DeliberationPolicy; committedEvidence: ReadonlySet<string>; reachableConstraints: ReadonlySet<string> }): Validation<DeliberationWave> {
@@ -352,7 +602,8 @@ export function materializeRoleView(input: { waveRef: Ref; wave: DeliberationWav
   const boundPolicy = policyBinding(input.policy, input.wave.authorship.policyVersion); if (!boundPolicy.ok) return boundPolicy as Validation<GeneratorView | CriticView | DeepenerView>;
   const topology = deriveTopology(input.waveRef, input.wave); const expected = topology.slots.find((s) => s.slotOrdinal === input.slot.slotOrdinal); if (!expected || !exactSlot(input.slot, expected)) return fail('INVALID_SLOT', 'slot', 'slot is not exactly derived from wave');
   const base = resolvedRefs(input.wave, input.resolved, input.policy); if (!base.ok) return base as Validation<GeneratorView | CriticView | DeepenerView>; const common = { question: input.wave.question.text, decisionImpact: input.wave.question.decisionImpact, ...(input.wave.question.discriminator === undefined ? {} : { discriminator: input.wave.question.discriminator }), evidence: base.value.evidence, constraints: base.value.constraints };
-  const baseContractBytes = input.slot.role === 'GENERATOR' ? (input.wave.gear === 'FOCUS' ? 'Return exactly one candidate idea.' : 'Return exactly six candidate ideas.') : input.slot.role === 'CRITIC' ? 'Score every idea exactly once and partition the pool into mechanism clusters.' : 'Return a 4–8 sentence sketch, risk, first step, and 3–5 child ideas.';
+  const criticContract = roleContract(input.wave, 'CRITIC');
+  const baseContractBytes = roleContract(input.wave, input.slot.role);
   let inputBytes = Buffer.byteLength(input.wave.question.text, 'utf8') + Buffer.byteLength(input.wave.question.decisionImpact, 'utf8') + Buffer.byteLength(baseContractBytes, 'utf8');
   if (input.wave.question.discriminator) inputBytes += Buffer.byteLength(input.wave.question.discriminator, 'utf8');
   for (const r of [...base.value.evidence, ...base.value.constraints]) inputBytes += r.size;
@@ -362,20 +613,21 @@ export function materializeRoleView(input: { waveRef: Ref; wave: DeliberationWav
   if (input.slot.role === 'GENERATOR') {
     if (input.predecessorRefs.length !== 0) return fail('PREDECESSOR', 'predecessorRefs', 'generator cannot receive predecessors');
     const lens = input.wave.generatorLenses[input.slot.slotOrdinal]; if (!lens) return fail('INVALID_SLOT', 'slot', 'generator lens is unavailable'); const frame = input.wave.gear === 'EXPLORE' ? input.policy.frameCatalog.find((f) => f.frameId === (lens as { frameId: string }).frameId) : undefined; if (input.wave.gear === 'EXPLORE' && !frame) return fail('INVALID_FRAME', 'slot.lens', 'frame is not in policy catalog'); const limit = tooLarge(); if (limit) return limit as Validation<GeneratorView>;
-    if (input.wave.gear === 'FOCUS') return ok({ kind: 'GENERATOR', ...common, lens: lens as { text: string }, contract: 'Return exactly one candidate idea.' });
-    return ok({ kind: 'GENERATOR', ...common, lens: { text: frame!.text }, contract: 'Return exactly six candidate ideas.' });
+    if (input.wave.gear === 'FOCUS') return ok({ kind: 'GENERATOR', ...common, lens: lens as { text: string }, contract: baseContractBytes });
+    const frameAsset = assetForVersion(input.wave.authorship.policyVersion)?.frameCatalog.find((candidate) => candidate.frameId === (lens as { frameId: string }).frameId);
+    return ok({ kind: 'GENERATOR', ...common, lens: { text: frame!.text, ...(frameAsset ? { tags: [...frameAsset.tags] } : {}) }, contract: baseContractBytes });
   }
   if (input.slot.role === 'CRITIC') {
     const direct = directPredecessors({ ...input, policy: input.policy }); if (!direct.ok) return direct as Validation<GeneratorView | CriticView | DeepenerView>;
     const generators = (direct.value as GeneratorReport[]).map((report, index) => ({ ref: roleRef(input.predecessorRefs[index]!), report: roleGeneratorReport(report) }));
-    for (const predecessor of generators) inputBytes += Buffer.byteLength(canonicalString(predecessor), 'utf8'); const limit = tooLarge(); if (limit) return limit as Validation<CriticView>; return ok({ kind: 'CRITIC', ...common, generators, contract: 'Score every idea exactly once and partition the pool into mechanism clusters.' });
+    for (const predecessor of generators) inputBytes += Buffer.byteLength(canonicalString(predecessor), 'utf8'); const limit = tooLarge(); if (limit) return limit as Validation<CriticView>; return ok({ kind: 'CRITIC', ...common, generators, contract: criticContract });
   }
   if (input.predecessorRefs.length !== 1 || input.slot.dependencies.length !== 1) return fail('PREDECESSOR', 'predecessorRefs', 'deepener requires exactly one critic predecessor'); const criticRef = validateRef(input.predecessorRefs[0]); if (!criticRef.ok) return criticRef as Validation<DeepenerView>; const criticEnvelope = acceptedEnvelope(criticRef.value, input.acceptedReportsByRef, 'predecessorRefs[0]'); if (!criticEnvelope.ok) return criticEnvelope as Validation<DeepenerView>; const criticSlot = topology.slots[input.slot.dependencies[0]]; if (!criticSlot || criticSlot.role !== 'CRITIC' || !sameRef(criticEnvelope.value.report.wave, input.waveRef) || criticEnvelope.value.report.slotOrdinal !== criticSlot.slotOrdinal) return fail('FOREIGN_REF', 'predecessorRefs[0]', 'critic predecessor is not the derived current-Wave critic');
   const generatorRefs = criticGeneratorRefs(criticEnvelope.value.report); if (!generatorRefs.ok) return generatorRefs as Validation<DeepenerView>; const generatorsBySlot = new Map<number, GeneratorReport>();
   for (const generatorRef of generatorRefs.value) { const envelope = acceptedEnvelope(generatorRef, input.acceptedReportsByRef, 'acceptedReportsByRef'); if (!envelope.ok) return envelope as Validation<DeepenerView>; if (!sameRef(envelope.value.report.wave, input.waveRef) || !('ideas' in envelope.value.report)) return fail('FOREIGN_REF', 'acceptedReportsByRef', 'generator predecessor is not current-wave'); const generatorSlot = topology.slots[envelope.value.report.slotOrdinal]; if (!generatorSlot || generatorSlot.role !== 'GENERATOR' || generatorsBySlot.has(generatorSlot.slotOrdinal)) return fail('PREDECESSOR', 'acceptedReportsByRef', 'generator closure has duplicate or invalid slot'); const validated = validateReport(envelope.value.report, { waveRef: input.waveRef, wave: input.wave, slot: generatorSlot, predecessors: [], policy: input.policy }); if (!validated.ok) return validated as Validation<DeepenerView>; generatorsBySlot.set(generatorSlot.slotOrdinal, validated.value as GeneratorReport); }
   const expectedGeneratorCount = input.wave.gear === 'EXPLORE' ? 5 : input.wave.generatorLenses.length; if (generatorsBySlot.size !== expectedGeneratorCount || [...Array(expectedGeneratorCount).keys()].some((ordinal) => !generatorsBySlot.has(ordinal))) return fail('PREDECESSOR', 'acceptedReportsByRef', 'generator closure is incomplete'); const generators = [...Array(expectedGeneratorCount).keys()].map((ordinal) => generatorsBySlot.get(ordinal)!);
   const validatedCritic = validateReport(criticEnvelope.value.report, { waveRef: input.waveRef, wave: input.wave, slot: criticSlot, predecessors: generators, policy: input.policy }); if (!validatedCritic.ok) return validatedCritic as Validation<DeepenerView>; const critic = validatedCritic.value as CriticReport;
-  const ranked = critic.scores.filter((score) => !score.trap).sort((a, b) => (35 * b.novelty + 40 * b.viability + 25 * b.fit) - (35 * a.novelty + 40 * a.viability + 25 * a.fit) || compareIdeaLocators(a.idea, b.idea, generators)); const criticOrdinal = criticSlot.slotOrdinal; const rank = input.slot.slotOrdinal - criticOrdinal; if (rank < 1 || rank > 3 || ranked.length < 3) return fail('CARDINALITY', 'predecessorRefs', 'deepener requires top three non-traps'); const target = ranked[rank - 1]; const selectedEnvelope = acceptedEnvelope(target.idea.generatorReport, input.acceptedReportsByRef, 'acceptedReportsByRef'); if (!selectedEnvelope.ok) return selectedEnvelope as Validation<DeepenerView>; const selectedGenerator = generators.find((generator) => sameRef(target.idea.generatorReport, reportRefFor(generator))); if (!selectedGenerator || !sameRef(selectedEnvelope.value.ref, reportRefFor(selectedGenerator)) || target.idea.oneBasedOrdinal > selectedGenerator.ideas.length) return fail('PREDECESSOR', 'acceptedReportsByRef', 'selected generator is unavailable'); const selected = { idea: selectedGenerator.ideas[target.idea.oneBasedOrdinal - 1], generatorReport: roleRef(target.idea.generatorReport), oneBasedOrdinal: target.idea.oneBasedOrdinal }; if (!selected.idea) return fail('INVALID_LOCATOR', 'critic.scores', 'selected idea ordinal is unavailable'); const projectedCritic = { ref: roleRef(criticRef.value), report: roleCriticReport(critic) }; inputBytes += Buffer.byteLength(canonicalString(projectedCritic), 'utf8') + Buffer.byteLength(canonicalString(selected), 'utf8'); const limit = tooLarge(); if (limit) return limit as Validation<DeepenerView>; return ok({ kind: 'DEEPENER', ...common, critic: projectedCritic, selected, contract: 'Return a 4–8 sentence sketch, risk, first step, and 3–5 child ideas.' });
+  const ranked = critic.scores.filter((score) => !score.trap).sort((a, b) => (35 * b.novelty + 40 * b.viability + 25 * b.fit) - (35 * a.novelty + 40 * a.viability + 25 * a.fit) || compareIdeaLocators(a.idea, b.idea, generators)); const criticOrdinal = criticSlot.slotOrdinal; const rank = input.slot.slotOrdinal - criticOrdinal; if (rank < 1 || rank > 3 || ranked.length < 3) return fail('CARDINALITY', 'predecessorRefs', 'deepener requires top three non-traps'); const target = ranked[rank - 1]; const selectedEnvelope = acceptedEnvelope(target.idea.generatorReport, input.acceptedReportsByRef, 'acceptedReportsByRef'); if (!selectedEnvelope.ok) return selectedEnvelope as Validation<DeepenerView>; const selectedGenerator = generators.find((generator) => sameRef(target.idea.generatorReport, reportRefFor(generator))); if (!selectedGenerator || !sameRef(selectedEnvelope.value.ref, reportRefFor(selectedGenerator)) || target.idea.oneBasedOrdinal > selectedGenerator.ideas.length) return fail('PREDECESSOR', 'acceptedReportsByRef', 'selected generator is unavailable'); const selected = { idea: selectedGenerator.ideas[target.idea.oneBasedOrdinal - 1], generatorReport: roleRef(target.idea.generatorReport), oneBasedOrdinal: target.idea.oneBasedOrdinal }; if (!selected.idea) return fail('INVALID_LOCATOR', 'critic.scores', 'selected idea ordinal is unavailable'); const projectedCritic = { ref: roleRef(criticRef.value), report: roleCriticReport(critic) }; inputBytes += Buffer.byteLength(canonicalString(projectedCritic), 'utf8') + Buffer.byteLength(canonicalString(selected), 'utf8'); const limit = tooLarge(); if (limit) return limit as Validation<DeepenerView>; return ok({ kind: 'DEEPENER', ...common, critic: projectedCritic, selected, contract: baseContractBytes });
 }
 
 function reportBase(value: Record<string, unknown>, path: string): Validation<BaseReport> { for (const key of ['schema', 'wave', 'slotOrdinal']) if (!Object.prototype.hasOwnProperty.call(value, key)) return fail('MISSING_KEY', path, `missing key ${key}`); if (value.schema !== 'lunacy-deliberation-report/v2' || !safeInt(value.slotOrdinal)) return fail('INVALID_REPORT', path, 'base report malformed'); const wave = validateRef(value.wave); if (!wave.ok) return wave as Validation<BaseReport>; return ok({ schema: 'lunacy-deliberation-report/v2', wave: wave.value, slotOrdinal: value.slotOrdinal }); }
@@ -410,21 +662,46 @@ export function validateReport(valueOrBytes: unknown, ctx: { waveRef: Ref; wave:
   let report: DeliberationReport;
   if (ctx.slot.role === 'GENERATOR') {
     if (ctx.predecessors.length !== 0) return fail('PREDECESSOR', 'predecessors', 'generator cannot receive predecessors');
-    const k = exact(parsed.value, ['schema', 'wave', 'slotOrdinal', 'ideas'], 'report'); if (!k.ok) return k as Validation<DeliberationReport>; if (!Array.isArray(parsed.value.ideas)) return fail('INVALID_REPORT', 'report.ideas', 'ideas must be an array'); const want = ctx.wave.gear === 'FOCUS' ? 1 : 6; if (parsed.value.ideas.length !== want) return fail('CARDINALITY', 'report.ideas', `expected ${want} ideas`); const ideas: Idea[] = []; for (const item of parsed.value.ideas) { if (!isObj(item)) return fail('INVALID_REPORT', 'report.ideas', 'idea malformed'); const ik = exact(item, ['text', 'rationale'], 'idea'); if (!ik.ok) return ik as Validation<DeliberationReport>; if (typeof item.text !== 'string' || typeof item.rationale !== 'string' || !item.text || !item.rationale) return fail('INVALID_REPORT', 'idea', 'idea text/rationale required'); ideas.push({ text: item.text, rationale: item.rationale }); } report = { ...base.value, ideas };
+    const k = exact(parsed.value, ['schema', 'wave', 'slotOrdinal', 'ideas'], 'report'); if (!k.ok) return k as Validation<DeliberationReport>; if (!Array.isArray(parsed.value.ideas)) return fail('INVALID_REPORT', 'report.ideas', 'ideas must be an array'); const want = ctx.wave.gear === 'FOCUS' ? 1 : 6; if (parsed.value.ideas.length !== want) return fail('CARDINALITY', 'report.ideas', `expected ${want} ideas`); const ideas: Idea[] = []; const seenIdeas = new Set<string>(); const freshAsset = assetForVersion(ctx.wave.authorship.policyVersion); for (const item of parsed.value.ideas) { if (!isObj(item)) return fail('INVALID_REPORT', 'report.ideas', 'idea malformed'); const ik = exact(item, ['text', 'rationale'], 'idea'); if (!ik.ok) return ik as Validation<DeliberationReport>; if (typeof item.text !== 'string' || typeof item.rationale !== 'string' || !normalizedNonBlank(item.text) || !normalizedNonBlank(item.rationale)) return fail('INVALID_REPORT', 'idea', 'idea text/rationale must be normalized nonblank text'); if (freshAsset && (Buffer.byteLength(item.text, 'utf8') > freshAsset.ceilings.ideaTextBytes || Buffer.byteLength(item.rationale, 'utf8') > freshAsset.ceilings.ideaRationaleBytes)) return fail('INPUT_TOO_LARGE', 'idea', 'idea text or rationale exceeds policy ceiling'); const key = canonicalString({ text: item.text, rationale: item.rationale }); if (seenIdeas.has(key)) return fail('INVALID_REPORT', 'ideas', 'generator ideas must be distinct'); seenIdeas.add(key); ideas.push({ text: item.text, rationale: item.rationale }); } report = { ...base.value, ideas };
   } else if (ctx.slot.role === 'CRITIC') {
     const generatorClosure = orderedGeneratorClosure(ctx.waveRef, ctx.wave, ctx.predecessors, ctx.policy); if (!generatorClosure.ok) return generatorClosure as Validation<DeliberationReport>; const generators = generatorClosure.value;
     const k = exact(parsed.value, ['schema', 'wave', 'slotOrdinal', 'scores', 'clusters'], 'report'); if (!k.ok) return k as Validation<DeliberationReport>; if (!Array.isArray(parsed.value.scores) || !Array.isArray(parsed.value.clusters)) return fail('INVALID_REPORT', 'report', 'critic arrays required'); const expectedLocators: IdeaLocator[] = []; for (const g of generators) { const reportRef = reportRefFor(g); for (let i = 0; i < g.ideas.length; i += 1) expectedLocators.push({ generatorReport: reportRef, oneBasedOrdinal: i + 1 }); } const expectedKeys = new Set(expectedLocators.map(locatorKey)); const scores: CriticReport['scores'][number][] = []; const seen = new Set<string>();
     const allowedEvidence = new Set<string>([ctx.waveRef, ctx.wave.authorship.intent, ctx.wave.authorship.evidenceSnapshot, ctx.wave.authorship.policyVersion, ...ctx.wave.question.evidence, ...ctx.wave.question.constraints, ...generators.map(reportRefFor)].map(provenanceKey));
     let evidenceOccurrences = 0;
-    for (const raw of parsed.value.scores) { if (!isObj(raw)) return fail('INVALID_REPORT', 'scores', 'score malformed'); const sk = exact(raw, ['idea', 'novelty', 'viability', 'fit', 'trap', 'evidence'].filter((x) => raw[x] !== undefined), 'score'); if (!sk.ok) return sk as Validation<DeliberationReport>; const l = validateLocator(raw.idea); if (!l.ok) return l as Validation<DeliberationReport>; const key = locatorKey(l.value); if (!expectedKeys.has(key)) return fail('FOREIGN_REF', 'scores.idea', 'locator does not resolve to a generator report'); if (seen.has(key)) return fail('INVALID_LOCATOR', 'scores', 'duplicate locator'); seen.add(key); const validScore = (n: unknown): n is number => typeof n === 'number' && Number.isSafeInteger(n) && n >= 0 && n <= 10; if (![raw.novelty, raw.viability, raw.fit].every(validScore)) return fail('SCORE_RANGE', 'scores', 'scores must be integers 0..10'); if (raw.trap !== undefined && typeof raw.trap !== 'string') return fail('INVALID_REPORT', 'scores.trap', 'trap must be text'); if (!Array.isArray(raw.evidence)) return fail('INVALID_REPORT', 'scores.evidence', 'evidence must be array'); const evidence: Ref[] = []; for (const er of raw.evidence) { const rv = validateRef(er); if (!rv.ok) return rv as Validation<DeliberationReport>; if (!allowedEvidence.has(provenanceKey(rv.value))) return fail('FOREIGN_REF', 'scores.evidence', 'evidence is outside the sealed wave/predecessor closure'); evidence.push(rv.value); evidenceOccurrences += 1; } if (evidence.some((r, i) => i > 0 && compareStable(refKey(evidence[i - 1]), refKey(r)) > 0)) return fail('INVALID_REF', 'scores.evidence', 'evidence refs not UTF-8 sorted'); scores.push({ idea: l.value, novelty: raw.novelty as number, viability: raw.viability as number, fit: raw.fit as number, ...(raw.trap === undefined ? {} : { trap: raw.trap }), evidence }); } if (scores.length !== expectedLocators.length || seen.size !== expectedKeys.size) return fail('CARDINALITY', 'scores', 'every idea must be scored exactly once'); const waveOwnRefOccurrences = 3 + ctx.wave.question.evidence.length + ctx.wave.question.constraints.length; const reportWaveRefOccurrences = deriveTopology(ctx.waveRef, ctx.wave).slots.length; const locatorOccurrences = expectedLocators.length * 2; if (waveOwnRefOccurrences + reportWaveRefOccurrences + locatorOccurrences + evidenceOccurrences > ctx.wave.limits.maxRefs) return fail('LIMIT_EXCEEDED', 'scores.evidence', 'critic evidence exceeds the admitted Ref occurrence quota');
+    for (const raw of parsed.value.scores) { if (!isObj(raw)) return fail('INVALID_REPORT', 'scores', 'score malformed'); const sk = exact(raw, ['idea', 'novelty', 'viability', 'fit', 'trap', 'evidence'].filter((x) => raw[x] !== undefined), 'score'); if (!sk.ok) return sk as Validation<DeliberationReport>; const l = validateLocator(raw.idea); if (!l.ok) return l as Validation<DeliberationReport>; const key = locatorKey(l.value); if (!expectedKeys.has(key)) return fail('FOREIGN_REF', 'scores.idea', 'locator does not resolve to a generator report'); if (seen.has(key)) return fail('INVALID_LOCATOR', 'scores', 'duplicate locator'); seen.add(key); const validScore = (n: unknown): n is number => typeof n === 'number' && Number.isSafeInteger(n) && n >= 0 && n <= 10; if (![raw.novelty, raw.viability, raw.fit].every(validScore)) return fail('SCORE_RANGE', 'scores', 'scores must be integers 0..10'); if (raw.trap !== undefined && (typeof raw.trap !== 'string' || !normalizedNonBlank(raw.trap) || raw.trap.includes('\n'))) return fail('INVALID_REPORT', 'scores.trap', 'trap must be a non-empty one-line reason'); if (!Array.isArray(raw.evidence)) return fail('INVALID_REPORT', 'scores.evidence', 'evidence must be array'); const evidence: Ref[] = []; for (const er of raw.evidence) { const rv = validateRef(er); if (!rv.ok) return rv as Validation<DeliberationReport>; if (!allowedEvidence.has(provenanceKey(rv.value))) return fail('FOREIGN_REF', 'scores.evidence', 'evidence is outside the sealed wave/predecessor closure'); evidence.push(rv.value); evidenceOccurrences += 1; } if (evidence.some((r, i) => i > 0 && compareStable(refKey(evidence[i - 1]), refKey(r)) > 0)) return fail('INVALID_REF', 'scores.evidence', 'evidence refs not UTF-8 sorted'); scores.push({ idea: l.value, novelty: raw.novelty as number, viability: raw.viability as number, fit: raw.fit as number, ...(raw.trap === undefined ? {} : { trap: raw.trap }), evidence }); } if (scores.length !== expectedLocators.length || seen.size !== expectedKeys.size) return fail('CARDINALITY', 'scores', 'every idea must be scored exactly once'); const waveOwnRefOccurrences = 3 + ctx.wave.question.evidence.length + ctx.wave.question.constraints.length; const reportWaveRefOccurrences = deriveTopology(ctx.waveRef, ctx.wave).slots.length; const locatorOccurrences = expectedLocators.length * 2; if (waveOwnRefOccurrences + reportWaveRefOccurrences + locatorOccurrences + evidenceOccurrences > ctx.wave.limits.maxRefs) return fail('LIMIT_EXCEEDED', 'scores.evidence', 'critic evidence exceeds the admitted Ref occurrence quota');
     const order = new Map(expectedLocators.map((l, i) => [locatorKey(l), i]));
     if (scores.some((s, i) => locatorKey(s.idea) !== locatorKey(expectedLocators[i]))) return fail('RANKING', 'scores', 'scores must use generator-slot/idea order');
-    const clusters: CriticReport['clusters'][number][] = []; const clustered = new Set<string>(); if (parsed.value.clusters.length < 3 || parsed.value.clusters.length > 6) return fail('CARDINALITY', 'clusters', '3-6 clusters required'); for (const c of parsed.value.clusters) { if (!isObj(c)) return fail('POOL_PARTITION', 'clusters', 'cluster malformed'); const ck = exact(c, ['label', 'ideas'], 'cluster'); if (!ck.ok) return ck as Validation<DeliberationReport>; if (typeof c.label !== 'string' || !Array.isArray(c.ideas)) return fail('POOL_PARTITION', 'clusters', 'cluster malformed'); const ideas: IdeaLocator[] = []; for (const raw of c.ideas) { const l = validateLocator(raw); if (!l.ok) return l as Validation<DeliberationReport>; const key = locatorKey(l.value); if (!expectedKeys.has(key)) return fail('FOREIGN_REF', 'clusters.ideas', 'locator does not resolve to a generator report'); if (clustered.has(key)) return fail('POOL_PARTITION', 'clusters', 'idea occurs in multiple clusters'); clustered.add(key); ideas.push(l.value); } if (ideas.some((l, i) => i > 0 && (order.get(locatorKey(ideas[i - 1])) ?? -1) > (order.get(locatorKey(l)) ?? -1))) return fail('POOL_PARTITION', 'clusters.ideas', 'ideas are not generator-slot/idea ordered'); clusters.push({ label: c.label, ideas }); } if (clustered.size !== expectedLocators.length) return fail('POOL_PARTITION', 'clusters', 'cluster partition incomplete'); if (clusters.some((a, i) => i > 0 && compareStable(clusters[i - 1].label, a.label) > 0)) return fail('POOL_PARTITION', 'clusters', 'clusters not UTF-8 sorted'); report = { ...base.value, scores, clusters };
+    const clusters: CriticReport['clusters'][number][] = []; const clustered = new Set<string>();
+    const canonicalFocusGroups = ctx.wave.gear === 'FOCUS' && parsed.value.clusters.length >= 1 && parsed.value.clusters.length <= 2;
+    const historicalFocusGroups = ctx.wave.gear === 'FOCUS' && parsed.value.clusters.length >= 3 && parsed.value.clusters.length <= 6;
+    const exploreGroups = ctx.wave.gear === 'EXPLORE' && parsed.value.clusters.length >= 3 && parsed.value.clusters.length <= 6;
+    if (!canonicalFocusGroups && !historicalFocusGroups && !exploreGroups) return fail('CARDINALITY', 'clusters', ctx.wave.gear === 'FOCUS' ? 'Focus requires 1-2 comparison groups or 3-6 historical groups' : 'Explore requires 3-6 clusters');
+    for (const c of parsed.value.clusters) { if (!isObj(c)) return fail('POOL_PARTITION', 'clusters', 'cluster malformed'); const ck = exact(c, ['label', 'ideas'], 'cluster'); if (!ck.ok) return ck as Validation<DeliberationReport>; if (typeof c.label !== 'string' || !normalizedNonBlank(c.label) || !Array.isArray(c.ideas)) return fail('POOL_PARTITION', 'clusters', 'cluster label/ideas are malformed'); if ((canonicalFocusGroups || exploreGroups) && c.ideas.length === 0) return fail('POOL_PARTITION', 'clusters', 'current comparison/mechanism groups must be non-empty'); const ideas: IdeaLocator[] = []; for (const raw of c.ideas) { const l = validateLocator(raw); if (!l.ok) return l as Validation<DeliberationReport>; const key = locatorKey(l.value); if (!expectedKeys.has(key)) return fail('FOREIGN_REF', 'clusters.ideas', 'locator does not resolve to a generator report'); if (clustered.has(key)) return fail('POOL_PARTITION', 'clusters', 'idea occurs in multiple clusters'); clustered.add(key); ideas.push(l.value); } if (ideas.some((l, i) => i > 0 && (order.get(locatorKey(ideas[i - 1])) ?? -1) > (order.get(locatorKey(l)) ?? -1))) return fail('POOL_PARTITION', 'clusters.ideas', 'ideas are not generator-slot/idea ordered'); clusters.push({ label: c.label, ideas }); } if (clustered.size !== expectedLocators.length) return fail('POOL_PARTITION', 'clusters', 'cluster partition incomplete'); if (clusters.some((a, i) => i > 0 && compareStable(clusters[i - 1].label, a.label) > 0)) return fail('POOL_PARTITION', 'clusters', 'clusters not UTF-8 sorted'); if (assetForVersion(ctx.wave.authorship.policyVersion) && ctx.wave.gear === 'EXPLORE' && scores.filter((score) => !score.trap).length < 3) return fail('CARDINALITY', 'scores', 'fresh Explore critic requires at least three non-traps'); report = { ...base.value, scores, clusters };
   } else {
     const k = exact(parsed.value, ['schema', 'wave', 'slotOrdinal', 'sketch', 'loadBearingRisk', 'firstConcreteStep', 'childIdeas'], 'report'); if (!k.ok) return k as Validation<DeliberationReport>; if (ctx.predecessors.length !== 1) return fail('PREDECESSOR', 'predecessors', 'deepener requires exactly one critic predecessor'); const critic = ctx.predecessors.find((p): p is CriticReport => 'scores' in p); const expectedCritic = deriveTopology(ctx.waveRef, ctx.wave).slots.find((s) => s.role === 'CRITIC'); if (!critic || !expectedCritic || critic.slotOrdinal !== expectedCritic.slotOrdinal) return fail('PREDECESSOR', 'predecessors', 'deepener requires the current-wave critic predecessor'); if (!sameRef(critic.wave, ctx.waveRef)) return fail('FOREIGN_REF', 'predecessors[0].wave', 'critic predecessor belongs to another wave'); if (critic.scores.filter((s) => !s.trap).length < 3) return fail('PREDECESSOR', 'predecessors', 'deepener requires critic with three non-traps'); if (typeof parsed.value.sketch !== 'string' || sentenceCount(parsed.value.sketch) < 4 || sentenceCount(parsed.value.sketch) > 8 || typeof parsed.value.loadBearingRisk !== 'string' || typeof parsed.value.firstConcreteStep !== 'string' || !Array.isArray(parsed.value.childIdeas) || parsed.value.childIdeas.length < 3 || parsed.value.childIdeas.length > 5 || parsed.value.childIdeas.some((x) => typeof x !== 'string' || !x)) return fail('INVALID_REPORT', 'deepener', 'deepener fields malformed'); report = { ...base.value, sketch: parsed.value.sketch, loadBearingRisk: parsed.value.loadBearingRisk, firstConcreteStep: parsed.value.firstConcreteStep, childIdeas: parsed.value.childIdeas as unknown as DeepenerReport['childIdeas'] };
   }
-  try { if (Buffer.byteLength(canonicalString(report), 'utf8') > ctx.wave.limits.maxReportBytes || Buffer.byteLength(canonicalString(report), 'utf8') > ctx.policy.maxSettlementBytes) return fail('INPUT_TOO_LARGE', 'report', 'report exceeds byte ceiling'); } catch { return fail('NON_CANONICAL', 'report', 'report is not canonical'); }
+  try { const bytes = Buffer.byteLength(canonicalString(report), 'utf8'); const asset = assetForVersion(ctx.wave.authorship.policyVersion); const roleCeiling = !asset ? ctx.wave.limits.maxReportBytes : ctx.slot.role === 'GENERATOR' ? (ctx.wave.gear === 'FOCUS' ? asset.ceilings.focusReportBytes : asset.ceilings.exploreGeneratorReportBytes) : ctx.slot.role === 'CRITIC' ? asset.ceilings.exploreCriticReportBytes : asset.ceilings.exploreDeepenerReportBytes; if (bytes > ctx.wave.limits.maxReportBytes || bytes > ctx.policy.maxSettlementBytes || bytes > roleCeiling) return fail('INPUT_TOO_LARGE', 'report', 'report exceeds byte ceiling'); } catch { return fail('NON_CANONICAL', 'report', 'report is not canonical'); }
   return ok(report);
+}
+
+/** Second, command-context-bound admission policy. The durable reader above
+ * remains union-tolerant; only a canonical current Focus critic at/above the
+ * caller-supplied rollout floor is contracted to the new writer shape. */
+export function validateCurrentReportAdmission(valueOrBytes: unknown, ctx: { waveRef: Ref; wave: DeliberationWave; slot: TopologySlot; predecessors: readonly DeliberationReport[]; policy: DeliberationPolicy; roleView?: Ref; rolloutGeneration?: number; rolloutFloor: number }): Validation<DeliberationReport> {
+  const validated = validateReport(valueOrBytes, ctx); if (!validated.ok) return validated;
+  const currentFocus = ctx.wave.gear === 'FOCUS'
+    && ctx.wave.generatorLenses.length === 2
+    && ctx.wave.generatorLenses[0]?.text === 'counterexample'
+    && ctx.wave.generatorLenses[1]?.text === 'simplify'
+    && ctx.wave.limits.maxModelCalls === 3
+    && deriveTopology(ctx.waveRef, ctx.wave).slots.length === 3;
+  if (!currentFocus || ctx.slot.role !== 'CRITIC' || ctx.rolloutGeneration === undefined || ctx.rolloutGeneration < ctx.rolloutFloor) return validated;
+  const roleRef = ctx.roleView && validateRef(ctx.roleView); if (!roleRef || !roleRef.ok || roleRef.value.scope !== 'deliberation/role-view' || typeof roleRef.value.bytes !== 'string' || roleRef.value.id !== `role-view:${roleRef.value.digest}`) return fail('FOREIGN_REF', 'roleView', 'current Focus critic role view is not exactly retained');
+  let role: unknown; try { role = parseCanonical<unknown>(roleRef.value.bytes); } catch { return fail('NON_CANONICAL', 'roleView.bytes', 'current Focus critic role view is not canonical'); }
+  if (!isObj(role) || role.kind !== 'CRITIC' || role.contract !== roleContract(ctx.wave, 'CRITIC')) return fail('FOREIGN_REF', 'roleView', 'current Focus critic role contract is not exact');
+  const critic = validated.value as CriticReport;
+  if (!('clusters' in critic) || critic.clusters.length < 1 || critic.clusters.length > 2 || critic.clusters.some((group) => group.ideas.length === 0)) return fail('CARDINALITY', 'clusters', 'current Focus critic requires one or two non-empty complete comparison groups');
+  return validated;
 }
 
 export function reconcileWave(waveRef: Ref, wave: DeliberationWave, accepted: readonly AcceptedReport[]): ReconcileResult {
@@ -463,15 +740,15 @@ export function reconcileWave(waveRef: Ref, wave: DeliberationWave, accepted: re
   const ordered = [...bySlot.entries()].sort((a, b) => a[0] - b[0]); const reports = ordered.map(([, v]) => v.report); const refs = ordered.map(([, v]) => v.ref); const missingSlots = topology.slots.map((s) => s.slotOrdinal).filter((n) => !bySlot.has(n)); const architecture = conflict ? 'CONFLICT' : stale ? 'STALE' : missingSlots.length ? 'MISSING' : 'COMPLETE'; return { architecture, reports, refs, missingSlots, ...(conflict ? { reason: 'conflicting accepted reports' } : stale ? { reason: 'stale report' } : {}) };
 }
 
-export function renderExplore(input: { waveRef: Ref; wave: DeliberationWave; reports: readonly DeliberationReport[]; policy: DeliberationPolicy }): Validation<{ brief: string; wide: string; converge: string; focus: string; provocation: string }> {
-  const boundPolicy = policyBinding(input.policy, input.wave.authorship.policyVersion); if (!boundPolicy.ok) return boundPolicy as Validation<{ brief: string; wide: string; converge: string; focus: string; provocation: string }>;
+export function renderExplore(input: { waveRef: Ref; wave: DeliberationWave; reports: readonly DeliberationReport[]; policy: DeliberationPolicy }): Validation<{ brief: string; wide: string; converge: string; traps: string; deepened: string; provocation: string }> {
+  const boundPolicy = policyBinding(input.policy, input.wave.authorship.policyVersion); if (!boundPolicy.ok) return boundPolicy as Validation<{ brief: string; wide: string; converge: string; traps: string; deepened: string; provocation: string }>;
   if (input.wave.gear !== 'EXPLORE') return fail('INVALID_GEAR', 'wave.gear', 'renderer requires Explore wave');
   const critic = input.reports.find((r): r is CriticReport => 'scores' in r); const generators = input.reports.filter((r): r is GeneratorReport => 'ideas' in r).sort((a, b) => a.slotOrdinal - b.slotOrdinal); const deepeners = input.reports.filter((r): r is DeepenerReport => 'sketch' in r).sort((a, b) => a.slotOrdinal - b.slotOrdinal); if (!critic || generators.length !== 5 || deepeners.length !== 3 || input.reports.length !== 9) return fail('CARDINALITY', 'reports', 'Explore requires exactly nine reports');
-  const boundWaveRef = validateRef(input.waveRef); if (!boundWaveRef.ok) return boundWaveRef as Validation<{ brief: string; wide: string; converge: string; focus: string; provocation: string }>; if (boundWaveRef.value.digest !== digest(input.wave)) return fail('FOREIGN_REF', 'waveRef', 'wave Ref digest does not bind the supplied wave'); const waveRef = boundWaveRef.value; if (input.reports.some((r) => !sameRef(r.wave, waveRef))) return fail('FOREIGN_REF', 'reports.wave', 'report belongs to another wave');
+  const boundWaveRef = validateRef(input.waveRef); if (!boundWaveRef.ok) return boundWaveRef as Validation<{ brief: string; wide: string; converge: string; traps: string; deepened: string; provocation: string }>; if (boundWaveRef.value.digest !== digest(input.wave)) return fail('FOREIGN_REF', 'waveRef', 'wave Ref digest does not bind the supplied wave'); const waveRef = boundWaveRef.value; if (input.reports.some((r) => !sameRef(r.wave, waveRef))) return fail('FOREIGN_REF', 'reports.wave', 'report belongs to another wave');
   const expectedOrdinals = new Set([0, 1, 2, 3, 4, 5, 6, 7, 8]); const slotSet = new Set(input.reports.map((r) => r.slotOrdinal)); if (slotSet.size !== 9 || [...expectedOrdinals].some((n) => !slotSet.has(n))) return fail('INVALID_SLOT', 'reports.slotOrdinal', 'report slots are not the Explore topology');
-  const topology = deriveTopology(waveRef, input.wave); for (const g of generators) { const vr = validateReport(g, { waveRef, wave: input.wave, slot: topology.slots[g.slotOrdinal], predecessors: [], policy: input.policy }); if (!vr.ok) return vr as Validation<{ brief: string; wide: string; converge: string; focus: string; provocation: string }>; }
-  const cv = validateReport(critic, { waveRef, wave: input.wave, slot: topology.slots[5], predecessors: generators, policy: input.policy }); if (!cv.ok) return cv as Validation<{ brief: string; wide: string; converge: string; focus: string; provocation: string }>;
-  for (const d of deepeners) { const dv = validateReport(d, { waveRef, wave: input.wave, slot: topology.slots[d.slotOrdinal], predecessors: [critic], policy: input.policy }); if (!dv.ok) return dv as Validation<{ brief: string; wide: string; converge: string; focus: string; provocation: string }>; }
+  const topology = deriveTopology(waveRef, input.wave); for (const g of generators) { const vr = validateReport(g, { waveRef, wave: input.wave, slot: topology.slots[g.slotOrdinal], predecessors: [], policy: input.policy }); if (!vr.ok) return vr as Validation<{ brief: string; wide: string; converge: string; traps: string; deepened: string; provocation: string }>; }
+  const cv = validateReport(critic, { waveRef, wave: input.wave, slot: topology.slots[5], predecessors: generators, policy: input.policy }); if (!cv.ok) return cv as Validation<{ brief: string; wide: string; converge: string; traps: string; deepened: string; provocation: string }>;
+  for (const d of deepeners) { const dv = validateReport(d, { waveRef, wave: input.wave, slot: topology.slots[d.slotOrdinal], predecessors: [critic], policy: input.policy }); if (!dv.ok) return dv as Validation<{ brief: string; wide: string; converge: string; traps: string; deepened: string; provocation: string }>; }
   const nonTraps = critic.scores.filter((s) => !s.trap && s.viability >= input.policy.viableFloor); if (nonTraps.length < 3) return fail('CARDINALITY', 'critic.scores', 'Explore requires at least three viable non-traps');
   const ideaBy = new Map<string, Idea>();
   for (const g of generators) { const reportDigest = digest(g); for (let i = 0; i < g.ideas.length; i += 1) { ideaBy.set(`${reportDigest}:${i + 1}`, g.ideas[i]); ideaBy.set(`${g.wave.digest}:${i + 1}`, g.ideas[i]); } }
@@ -481,11 +758,12 @@ export function renderExplore(input: { waveRef: Ref; wave: DeliberationWave; rep
   const textFor = (l: IdeaLocator): string => ideaBy.get(`${l.generatorReport.digest}:${l.oneBasedOrdinal}`)?.text ?? '';
   const wide = critic.clusters.map((c) => `${c.label}: ${c.ideas.map((l) => { const s = critic.scores.find((x) => locatorKey(x.idea) === locatorKey(l)); return `${textFor(l)} [N${s?.novelty ?? 0} V${s?.viability ?? 0} F${s?.fit ?? 0}]`; }).join('; ')}`).join('\n');
   const brief = `${input.wave.question.text} — ${generators.reduce((n, g) => n + g.ideas.length, 0)} ideas across ${critic.clusters.length} clusters.`;
-  const converge = finalists.map((s, i) => `${i + 1}. ${i > 0 && star && locatorKey(star.idea) === locatorKey(s.idea) ? '★ ' : ''}${textFor(s.idea)} (${35 * s.novelty + 40 * s.viability + 25 * s.fit})`).join('\n');
-  const focus = deepeners.map((d, i) => `${i + 1}. ${d.sketch}\nRisk: ${d.loadBearingRisk}\nFirst: ${d.firstConcreteStep}\nChildren: ${d.childIdeas.join('; ')}`).join('\n');
+  const converge = finalists.map((s, i) => { const idea = ideaBy.get(`${s.idea.generatorReport.digest}:${s.idea.oneBasedOrdinal}`); return `${i + 1}. ${i === 0 || (star && locatorKey(star.idea) === locatorKey(s.idea)) ? '★ ' : ''}${idea?.text ?? ''} — ${idea?.rationale ?? ''} [N${s.novelty} V${s.viability} F${s.fit}; ${35 * s.novelty + 40 * s.viability + 25 * s.fit}]`; }).join('\n');
+  const deepened = deepeners.map((d, i) => `${i + 1}. Target: ${textFor(finalists[i]!.idea)}\n${d.sketch}\nRisk: ${d.loadBearingRisk}\nFirst: ${d.firstConcreteStep}\nChildren: ${d.childIdeas.join('; ')}`).join('\n');
   const provocation = [...critic.scores].filter((s) => !s.trap && s.viability >= input.policy.viableFloor && !finalists.some((f) => locatorKey(f.idea) === locatorKey(s.idea))).sort((a, b) => b.novelty - a.novelty || compareIdeaLocators(a.idea, b.idea, generators))[0];
   const traps = critic.scores.filter((s) => s.trap).map((s) => `Trap: ${textFor(s.idea)} — ${s.trap}`).join('\n');
-  return ok({ brief, wide, converge: traps ? `${converge}\n${traps}` : converge, focus, provocation: provocation ? textFor(provocation.idea) : (input.policy.frameCatalog.find((f) => f.tag === 'wild')?.text ?? '') });
+  const wildFrame = input.wave.generatorLenses.find((lens) => input.policy.frameCatalog.find((frame) => frame.frameId === (lens as { frameId: string }).frameId)?.tag === 'wild') as { frameId: string } | undefined;
+  return ok({ brief, wide, converge, traps, deepened, provocation: provocation ? `${wildFrame ? `[${wildFrame.frameId}] ` : ''}${textFor(provocation.idea)}` : `${wildFrame ? `[${wildFrame.frameId}] ` : ''}${input.policy.frameCatalog.find((f) => f.tag === 'wild')?.text ?? ''}` });
 }
 
 export function shadowPolicy(input: { authorship: PlanAuthorshipInput; predicates: GearPredicates; policy?: DeliberationPolicy; mode: 'OFF' | 'SHADOW'; sink?: (receipt: Readonly<{ gear: Gear; decisionKey?: string; inputDigest: Sha256 }>) => void }): { mode: 'OFF' | 'SHADOW'; proposal?: GearProposal } {

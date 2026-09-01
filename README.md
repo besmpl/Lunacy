@@ -52,6 +52,13 @@ route, role policy, or eligibility refuses with no fallback. See the concise [ad
 operator contract](orchestrator/DELIBERATION.md) for the rollout corridor,
 kill/revocation procedure, diagnostics, recovery, and disposable validation.
 
+Installed hosts resolve this boundary only through the fingerprinted private
+`runtime/bridge.mjs resolve-plan` route. Its one trusted canonical closed `DIRECT | AUTO | EXPLORE` request and route-local documents replace prose parsing; one
+invocation calls the selector once, returns Direct without managed inputs, or
+validates and starts Focus/Explore in-process. Current Explore admission also
+consumes a fresh invocation-local exact binding and cannot be authorized by the
+retained `explicitExplore` compatibility boolean alone.
+
 ## Mechanical context controls
 
 Lunacy does not rely only on “be concise.” It enforces boundaries:

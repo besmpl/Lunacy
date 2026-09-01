@@ -25,7 +25,7 @@ function normalizeLauncher(source) {
 
 async function sourceFixture() {
   const repo = await mkdtemp(join(tmpdir(), 'lunacy-s7-loader-repo-'));
-  for (const name of ['dist', 'docs', 'schemas', 'tools']) await cp(join(root, name), join(repo, name), { recursive: true });
+  for (const name of ['assets', 'dist', 'docs', 'schemas', 'tools']) await cp(join(root, name), join(repo, name), { recursive: true });
   for (const name of ['package.json', 'package-lock.json']) await cp(join(root, name), join(repo, name));
   await mkdir(join(repo, 'dist', 'synthetic'), { recursive: true });
   const canaryMarker = join(repo, 's7-canary-evaluated');

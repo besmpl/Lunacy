@@ -30,6 +30,8 @@
     "README.md",
     "LICENSE",
     "docs",
+    "assets/deliberation-policy/*.json",
+    "assets/deliberation-policy-compatibility/map.json",
     "orchestrator/DELIBERATION.md",
     "examples",
     "bench",

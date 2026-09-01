@@ -5,9 +5,11 @@ import { createManagedCapability, projectManagedRolloutPolicy, reserveManaged, v
 import { readySteps, validatePlan } from './validator.js';
 import { acknowledge, commandInCurrentFrame } from './outbox.js';
 import { JOURNAL_BYTE_CEILING, JOURNAL_EVENT_CEILING } from './limits.js';
-import { deriveTopology, isManagedDissent, reconcileWave, settlementPrefixDigest, validateReport, validateWave, type AcceptedReport, type DeliberationPolicy, type DeliberationReport, type DeliberationWave, type ReconcileResult } from './deliberation.js';
+import { deriveTopology, isManagedDissent, reconcileWave, resolveWaveSemanticClosure, retainedDeliberationPolicy, settlementPrefixDigest, validateCurrentReportAdmission, validateReport, validateWave, type AcceptedReport, type DeliberationPolicy, type DeliberationReport, type DeliberationWave, type ReconcileResult } from './deliberation.js';
+import { commandExecutionOwner } from './execution-plane.js';
+import { isOneShotManagedCommand, isOneShotManagedDecision, ONE_SHOT_ROLLOUT_GENERATION_FLOOR, requestsManagedSuccessor } from './one-shot.js';
 
-export type ReduceResult = { state: MachineState; outcome: 'WAITING' | 'PHASE_READY' | 'COMPLETE' | 'DECISION_REQUIRED' | 'BLOCKED'; reason?: string; token?: string; brief?: Ref; receipt?: Ref; deferAdmission?: boolean };
+export type ReduceResult = { state: MachineState; outcome: 'WAITING' | 'PHASE_READY' | 'COMPLETE' | 'DECISION_REQUIRED' | 'BLOCKED'; reason?: string; token?: string; brief?: Ref; receipt?: Ref; launchToken?: string; deferAdmission?: boolean };
 export type PreparedDecisionPublication = Readonly<{
   disposition: 'SELECTION' | 'SYNTHESIS' | 'WIDEN';
   settlementRef: Ref | null;
@@ -69,7 +71,8 @@ export function applyManagedReservations(state: MachineState, capability: Manage
       && command.barrierEpoch === state.barrierEpoch
       && command.modeEpoch === state.modeEpoch
       && Boolean(step && step.status === 'ACTIVE')
-      && command.state !== 'ACKED';
+      && command.state !== 'ACKED'
+      && commandExecutionOwner(state, command) === 'DELIBERATION';
   };
   // A zero-wave capability is a valid closed descriptor but cannot admit any
   // command. Remove unreserved candidates before publication rather than
@@ -188,33 +191,18 @@ type ManagedReportPrefix = { waveRef: Ref; result: ReconcileResult };
  * is performed by deliberation.ts. Explore's frame tags are only needed when
  * validating a Wave; the authored five-frame shape is deterministic (four
  * code/design frames followed by one wild frame). */
-function managedPolicyForWave(wave: DeliberationWave): DeliberationPolicy {
-  const frameCatalog = wave.gear === 'EXPLORE'
-    ? wave.generatorLenses.map((frame, index) => ({ frameId: frame.frameId, tag: index === 4 ? 'wild' as const : 'code' as const, text: frame.frameId }))
-    : [];
-  return {
-    version: wave.authorship.policyVersion,
-    frameCatalog,
-    maxMaterialDecisions: 0,
-    maxSettlementBytes: wave.limits.maxTotalReportBytes,
-    maxResolvedRoleInputBytes: wave.limits.maxResolvedRoleInputBytes,
-    convergeCount: 3,
-    nonObviousNovelty: 0,
-    viableFloor: 0,
-  };
-}
-
 function parseManagedWave(ref: Ref, state: MachineState): { ref: Ref; wave: DeliberationWave; policy: DeliberationPolicy } | undefined {
   try {
     if (typeof ref.bytes !== 'string' || ref.scope !== 'deliberation/wave') return undefined;
     const wave = parseCanonical<DeliberationWave>(ref.bytes);
-    const policy = managedPolicyForWave(wave);
+    const policy = retainedDeliberationPolicy(wave);
+    const closure = resolveWaveSemanticClosure(wave); if (!closure.ok) return undefined;
     const valid = validateWave(wave, {
       runId: state.runId,
       phaseId: state.phaseId,
       policy,
-      committedEvidence: new Set(),
-      reachableConstraints: new Set(),
+      committedEvidence: closure.value.committedEvidence,
+      reachableConstraints: closure.value.reachableConstraints,
     });
     if (!valid.ok || digest(wave) !== ref.digest) return undefined;
     return { ref: { ...ref }, wave: valid.value, policy };
@@ -318,7 +306,7 @@ function acceptManagedReport(state: MachineState, command: OutboxCommand, identi
     const topology = deriveTopology(waveContext.ref, waveContext.wave);
     const slot = topology.slots.find((candidate) => candidate.slotOrdinal === report.slotOrdinal);
     if (!slot || slot.stepId !== command.stepId) return undefined;
-    const predecessorReportDigests: Sha256[] = [];
+    const predecessorReportDigests: Sha256[] = []; const predecessorReports: DeliberationReport[] = [];
     for (const dependencyOrdinal of slot.dependencies) {
       const matching = Object.values(state.managed?.acceptedReports ?? {}).filter((row) => row.report.slotOrdinal === dependencyOrdinal
         && managedReportRefEqual(row.report.wave, waveContext.ref)
@@ -326,14 +314,25 @@ function acceptManagedReport(state: MachineState, command: OutboxCommand, identi
         && row.barrierEpoch === command.barrierEpoch && row.modeEpoch === command.modeEpoch);
       if (matching.length !== 1) return undefined;
       predecessorReportDigests.push(matching[0].ref.digest);
+      predecessorReports.push(matching[0].report);
     }
     if (command.roleView && (typeof command.roleView.bytes !== 'string' || command.roleView.scope !== 'deliberation/role-view'
       || !Array.isArray(command.predecessorReportDigests) || canonicalString(predecessorReportDigests) !== canonicalString(command.predecessorReportDigests))) return undefined;
     const attemptAnchor = state.managed?.attempts?.[command.commandId]?.authorityAnchor;
     if (command.roleView && (!proof?.authorityAnchor || !attemptAnchor || canonicalString(proof.authorityAnchor) !== canonicalString(attemptAnchor))) return undefined;
+    const origin = state.managed?.proposal?.rolloutOrigin;
+    if (origin && origin.generation >= ONE_SHOT_ROLLOUT_GENERATION_FLOOR) {
+      const managedOrigin = state.managed?.rolloutOrigin; const attemptOrigin = state.managed?.attempts?.[command.commandId]?.rolloutOrigin;
+      if (!managedOrigin || !attemptOrigin || canonicalString(origin) !== canonicalString(managedOrigin) || canonicalString(origin) !== canonicalString(attemptOrigin)) return undefined;
+    }
+    const contextual = validateCurrentReportAdmission(report, {
+      waveRef: waveContext.ref, wave: waveContext.wave, slot, predecessors: predecessorReports, policy: waveContext.policy,
+      roleView: command.roleView, rolloutGeneration: origin?.generation, rolloutFloor: ONE_SHOT_ROLLOUT_GENERATION_FLOOR,
+    });
+    if (!contextual.ok) return undefined;
     const row: ManagedAcceptedReport = {
       ref: { ...event.ref },
-      report,
+      report: contextual.value,
       commandId: command.commandId,
       ...(command.roleView ? { roleDigest: command.roleView.digest, predecessorReportDigests, authorityAnchor: { ...proof!.authorityAnchor! } } : {}),
       receipt: { commandDigest: command.commandDigest, resultDigest: event.ref.digest, attemptEpoch: command.attemptEpoch, ...(proof?.authorityAnchor ? { authorityAnchorDigest: proof.authorityAnchor.digest } : {}) },
@@ -490,7 +489,8 @@ function reduceEvent(current: MachineState | undefined, plan: Plan, identity: Ev
     // Ordinary schema-1/direct execution keeps its compact status envelope.
     // Managed schema-2 execution must project a receipt-bound Report/v2 row;
     // a status placeholder is deliberately inert and cannot close a prefix.
-    if (state.schema === 2 && state.managed?.proposal) {
+    if (command.roleView) {
+      if (!state.managed) return { state: current, outcome: 'BLOCKED', reason: 'managed Report command has no managed state' };
       const accepted = acceptManagedReport(state, command, identity, event);
       if (!accepted) return { state: current, outcome: 'BLOCKED', reason: 'accepted Report/v2 is invalid or receipt-bound prefix is incomplete' };
       state.managed.acceptedReports ??= {};
@@ -572,14 +572,26 @@ export function applyDispatchReceipt(state: MachineState, identity: EventIdentit
  * old outbox/attempt remains immutable historical evidence; only the step
  * projection is reset and admission may create a new command after the
  * caller's all-dimension reservation gate. */
-export function retireManagedAttempt(current: MachineState, identity: EventIdentity, token: string, plan: Plan, maxInFlight: number, status: 'TIMED_OUT' | 'CANCELLED' | 'FAILED' = 'TIMED_OUT', allowUnbounded = false): ReduceResult {
+export function retireManagedAttempt(current: MachineState, identity: EventIdentity, token: string, plan: Plan, maxInFlight: number, status: 'TIMED_OUT' | 'CANCELLED' | 'FAILED' = 'TIMED_OUT', allowUnbounded = false, providerIntent?: import('./driver.js').ProviderIntentFenceObservation): ReduceResult {
   if (current.schema !== 2 || !current.managed) return { state: current, outcome: 'BLOCKED', reason: 'managed attempt unavailable' };
   const state = copy(current);
   const managed = state.managed!;
   const command = commandForToken(state, token);
   if (!command || command.state !== 'UNKNOWN') return { state: current, outcome: 'BLOCKED', reason: 'attempt is not UNKNOWN' };
+  if (commandExecutionOwner(state, command) !== 'DELIBERATION') return { state: current, outcome: 'BLOCKED', reason: 'command is not managed deliberation work' };
   const attempt = managed.attempts?.[command.commandId];
   if (attempt && !['LIVE', 'UNKNOWN'].includes(attempt.status)) return { state: current, outcome: 'BLOCKED', reason: 'attempt already retired' };
+  if (isOneShotManagedCommand(state, command) && providerIntent?.kind !== 'ABSENT_PROVED') {
+    if (!attempt) return { state: current, outcome: 'BLOCKED', reason: 'managed attempt unavailable' };
+    attempt.status = status;
+    state.status = 'BLOCKED';
+    state.nextAction = 'blocked';
+    const recoveryRef = { id: `retired:${command.launchToken}`, scope: 'outbox/recovery', digest: digest({ launchToken: command.launchToken, commandDigest: command.commandDigest, status }), bytes: canonicalString({ launchToken: command.launchToken, commandDigest: command.commandDigest, status }) } as Ref;
+    const recovery: Event = { kind: 'OBSERVATION', category: 'RECOVERY', ref: recoveryRef };
+    appendJournal(state, { ...identity, eventId: `${identity.eventId}:retire`, payloadDigest: digest(recovery) }, recovery, allowUnbounded);
+    appendJournal(state, identity, { kind: 'RESUME' }, allowUnbounded);
+    return { state, outcome: 'BLOCKED', reason: 'UnknownDispatch', launchToken: command.launchToken };
+  }
   if (attempt) attempt.status = status;
   if (!Number.isSafeInteger(state.attemptEpoch + 1)) return { state: current, outcome: 'BLOCKED', reason: 'attempt epoch exhausted' };
   state.attemptEpoch += 1;
@@ -883,6 +895,7 @@ export function validateManagedDecisionBinding(state: MachineState, token: strin
   const requested = managedDecisionValue(value);
   const disposition = typeof requested.disposition === 'string' ? requested.disposition : typeof requested.kind === 'string' ? requested.kind : typeof requested.decision === 'string' ? requested.decision : undefined;
   if (!disposition || !['SELECTION', 'SYNTHESIS', 'WIDEN'].includes(disposition)) return undefined;
+  if (isOneShotManagedDecision(state, token) && requestsManagedSuccessor(value)) return undefined;
   if (!managedTokenPrefix(state, record)) return undefined;
   const authorshipInputDigest = requested.authorshipInputDigest ?? requested.authorshipDigest;
   if (authorshipInputDigest !== undefined && authorshipInputDigest !== record.authorshipInputDigest) return undefined;
@@ -975,6 +988,9 @@ function applyManagedDecision(state: MachineState, identity: EventIdentity, toke
   if (new Set(leaseRefs.map((item) => canonicalString(item))).size !== leaseRefs.length
     || leaseRefs.length !== expectedClosure.length
     || expectedClosure.some((item) => !leaseRefs.some((candidate) => canonicalString(candidate) === canonicalString(item)))) return { state, outcome: 'BLOCKED', reason: 'publication lease closure is invalid' };
+  // The public preflight is only an optimization.  Repeat the one-shot
+  // successor fence against the exact CAS input immediately before mutation.
+  if (isOneShotManagedDecision(state, token) && requestsManagedSuccessor(value)) return { state, outcome: 'BLOCKED', reason: 'one-shot managed Wave cannot publish a successor' };
   const next = copy(state);
   const nextRecord = next.decisionTokens[token]!;
   nextRecord.consumed = true;

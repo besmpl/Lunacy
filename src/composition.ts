@@ -1,12 +1,21 @@
-import { makeComposedKernel, type DispatcherOptions, type KernelOptions, type RunKernel } from './public.js';
+import { makeComposedKernel, makeComposedKernelForBridge, type DispatcherOptions, type KernelOptions, type RunKernel } from './public.js';
+import type { FilesystemIdentity } from './filesystem.js';
 import type { EffectDriver } from './driver.js';
 import { validateCodexDeliberationHostPolicy, type CodexDeliberationHostPolicy } from './codex-host-policy.js';
 import { CodexDeliberationDriver } from './codex-deliberation-driver.js';
+import { commandExecutionOwner } from './execution-plane.js';
+import { parseCanonical } from './canonical.js';
+import { validateRef as validateDeliberationRef, type DeliberationWave } from './deliberation.js';
+import { createManagedRolloutPolicy } from './managed-capability.js';
+import { inspectExploreAuthorization } from './explore-authorization.js';
+import type { MachineState, OutboxCommand } from './model.js';
 
 export type CompositionOptions = KernelOptions & DispatcherOptions & {
   driver?: EffectDriver;
   /** Closed real Codex host configuration for admitted managed Waves. */
   managedDeliberationPolicy?: CodexDeliberationHostPolicy;
+  /** Private invocation-local proof. It is never persisted or projected. */
+  exploreAuthorization?: unknown;
   /** Backward/host-friendly aliases for the private controls. */
   dispatchTimeoutMs?: number;
   abortSignal?: AbortSignal;
@@ -38,7 +47,7 @@ function projectDispatcher(dispatcher: DispatcherOptions | undefined): Dispatche
 }
 
 const COMPOSITION_CONTROL_KEYS = new Set([
-  'driver', 'managedDeliberationPolicy', 'dispatcher', 'timeoutMs', 'dispatchTimeoutMs',
+  'driver', 'managedDeliberationPolicy', 'exploreAuthorization', 'dispatcher', 'timeoutMs', 'dispatchTimeoutMs',
   'signal', 'abortSignal', 'onYield', 'maxInFlight',
 ]);
 
@@ -72,10 +81,72 @@ function projectKernelOptions(options: CompositionOptions, maxInFlight: number |
   return projected;
 }
 
+type DriverMethods = Readonly<{
+  receiver: EffectDriver;
+  prepare?: NonNullable<EffectDriver['prepare']>;
+  dispatch: EffectDriver['dispatch'];
+  observe?: NonNullable<EffectDriver['observe']>;
+  observeTeardown?: NonNullable<EffectDriver['observeTeardown']>;
+  observeProviderIntent?: NonNullable<EffectDriver['observeProviderIntent']>;
+}>;
+
+function snapshotDriver(driver: EffectDriver | undefined): DriverMethods | undefined {
+  if (!driver) return undefined;
+  return Object.freeze({
+    receiver: driver,
+    prepare: driver.prepare,
+    dispatch: driver.dispatch,
+    observe: driver.observe,
+    observeTeardown: driver.observeTeardown,
+    observeProviderIntent: driver.observeProviderIntent,
+  });
+}
+
+/** Command-scoped private multiplexer. It owns no route state: durable
+ * roleView/predecessor bindings and the pure execution-plane derivation are
+ * the only selectors used before and after restart. */
+function multiplexDrivers(ordinaryDriver: EffectDriver | undefined, deliberationDriver: EffectDriver): EffectDriver {
+  const ordinary = snapshotDriver(ordinaryDriver);
+  const deliberation = snapshotDriver(deliberationDriver)!;
+  const routeRetained = (command: OutboxCommand | undefined): DriverMethods | undefined => command?.roleView ? deliberation : command ? ordinary : undefined;
+  return {
+    available(command, state) {
+      const owner = commandExecutionOwner(state, command);
+      return owner === 'DELIBERATION' ? true : owner === 'ORDINARY' ? ordinary !== undefined : false;
+    },
+    prepare(command: OutboxCommand, state: MachineState) {
+      const owner = commandExecutionOwner(state, command);
+      if (owner !== 'DELIBERATION') return;
+      if (!command.roleView && deliberation.prepare) Reflect.apply(deliberation.prepare, deliberation.receiver, [command, state]);
+    },
+    dispatch(command, token, signal) {
+      const selected = routeRetained(command);
+      if (!selected) throw new Error('command execution plane has no driver');
+      return Reflect.apply(selected.dispatch, selected.receiver, [command, token, signal]);
+    },
+    observe(token, signal, authorityAnchor, retainedCommand) {
+      const selected = routeRetained(retainedCommand);
+      if (!selected?.observe) return undefined;
+      return Reflect.apply(selected.observe, selected.receiver, [token, signal, authorityAnchor, retainedCommand]);
+    },
+    observeTeardown(token, commandDigest, signal, retainedCommand) {
+      const selected = routeRetained(retainedCommand);
+      if (!selected?.observeTeardown) return undefined;
+      return Reflect.apply(selected.observeTeardown, selected.receiver, [token, commandDigest, signal, retainedCommand]);
+    },
+    observeProviderIntent(token, commandDigest, retainedCommand) {
+      const selected = routeRetained(retainedCommand);
+      if (!selected?.observeProviderIntent) return { kind: 'AMBIGUOUS' } as const;
+      return Reflect.apply(selected.observeProviderIntent, selected.receiver, [token, commandDigest, retainedCommand]);
+    },
+  };
+}
+
 /** Private host composition hook; callers still receive only the RunKernel seam. */
-export function composeKernel(options: CompositionOptions): RunKernel {
+function compose(options: CompositionOptions, expectedRootIdentity?: FilesystemIdentity): RunKernel {
   const legacyDriver = options.driver;
   const managedPolicy = options.managedDeliberationPolicy;
+  const suppliedExploreAuthorization = options.exploreAuthorization;
   const dispatcher = options.dispatcher;
   const timeoutMs = options.timeoutMs;
   const dispatchTimeoutMs = options.dispatchTimeoutMs;
@@ -85,6 +156,7 @@ export function composeKernel(options: CompositionOptions): RunKernel {
   const maxInFlight = options.maxInFlight;
   const kernelOptions = projectKernelOptions(options, maxInFlight);
   let driver = legacyDriver;
+  let exploreAuthorization: unknown;
   const managedWave = options.managedRollout?.wave !== undefined && options.managedRollout.policy.mode !== 'disabled';
   if (managedWave) {
     if (!managedPolicy) throw new Error('managed deliberation host policy is unavailable');
@@ -92,7 +164,26 @@ export function composeKernel(options: CompositionOptions): RunKernel {
     const policy = validateCodexDeliberationHostPolicy(managedPolicy);
     if (options.workspace === undefined) throw new Error('managed deliberation target workspace is required');
     if (policy.targetWorkspace !== options.workspace) throw new Error('managed deliberation target workspace mismatch');
-    driver = new CodexDeliberationDriver({ policy, wave: options.managedRollout.wave!, deliberationPolicy: options.managedRollout.deliberationPolicy });
+    // Composition independently checks the exact current Wave tuple before
+    // forwarding the opaque process-local proof. Kernel admission consumes
+    // and checks it again; a loose explicitExplore boolean is never upgraded.
+    try {
+      const checkedRef = validateDeliberationRef(options.managedRollout.wave!);
+      if (checkedRef.ok && typeof checkedRef.value.bytes === 'string') {
+        const wave = parseCanonical<DeliberationWave>(checkedRef.value.bytes);
+        const rolloutPolicy = createManagedRolloutPolicy(options.managedRollout.policy);
+        if (wave.gear === 'EXPLORE' && inspectExploreAuthorization(suppliedExploreAuthorization, {
+          intent: wave.authorship.intent,
+          authorityDigest: wave.authorship.authorityDigest,
+          waveDigest: checkedRef.value.digest,
+          runId: wave.authorship.runId,
+          phaseId: wave.authorship.phaseId,
+          rolloutPolicyDigest: rolloutPolicy.digest,
+        })) exploreAuthorization = suppliedExploreAuthorization;
+      }
+    } catch { /* malformed/unbound proof remains unavailable to admission */ }
+    const deliberation = new CodexDeliberationDriver({ policy, wave: options.managedRollout.wave!, deliberationPolicy: options.managedRollout.deliberationPolicy });
+    driver = multiplexDrivers(legacyDriver, deliberation);
   }
   const merged: DispatcherOptions = {
     ...projectDispatcher(dispatcher),
@@ -100,5 +191,16 @@ export function composeKernel(options: CompositionOptions): RunKernel {
     ...(signal === undefined && abortSignal === undefined ? {} : { signal: signal ?? abortSignal }),
     ...(onYield === undefined ? {} : { onYield }),
   };
-  return makeComposedKernel(kernelOptions, driver, merged);
+  const invocation = exploreAuthorization === undefined ? undefined : { exploreAuthorization };
+  return expectedRootIdentity
+    ? makeComposedKernelForBridge(kernelOptions, expectedRootIdentity, driver, merged, invocation)
+    : makeComposedKernel(kernelOptions, driver, merged, invocation);
+}
+
+export function composeKernel(options: CompositionOptions): RunKernel { return compose(options); }
+
+/** Root-bound variant used only while the private bridge owns its operation
+ * lock.  Provider work begins later, after the lock has been released. */
+export function composeKernelForBridge(options: CompositionOptions, expectedRootIdentity: FilesystemIdentity): RunKernel {
+  return compose(options, expectedRootIdentity);
 }

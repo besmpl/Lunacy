@@ -10,7 +10,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 async function sourceFixture() {
   const repo = await mkdtemp(join(tmpdir(), 'lunacy-r2-deploy-repo-'));
-  for (const name of ['dist', 'docs', 'schemas', 'tools']) await cp(join(root, name), join(repo, name), { recursive: true });
+  for (const name of ['assets', 'dist', 'docs', 'schemas', 'tools']) await cp(join(root, name), join(repo, name), { recursive: true });
   for (const name of ['package.json', 'package-lock.json']) await cp(join(root, name), join(repo, name));
   return repo;
 }
@@ -44,7 +44,7 @@ test('R2 complete-tree publication removes owned stale files but preserves unrel
     const report = JSON.parse(result.stdout);
     // The generated release owns its exact runtime payload; the complete verified tree
     // also contains the one explicitly preserved operator sentinel above.
-    assert.equal(report.managedFiles, 198);
+    assert.equal(report.managedFiles, 217);
     assert.match(report.managedAggregate, /^[0-9a-f]{64}$/);
   } finally {
     await rm(repo, { recursive: true, force: true });

@@ -1,24 +1,24 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { promises as dns } from 'node:dns';
-import { promises as fs } from 'node:fs';
+import { constants as fsConstants, promises as fs } from 'node:fs';
 import { lstatSync, realpathSync, statSync } from 'node:fs';
 import { connect as connectTcp, createServer, isIP, type Server, type Socket } from 'node:net';
 import { connect as connectTls } from 'node:tls';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { canonicalString, digest, parseCanonical } from './canonical.js';
 import {
   deriveTopology,
   materializeRoleView,
+  resolveWaveSemanticClosure,
   validateReport,
   validateWave,
   type AcceptedReport,
   type DeliberationPolicy,
   type DeliberationReport,
   type DeliberationWave,
-  type ResolvedRef,
 } from './deliberation.js';
-import type { EffectDriver } from './driver.js';
+import type { EffectDriver, ProviderIntentFenceObservation } from './driver.js';
 import type { MachineState, OutboxCommand, Ref, Sha256 } from './model.js';
 import type { DriverReceipt } from './outbox.js';
 import {
@@ -39,6 +39,13 @@ export type CodexDeliberationDriverOptions = Readonly<{
 type CommandEvidence = Readonly<Pick<OutboxCommand,
   'commandId' | 'runId' | 'phaseId' | 'stepId' | 'attemptEpoch' | 'authorityEpoch' |
   'barrierEpoch' | 'modeEpoch' | 'launchToken' | 'commandDigest'>>;
+
+type ProviderIntentFence = Readonly<{
+  schema: 'lunacy-provider-intent/v1';
+  command: CommandEvidence;
+  roleDigest: Sha256;
+  predecessorReportDigests: readonly Sha256[];
+}>;
 
 type ReceiptEvidence = Readonly<{
   schema: 'lunacy-codex-deliberation-receipt/v2';
@@ -378,9 +385,9 @@ export class CodexDeliberationDriver implements EffectDriver {
     try { wave = parseCanonical<DeliberationWave>(options.wave.bytes); }
     catch { fail('Wave Ref is invalid'); }
     if (digest(wave) !== options.wave.digest) fail('Wave Ref is invalid');
-    const committedEvidence = new Set(wave.question.evidence.map(provenance));
-    const reachableConstraints = new Set(wave.question.constraints.map(provenance));
-    const validated = validateWave(wave, { runId: wave.authorship.runId, phaseId: wave.authorship.phaseId, policy: options.deliberationPolicy, committedEvidence, reachableConstraints });
+    const closure = resolveWaveSemanticClosure(wave);
+    if (!closure.ok) fail(`Wave semantic closure is invalid: ${closure.message}`);
+    const validated = validateWave(wave, { runId: wave.authorship.runId, phaseId: wave.authorship.phaseId, policy: options.deliberationPolicy, committedEvidence: closure.value.committedEvidence, reachableConstraints: closure.value.reachableConstraints });
     if (!validated.ok) fail(`Wave is not admitted by deliberation policy: ${validated.message}`);
     this.waveRef = Object.freeze(JSON.parse(JSON.stringify(options.wave)) as Ref);
     this.wave = Object.freeze(JSON.parse(JSON.stringify(validated.value)) as DeliberationWave);
@@ -463,11 +470,9 @@ export class CodexDeliberationDriver implements EffectDriver {
       if (refs.length !== 1) fail(`slot ${slot.slotOrdinal} requires exactly one accepted predecessor for slot ${ordinal}`);
       return refs[0]!;
     });
-    const resolved = new Map<string, ResolvedRef>();
-    for (const ref of [...this.wave.question.evidence, ...this.wave.question.constraints]) {
-      if (typeof ref.bytes !== 'string') fail(`sealed role input ${ref.id} has no canonical bytes`);
-      resolved.set(provenance(ref), { ref: { ...ref }, bytes: ref.bytes, size: Buffer.byteLength(ref.bytes, 'utf8') });
-    }
+    const closure = resolveWaveSemanticClosure(this.wave);
+    if (!closure.ok) fail(`sealed role input closure is invalid: ${closure.message}`);
+    const resolved = closure.value.resolved;
     const materialized = materializeRoleView({ waveRef: this.waveRef, wave: this.wave, slot, predecessorRefs, acceptedReportsByRef, resolved, policy: this.deliberationPolicy });
     if (!materialized.ok) fail(`role materialization failed: ${materialized.code} ${materialized.message}`);
     const bytes = canonicalString(materialized.value);
@@ -490,9 +495,6 @@ export class CodexDeliberationDriver implements EffectDriver {
     if (signal?.aborted) fail('launch was cancelled before spawn');
     const paths = this.paths(token);
     const args = buildCodexDeliberationArguments(this.policy, paths.output);
-    try { await fs.writeFile(paths.reservation, canonicalString({ launchToken: token, commandDigest: command.commandDigest, roleDigest: command.roleView!.digest }), { flag: 'wx', mode: 0o600 }); }
-    catch { fail('launch token is already reserved'); }
-
     let attemptCreated = false;
     let providerLaunched = false;
     let providerExited = false;
@@ -519,6 +521,13 @@ export class CodexDeliberationDriver implements EffectDriver {
       const isolationProfileDigest = digest(isolationProfile);
       const environmentDigest = digest(environment);
       transport.bindInvocation(isolationProfileDigest, environmentDigest);
+      // Every retryable preparation and frozen-identity check is complete
+      // before this permanent fence.  Once its file and parent directory are
+      // durable, provider replacement is forbidden for this attempt forever.
+      const beforeFence = await attestCodexDeliberationHost(this.policy);
+      this.assertConstructionIdentity();
+      if (!same(attestation, beforeFence)) fail('host identity changed before provider intent');
+      await this.writeProviderIntentFence(paths.reservation, command);
       providerLaunched = true;
       const providerError = await this.run(attestation.readIsolation.executable.path, isolatedArgs, command.roleView!.bytes!, paths.attempt, environment, signal);
       providerExited = true;
@@ -532,9 +541,6 @@ export class CodexDeliberationDriver implements EffectDriver {
       await this.writeTransportEvidence(paths, transportEvidence);
       transportPersisted = true;
       if (providerError) throw providerError;
-      const after = await attestCodexDeliberationHost(this.policy);
-      this.assertConstructionIdentity();
-      if (!same(attestation, after)) fail('host identity changed across provider entry');
       const report = await this.readReport(paths.output);
       const predecessors = this.rolePredecessors(role);
       const topology = deriveTopology(this.waveRef, this.wave);
@@ -556,7 +562,7 @@ export class CodexDeliberationDriver implements EffectDriver {
         argvDigest: digest(isolatedArgs),
         environmentDigest,
         isolationProfileDigest,
-        attestation: after,
+        attestation,
         transport: transportEvidence,
         teardown: teardownRef,
       };
@@ -570,8 +576,25 @@ export class CodexDeliberationDriver implements EffectDriver {
       if (attemptCreated && !providerLaunched) { await this.removeScratch(paths); attemptCreated = false; }
       if (attemptCreated && providerExited && transportPersisted) { await this.removeScratch(paths); attemptCreated = false; }
       if (ownsTeardown && providerExited && transportEvidence && transportPersisted && !teardownRef) teardownRef = await this.writeTeardown(paths, command, transportEvidence);
-      await fs.rm(paths.reservation, { force: true }).catch(() => undefined);
     }
+  }
+
+  async observeProviderIntent(token: string, expectedCommandDigest: string, retainedCommand?: OutboxCommand): Promise<ProviderIntentFenceObservation> {
+    if (!retainedCommand || token !== retainedCommand.launchToken || expectedCommandDigest !== retainedCommand.commandDigest || !retainedCommand.roleView) return { kind: 'AMBIGUOUS' };
+    const path = this.paths(token).reservation;
+    let raw: string;
+    try { raw = await fs.readFile(path, 'utf8'); }
+    catch (error) { return (error as NodeJS.ErrnoException).code === 'ENOENT' ? { kind: 'ABSENT_PROVED' } : { kind: 'AMBIGUOUS' }; }
+    try {
+      const value = parseCanonical<ProviderIntentFence>(raw);
+      if (canonicalString(value) !== raw || value.schema !== 'lunacy-provider-intent/v1'
+        || Object.keys(value).sort().join(',') !== 'command,predecessorReportDigests,roleDigest,schema'
+        || !same(value.command, this.commandEvidence(retainedCommand))
+        || value.roleDigest !== retainedCommand.roleView.digest
+        || !same(value.predecessorReportDigests, retainedCommand.predecessorReportDigests ?? [])) return { kind: 'AMBIGUOUS' };
+      const fence: Ref = { id: `provider-intent:${digest(value)}`, scope: 'outbox/provider-intent', digest: digest(value), bytes: raw };
+      return { kind: 'PRESENT_VALID', fence };
+    } catch { return { kind: 'AMBIGUOUS' }; }
   }
 
   async observe(token: string, signal?: AbortSignal, authorityAnchor?: Ref, retainedCommand?: OutboxCommand): Promise<DriverReceipt | undefined> {
@@ -600,14 +623,14 @@ export class CodexDeliberationDriver implements EffectDriver {
       const predecessors = this.rolePredecessors(role);
       const validated = validateReport(report, { waveRef: this.waveRef, wave: this.wave, slot, predecessors, policy: this.deliberationPolicy });
       if (!validated.ok || canonicalString(validated.value) !== evidence.report.bytes) return undefined;
-      const attestation = await attestCodexDeliberationHost(this.policy);
-      this.assertConstructionIdentity();
+      const attestation = evidence.attestation;
+      if (attestation.policyDigest !== digest(this.policy)) return undefined;
       const transportSummary = await this.readTransportEvidence(paths, evidence.transport);
       const isolationProfile = buildCodexDeliberationIsolationProfile(this.policy, paths.attempt, transportSummary.listener.port);
       const isolatedArgs = ['-p', isolationProfile, attestation.executable.physicalPath, ...buildCodexDeliberationArguments(this.policy, paths.output)];
       const environment = this.childEnvironment(paths.attempt, paths.authHome, transportSummary.listener.port);
       if (!this.validTransportEvidence(transportSummary, attestation.modelTransport.digest, attestation.readIsolation.tlsRoots.digest, digest(isolationProfile), digest(environment))) return undefined;
-      if (!same(evidence.attestation, attestation) || evidence.argvDigest !== digest(isolatedArgs) || evidence.environmentDigest !== digest(environment) || evidence.isolationProfileDigest !== digest(isolationProfile)) return undefined;
+      if (evidence.argvDigest !== digest(isolatedArgs) || evidence.environmentDigest !== digest(environment) || evidence.isolationProfileDigest !== digest(isolationProfile)) return undefined;
       const teardown = await this.observeTeardown(token, evidence.command.commandDigest, signal);
       if (!teardown || !same(teardown, evidence.teardown)) return undefined;
       if (parseCanonical<TeardownEvidence>(teardown.bytes!).transportDigest !== evidence.transport.digest) return undefined;
@@ -634,11 +657,7 @@ export class CodexDeliberationDriver implements EffectDriver {
       if (token !== launchToken(evidence.command.commandId, evidence.command.attemptEpoch, evidence.roleDigest, evidence.predecessorReportDigests)) return undefined;
       const transport = await this.readTransportEvidence(paths);
       if (digest(transport) !== evidence.transportDigest) return undefined;
-      const attestation = await attestCodexDeliberationHost(this.policy);
-      this.assertConstructionIdentity();
-      const isolationProfile = buildCodexDeliberationIsolationProfile(this.policy, paths.attempt, transport.listener.port);
-      const environment = this.childEnvironment(paths.attempt, paths.authHome, transport.listener.port);
-      if (!this.validTransportEvidence(transport, attestation.modelTransport.digest, attestation.readIsolation.tlsRoots.digest, digest(isolationProfile), digest(environment))) return undefined;
+      if (!transport.closed) return undefined;
       const scratchAbsent = await fs.lstat(paths.attempt).then(() => false, (error: NodeJS.ErrnoException) => error.code === 'ENOENT');
       const authAbsent = await fs.lstat(paths.authHome).then(() => false, (error: NodeJS.ErrnoException) => error.code === 'ENOENT');
       if (!scratchAbsent || !authAbsent) return undefined;
@@ -689,7 +708,8 @@ export class CodexDeliberationDriver implements EffectDriver {
       assertRoleRef(bound.report.wave);
     };
     if (kind === 'GENERATOR') {
-      if (!role.lens || Object.keys(role.lens).join(',') !== 'text' || typeof role.lens.text !== 'string') fail('generator lens projection is malformed');
+      if (!role.lens || !['text', 'tags,text'].includes(Object.keys(role.lens).sort().join(',')) || typeof role.lens.text !== 'string'
+        || (role.lens.tags !== undefined && (!Array.isArray(role.lens.tags) || role.lens.tags.length === 0 || role.lens.tags.some((tag: unknown) => !['code', 'design', 'general', 'wild'].includes(String(tag)))))) fail('generator lens projection is malformed');
     } else if (kind === 'CRITIC') {
       if (!Array.isArray(role.generators)) fail('critic predecessor projection is malformed');
       for (const bound of role.generators) assertBound(bound, ['schema', 'wave', 'slotOrdinal', 'ideas']);
@@ -760,6 +780,24 @@ export class CodexDeliberationDriver implements EffectDriver {
       teardown: join(this.policy.evidenceRoot, `managed-${key}.teardown.json`),
       transport: join(this.policy.evidenceRoot, `managed-${key}.transport.json`),
     };
+  }
+
+  private async writeProviderIntentFence(path: string, command: OutboxCommand): Promise<void> {
+    const value: ProviderIntentFence = {
+      schema: 'lunacy-provider-intent/v1', command: this.commandEvidence(command),
+      roleDigest: command.roleView!.digest, predecessorReportDigests: [...command.predecessorReportDigests!] as Sha256[],
+    };
+    let handle;
+    try {
+      handle = await fs.open(path, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL, 0o600);
+      await handle.writeFile(canonicalString(value), 'utf8');
+      await handle.sync();
+    } catch { fail('launch token is already reserved or cannot be made durable'); }
+    finally { await handle?.close().catch(() => undefined); }
+    let directory;
+    try { directory = await fs.open(dirname(path), fsConstants.O_RDONLY); await directory.sync(); }
+    catch { fail('provider-intent parent directory cannot be made durable'); }
+    finally { await directory?.close().catch(() => undefined); }
   }
 
   private async writeTransportEvidence(paths: ReturnType<CodexDeliberationDriver['paths']>, evidence: ModelTransportEvidenceRef): Promise<void> {

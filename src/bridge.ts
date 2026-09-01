@@ -477,7 +477,7 @@ async function reclaimBridgeLock(lockPath: string, directory: string): Promise<b
   }
 }
 
-async function withBridgeOperationLock<T>(rootPath: string, fn: (rootIdentity: FilesystemIdentity) => Promise<T>): Promise<T> {
+export async function withBridgeOperationLock<T>(rootPath: string, fn: (rootIdentity: FilesystemIdentity) => Promise<T>): Promise<T> {
   const key = rootPath;
   const previous = bridgeProcessLocks.get(key) ?? Promise.resolve();
   let release!: () => void;

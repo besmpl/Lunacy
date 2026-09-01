@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { composeKernel } from '../dist/composition.js';
+import { makeExactManagedKernel } from './exact-managed-harness.js';
 import { createManagedCapability } from '../dist/managed-capability.js';
 import { authorPlan, compileWavePlan, deriveTopology } from '../dist/deliberation.js';
 import { canonicalString, digest } from '../dist/canonical.js';
@@ -47,8 +47,8 @@ function authored(gear, runId) {
   const deepeners = gear === 'EXPLORE' ? [6, 7, 8].map((slotOrdinal) => ({ schema: 'lunacy-deliberation-report/v2', wave: waveRef, slotOrdinal, sketch: 'One. Two. Three. Four.', loadBearingRisk: 'risk', firstConcreteStep: 'step', childIdeas: ['a', 'b', 'c'] })) : [];
   const reports = [...generators, critic, ...deepeners];
   const plan = validatePlan(compileWavePlan(waveRef, wave).value).plan;
-  const byStep = new Map(topology.slots.map((slot, index) => [slot.stepId, reportRef(reports[index])]));
   const reportRefs = reports.map((report) => reportRef(report));
+  const byStep = new Map(topology.slots.map((slot, index) => [slot.stepId, reportRefs[index]]));
   return { waveRef, wave, topology, reports, reportRefs, plan, byStep, intent };
 }
 
@@ -69,7 +69,7 @@ async function reachDecision({ runId, fixture, rootDir, memory = false, calls = 
     const report = fixture.byStep.get(command.stepId);
     return { launchToken, commandDigest: command.commandDigest, ref: report };
   } };
-  const kernel = composeKernel({ plan: fixture.plan, ...(memory ? {} : { rootDir }), managedCapability: capability(calls, bytes), maxInFlight: calls, driver });
+  const kernel = makeExactManagedKernel({ plan: fixture.plan, ...(memory ? {} : { rootDir }), capability: capability(calls, bytes), waveRef: fixture.waveRef, wave: fixture.wave, policy, maxInFlight: calls, driver });
   let yielded = await kernel.advance(start(runId, fixture));
   const completed = new Set();
   for (let index = 0; index < 200 && yielded.kind !== 'DECISION_REQUIRED' && yielded.kind !== 'BLOCKED'; index += 1) {

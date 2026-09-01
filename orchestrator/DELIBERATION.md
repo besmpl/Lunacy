@@ -13,14 +13,14 @@ still leaves the managed path disabled/refused.
 
 Gear selection is deterministic for the sealed decision/evidence/policy
 inputs. Explicit Explore direction wins; otherwise proof that only one route
-remains selects Direct, an open-ended + high-stakes + openly phrased decision
-selects Explore, and another unresolved material discriminator selects Focus.
-Closed phrasing prevents implicit Explore but never fabricates a settlement.
+remains selects Direct and another unresolved material discriminator selects
+Focus. New installed commands never select Explore implicitly. Historical D4
+reader/recovery behavior remains supported but cannot mint new authority.
 
 - **Direct** is a true bypass: no Wave, Report, deliberation budget, managed
   host, or model fan-out is initialized. Ordinary Lunacy execution is
   unchanged.
-- **Focus** is two or three isolated, one-candidate generators followed by one
+- **Focus** is exactly two isolated, one-candidate generators followed by one
   critic. It has no deepener. Installed automatic Focus is one-shot: if its
   single Wave does not settle, the host returns exactly one parent decision
   boundary and does not automatically `WIDEN` or start another Wave.
@@ -70,6 +70,10 @@ The existing closed rollout policy has one monotonic generation and one mode:
 | D3 | `automatic-focus` | At most one eligible automatic pre-Plan Focus Wave plus explicit Explore; no implicit Explore. |
 | D4 | `automatic-explore` | D3 plus eligible implicit Explore only when open-ended, high-stakes, and openly phrased are all true. |
 
+The D4 row remains a historical/internal reader contract. Current installed
+admission is explicit-only for Explore even when that retained policy spelling
+is read.
+
 Every non-Direct rung also requires the exact effect-denied capability,
 one decision key, closed static topology, sealed evidence, no claims/effects,
 and no child delegation. Shadow output is diagnostic only: its origin remains
@@ -108,6 +112,21 @@ delegation. Direct remains a zero-fan-out bypass. D3 admits automatic Focus and
 explicitly requested unsettled Explore only; it never admits implicit Explore.
 The parent remains the sole settlement, complete-Plan authorship/adoption, and
 gate authority.
+
+## Installed pre-Plan resolver
+
+The only installed selection/authorship seam is the verified private
+`"$NODE" runtime/bridge.mjs resolve-plan` route. The trusted parent passes one canonical closed `DIRECT | AUTO | EXPLORE` request. Focus and Explore additionally carry exact deliberation and rollout policy documents. The adapter
+does not inspect free-form user text and performs selection exactly once.
+Direct returns the complete Plan with no Wave, managed options, lease, or
+provider call. Focus and Explore validate the authored Wave and enter the
+existing managed START path within that same process.
+
+For each current Explore invocation, the adapter mints one private process-local
+authorization and composition/kernel consume it once. Its exact binding covers
+the intent Ref, authority digest, Wave digest, run and phase, and rollout policy
+digest. It is never serialized or persisted. `explicitExplore`, Report text,
+metrics, gate results, and prior requests remain non-authoritative.
 
 After that one automatic Wave, the host never automatically composes another
 Focus or `WIDEN`s from its Reports. Gates, repair, worker completion, resume,

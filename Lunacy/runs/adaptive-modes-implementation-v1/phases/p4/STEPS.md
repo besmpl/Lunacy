@@ -1,0 +1,7 @@
+# P4 Steps
+Goal: implement roadmap R4 as one private installed bridge resolver release on accepted P1-P3, with trusted explicit mode selection and invocation-scoped Explore authority.
+Gate: private `resolve-plan` bridge route consumes the exact existing Plan-authorship document and exact policies; `--intent-mode auto|direct|explore` is selected by the trusted parent; one invocation calls `resolvePrePlan` exactly once; Direct returns a complete Plan with zero managed inputs; Focus/Explore invoke the existing managed START path in-process; Explore requires a freshly minted/consumed invocation-local authorization binding intent, authority, Wave, run/phase, and rollout policy; loose legacy `explicitExplore` alone cannot authorize new Explore; generated deployment/help/docs and tracked-only installed runtime smoke agree; terminal focused checks and `npm run check`. No public root API/schema/ledger, live activation, installation, commit, or push.
+
+| Step | Goal | Depends | Adversary | Status | Report |
+|---|---|---|---|---|---|
+| S1 | Inventory and reuse bridge CLI, Plan-authorship input, managed START, capability/policy, generated deploy/help, and tracked-only package seams; implement the private resolver route and same-invocation Explore authorization end-to-end with exact Direct/Focus/Explore/refusal tests and installed-artifact smoke. | P3 PASS | NO | ACTIVE | `reports/S1-worker-01.md` |

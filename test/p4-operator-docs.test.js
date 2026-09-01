@@ -13,7 +13,7 @@ test('adaptive operator contract limits installed D3 to one pre-Plan Focus wave'
   for (const invariant of [
     /package\/runtime rollout is disabled by default/i,
     /Direct[^\n]*true bypass/i,
-    /Focus[^\n]*two or three isolated/i,
+    /Focus[^\n]*exactly two isolated/i,
     /Explore[^\n]*five isolated generators producing six ideas each/i,
     /exactly 3–6 mechanism clusters/,
     /35N \+ 40V \+ 25F/,

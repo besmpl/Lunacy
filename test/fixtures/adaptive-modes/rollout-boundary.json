@@ -1,0 +1,1 @@
+{"boundary":20,"kind":"ROLLOUT_BOUNDARY","projection":{"generations":[19,20,21],"unfinished":3},"states":[{"generation":19,"mode":"focus-canary","unfinishedManagedAttempt":true},{"generation":20,"mode":"focus-canary","unfinishedManagedAttempt":true},{"generation":21,"mode":"focus-canary","unfinishedManagedAttempt":true}]}

@@ -72,6 +72,16 @@ test('bridge lifecycle stays private while composition remains the only package 
   await assert.rejects(() => import('lunacy-runtime/dist/bridge.js'), { code: 'ERR_PACKAGE_PATH_NOT_EXPORTED' });
 });
 
+test('adaptive resolver doctrine names only the verified private installed route', () => {
+  for (const path of ['README.md', 'SKILL.md', 'orchestrator/DELIBERATION.md', 'docs/API.md', 'docs/RECOVERY.md', 'docs/INSTALL.md']) {
+    const bytes = readFileSync(join(root, path), 'utf8');
+    assert.match(bytes, /resolve-plan/);
+  }
+  const api = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).exports;
+  assert.deepEqual(Object.keys(api).sort(), ['.', './dist/composition.js']);
+  assert.match(readFileSync(join(root, 'orchestrator/DELIBERATION.md'), 'utf8'), /process-local\s+authorization/);
+});
+
 test('published package excludes private bridge/Beads/Workfront executable surfaces', () => {
   const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
   assert.equal(packageJson.bin['lunacy-bridge'], undefined);

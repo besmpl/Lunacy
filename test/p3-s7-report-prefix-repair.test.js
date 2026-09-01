@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { composeKernel } from '../dist/composition.js';
+import { makeExactManagedKernel } from './exact-managed-harness.js';
 import { createManagedCapability } from '../dist/managed-capability.js';
 import { authorPlan, compileWavePlan, deriveTopology, reconcileWave } from '../dist/deliberation.js';
 import { canonicalString, digest } from '../dist/canonical.js';
@@ -66,7 +66,7 @@ async function completeWave(runId, fixture, root, mutate = () => undefined) {
     const altered = mutate(command, report);
     return { launchToken, commandDigest: command.commandDigest, ref: altered?.receipt ?? report };
   } };
-  const kernel = composeKernel({ plan: fixture.plan, rootDir: root, managedCapability: capability(fixture.reports.length), maxInFlight: fixture.reports.length, driver });
+  const kernel = makeExactManagedKernel({ plan: fixture.plan, rootDir: root, capability: capability(fixture.reports.length), waveRef: fixture.waveRef, wave: fixture.wave, policy, maxInFlight: fixture.reports.length, driver });
   let yielded = await kernel.advance(input(runId, 'start', { kind: 'START', intentRef: ref('plan', fixture.plan) }));
   for (let index = 0; index < 100 && yielded.kind !== 'DECISION_REQUIRED'; index += 1) {
     const state = (await new FileArtifactStore(root).load()).state;
@@ -115,13 +115,13 @@ test('partial and stale epoch completions remain non-authoritative', async () =>
   const root = await mkdtemp(join(tmpdir(), 'p3-s7-partial-'));
   try {
     const driver = { dispatch(command, launchToken) { return { launchToken, commandDigest: command.commandDigest, ref: fixture.byStep.get(command.stepId) }; } };
-    const kernel = composeKernel({ plan: fixture.plan, rootDir: root, managedCapability: capability(3), maxInFlight: 2, driver });
+    const kernel = makeExactManagedKernel({ plan: fixture.plan, rootDir: root, capability: capability(3), waveRef: fixture.waveRef, wave: fixture.wave, policy, maxInFlight: 2, driver });
     let yielded = await kernel.advance(input('s7-partial', 'start', { kind: 'START', intentRef: ref('plan', fixture.plan) }));
     yielded = await kernel.advance(input('s7-partial', 'resume', { kind: 'RESUME' }, yielded.snapshot));
     const state = (await new FileArtifactStore(root).load()).state;
     const command = Object.values(state.outbox).find((candidate) => candidate.state === 'ACKED' && state.steps[candidate.stepId]?.status === 'ACTIVE');
     yielded = await kernel.advance(input('s7-partial', 'worker', { kind: 'WORKER_ENVELOPE', ref: fixture.byStep.get(command.stepId) }, yielded.snapshot, command.launchToken));
-    assert.equal(yielded.kind, 'WAITING');
+    assert.equal(yielded.kind, 'WAITING', yielded.reason);
     assert.equal(Object.values((await new FileArtifactStore(root).load()).state.decisionTokens).some((token) => token.kind === 'DELIBERATION_SELECTION'), false);
     await assert.rejects(() => kernel.advance(input('s7-partial', 'stale', { kind: 'RESUME' }, { ...yielded.snapshot, attemptEpoch: yielded.snapshot.attemptEpoch + 1 })), /Superseded/);
   } finally { await rm(root, { recursive: true, force: true }); }
@@ -132,7 +132,7 @@ test('wrong mode epoch cannot admit an otherwise valid Report/v2 receipt', async
   const root = await mkdtemp(join(tmpdir(), 'p3-s7-mode-'));
   try {
     const driver = { dispatch(command, launchToken) { return { launchToken, commandDigest: command.commandDigest, ref: fixture.byStep.get(command.stepId) }; } };
-    const kernel = composeKernel({ plan: fixture.plan, rootDir: root, managedCapability: capability(3), maxInFlight: 2, driver });
+    const kernel = makeExactManagedKernel({ plan: fixture.plan, rootDir: root, capability: capability(3), waveRef: fixture.waveRef, wave: fixture.wave, policy, maxInFlight: 2, driver });
     let yielded = await kernel.advance(input('s7-mode', 'start', { kind: 'START', intentRef: ref('plan', fixture.plan) }));
     yielded = await kernel.advance(input('s7-mode', 'resume', { kind: 'RESUME' }, yielded.snapshot));
     const state = (await new FileArtifactStore(root).load()).state;
@@ -155,7 +155,14 @@ for (const gear of ['FOCUS', 'EXPLORE']) test(`valid ${gear} completion issues d
     const state = (await new FileArtifactStore(root).load()).state;
     const token = state.decisionTokens[run.yielded.token];
     assert.equal(token.kind, 'DELIBERATION_SELECTION');
-    assert.deepEqual(token.orderedReportRefs, fixture.reports.map((report) => ref(`report:${digest(report).slice(0, 16)}`, report, 'deliberation/report')));
+    const accepted = fixture.reports.map((report) => {
+      const row = state.managed.acceptedReports[digest(report)];
+      assert.ok(row);
+      assert.equal(row.ref.id, `managed-report:${row.roleDigest}:${row.ref.digest}`);
+      return row.ref;
+    });
+    assert.deepEqual(token.orderedReportRefs, accepted);
+    assert.deepEqual(token.orderedReportRefs.map(({ digest: reportDigest }) => reportDigest), fixture.reports.map(digest));
     assert.equal(Object.keys(state.managed.acceptedReports).length, fixture.reports.length);
     assert.equal(reconcileWave(fixture.waveRef, fixture.wave, fixture.reports.map((report) => ({ ref: ref(`report:${digest(report).slice(0, 16)}`, report, 'deliberation/report'), report, receipt: { commandDigest: digest('command'), resultDigest: digest(report), attemptEpoch: 0 } })) ).architecture, 'COMPLETE');
   } finally { await rm(root, { recursive: true, force: true }); }

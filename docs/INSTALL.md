@@ -40,6 +40,29 @@ exact Luna/max isolation, and parent authority; missing or nonconforming
 composition is disabled/refused without fallback. Validate its operator surface and a disposable target with
 the copy-paste procedure in the [adaptive operator contract](../orchestrator/DELIBERATION.md).
 
+After deployment and `--check`, the trusted parent invokes adaptive Plan
+authorship only through the verified installed route (never a source-checkout
+import):
+
+```sh
+"$NODE" runtime/bridge.mjs resolve-plan \
+  --input REQUEST.json \
+  --deliberation-policy DELIBERATION.json --rollout-policy ROLLOUT.json \
+  --run-dir RUN --capability CAPABILITY.json --host-policy HOST.json
+```
+
+The request mode is exactly `DIRECT`, `AUTO`, or `EXPLORE`. Managed-only arguments are omitted for Direct and AUTO→Direct. All
+documents are canonical and exact. The adapter performs no prose parsing,
+calls the resolver once, and keeps current Explore authorization private to
+that process; no reusable authorization artifact is installed or emitted.
+
+The signed deployment inventory includes
+`runtime/assets/deliberation-policy/*.json` and the reader-only
+`runtime/assets/deliberation-policy-compatibility/map.json`. Every policy asset
+filename is the SHA-256 of its canonical bytes. A deployment missing either a
+fresh policy asset or the compatibility map is incomplete and must remain
+disabled.
+
 ## Minimal API
 
 ```js

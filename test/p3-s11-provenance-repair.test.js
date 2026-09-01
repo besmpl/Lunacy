@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { composeKernel } from '../dist/composition.js';
+import { makeExactManagedKernel } from './exact-managed-harness.js';
 import { createManagedCapability } from '../dist/managed-capability.js';
 import { authorPlan, compileWavePlan, deriveTopology } from '../dist/deliberation.js';
 import { canonicalString, digest } from '../dist/canonical.js';
@@ -44,7 +44,7 @@ function input(runId, eventId, event, snapshot, launchToken) {
 async function reachDecision(runId, fixture, rootDir, memory) {
   const launched = new Map();
   const driver = { dispatch(command, launchToken) { launched.set(command.commandId, command); return { launchToken, commandDigest: command.commandDigest, ref: fixture.byStep.get(command.stepId) }; } };
-  const kernel = composeKernel({ plan: fixture.plan, ...(memory ? {} : { rootDir }), managedCapability: capability, maxInFlight: 3, driver });
+  const kernel = makeExactManagedKernel({ plan: fixture.plan, ...(memory ? {} : { rootDir }), capability, waveRef: fixture.waveRef, wave: fixture.wave, policy, maxInFlight: 3, driver });
   let yielded = await kernel.advance(input(runId, 'start', { kind: 'START', intentRef: ref('plan', fixture.plan) }));
   const completed = new Set();
   for (let index = 0; index < 100 && yielded.kind !== 'DECISION_REQUIRED'; index += 1) {

@@ -19,9 +19,11 @@ const canonical = (value) => Array.isArray(value)
 async function sourceFixture() {
   const repo = await mkdtemp(join(tmpdir(), 'lunacy-r5b-repo-'));
   await mkdir(join(repo, 'dist'), { recursive: true });
+  await mkdir(join(repo, 'assets'), { recursive: true });
   await mkdir(join(repo, 'docs'), { recursive: true });
   await mkdir(join(repo, 'schemas'), { recursive: true });
   await mkdir(join(repo, 'tools'), { recursive: true });
+  await cp(join(root, 'assets'), join(repo, 'assets'), { recursive: true });
   await writeFile(join(repo, 'dist', 'bridge-cli.js'), 'export function runBridgeCli() { return 0; }\n');
   // The deployment manager imports this trust helper from ../dist; keep the
   // fixture otherwise tiny so the crash matrix does not serialize 130 files.

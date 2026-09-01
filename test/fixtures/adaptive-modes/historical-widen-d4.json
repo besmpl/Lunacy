@@ -1,0 +1,1 @@
+{"kind":"HISTORICAL_STATE","projection":{"disposition":"WIDEN","generation":4,"terminal":true},"state":{"archived":true,"decision":{"consumed":true,"disposition":"WIDEN"},"modeEpoch":0,"rollout":{"generation":4,"mode":"explore-canary"},"schema":2,"terminal":true}}

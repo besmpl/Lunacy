@@ -19,6 +19,7 @@ import { AccelerationMetrics } from '../dist/metrics.js';
 import { buildCodexDeliberationArguments, buildCodexDeliberationIsolationProfile, createCodexDeliberationHostPolicy, validateCodexDeliberationHostPolicy } from '../dist/codex-host-policy.js';
 import * as composition from '../dist/composition.js';
 import { CodexDeliberationDriver } from '../dist/codex-deliberation-driver.js';
+import { ONE_SHOT_ROLLOUT_GENERATION_FLOOR } from '../dist/one-shot.js';
 
 const { composeKernel } = composition;
 const TEST_AUTH_BYTES = '{}\n';
@@ -168,6 +169,19 @@ test('omitted, explicit disabled, and Direct rollout preserve schema-1 public by
   }
 });
 
+test('current rollout binds exact authored topology to the capability call ceiling', async () => {
+  const fixture = focusFixture('p4-current-capability');
+  const rollout = { policy: createManagedRolloutPolicy({ generation: ONE_SHOT_ROLLOUT_GENERATION_FLOOR, mode: 'focus-canary' }), wave: fixture.wave, deliberationPolicy, decisionUnsettled: true };
+  const exactCapability = createManagedCapability({ ceilings: { waves: 1, calls: 3, refs: 128, reportBytes: 1_000_000, persistedBytes: 1_000_000 } });
+  for (const [label, managedCapability, expectedSchema] of [['legacy-ceiling', capability, undefined], ['exact-ceiling', exactCapability, 2]]) {
+    const root = await mkdtemp(join(tmpdir(), `p4-current-${label}-`));
+    try {
+      await makeRunKernel({ plan: fixture.plan, rootDir: root, managedCapability, managedRollout: rollout }).advance(start('p4-current-capability', fixture.plan));
+      assert.equal((await new FileArtifactStore(root).load()).state?.schema, expectedSchema);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  }
+});
+
 test('shadow admission persists policy projection and mechanically denies authority', async () => {
   const fixture = focusFixture('p4-shadow');
   const root = await mkdtemp(join(tmpdir(), 'p4-shadow-'));
@@ -271,7 +285,8 @@ test('managed composition constructs only a real attested Codex driver and prese
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
     const state = loaded.state;
-    const command = Object.values(state.outbox)[0];
+    const command = Object.values(state.outbox).find((candidate) => state.managed.attempts[candidate.commandId]?.authorityAnchor);
+    assert.ok(command);
     const attempt = state.managed.attempts[command.commandId];
     const authorityAnchor = attempt.authorityAnchor;
     assert.equal(authorityAnchor.scope, 'outbox/managed-receipt-authority');

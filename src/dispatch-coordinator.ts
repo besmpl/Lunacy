@@ -1,9 +1,11 @@
 import { canonicalString, digest } from './canonical.js';
 import { claim, commandInCurrentFrame, unknown, type DriverReceipt } from './outbox.js';
-import { ProseDriver, type EffectDriver } from './driver.js';
+import { ProseDriver, type EffectDriver, type ProviderIntentFenceObservation } from './driver.js';
 import { appendJournal, commandForToken, reduce, refreshAdmission } from './reducer.js';
 import { normalizeDriverResult, storeLinearizedDispatch, type ArtifactStore, type StoreLinearizedDispatchRequest } from './store.js';
 import type { AdvanceInput, CompactSnapshot, Event, EventIdentity, MachineState, OutboxCommand, OutboxState, Plan, Ref, Yield } from './model.js';
+import { commandExecutionOwner, readExecutionWave } from './execution-plane.js';
+import { classifyManagedRecovery, terminalOneShotManagedCommand } from './one-shot.js';
 
 export type CurrentCommandSelection = Readonly<{ command: OutboxCommand; authorityAnchor?: Ref }>;
 
@@ -30,7 +32,13 @@ export function selectEligibleCommand(
 ): CurrentCommandSelection | undefined {
   if (!state || state.modeEpoch !== 0) return undefined;
   const allowed = new Set(dispositions);
-  for (const command of Object.values(state.outbox)) {
+  const commands = Object.values(state.outbox);
+  const wave = readExecutionWave(state.managed?.proposal?.roleWaveRef, state.runId, state.phaseId);
+  if (wave) {
+    const ordinals = new Map(wave.topology.slots.map((slot) => [slot.stepId, slot.slotOrdinal]));
+    commands.sort((a, b) => (ordinals.get(a.stepId) ?? Number.MAX_SAFE_INTEGER) - (ordinals.get(b.stepId) ?? Number.MAX_SAFE_INTEGER));
+  }
+  for (const command of commands) {
     if (!eligible(state, command, allowed)) continue;
     const selected = selection(state, command);
     if (selected) return selected;
@@ -62,10 +70,12 @@ export function selectCurrentCommand(state: MachineState | undefined, dispositio
  * await or while a store fence is held. */
 export type DispatchDriverSnapshot = {
   receiver: EffectDriver;
+  available?: NonNullable<EffectDriver['available']>;
   prepare?: NonNullable<EffectDriver['prepare']>;
   dispatch: EffectDriver['dispatch'];
   observe?: NonNullable<EffectDriver['observe']>;
   observeTeardown?: NonNullable<EffectDriver['observeTeardown']>;
+  observeProviderIntent?: NonNullable<EffectDriver['observeProviderIntent']>;
 };
 
 export type DispatchCoordinatorOptions = {
@@ -77,7 +87,7 @@ export type DispatchCoordinatorOptions = {
 type CommitEventOnly = (generation: number, current: MachineState, input: AdvanceInput, key: string, plan: Plan, capacity: number, y: Yield) => Promise<Yield>;
 type CommitYield = (generation: number, state: MachineState, key: string, identity: EventIdentity, y: Yield) => Promise<Yield>;
 type CommitDispatcherOutcome = (token: string, expectedDigest: string, plan: Plan, capacity: number, receipt?: DriverReceipt, expectedLeaseId?: string, receiptLeaseId?: string, teardownEvidence?: Ref) => Promise<Yield | undefined>;
-type RetireManagedAttempt = (generation: number, current: MachineState, token: string, input: AdvanceInput, plan: Plan, capacity: number, status?: 'TIMED_OUT' | 'CANCELLED' | 'FAILED') => Promise<Yield>;
+type RetireManagedAttempt = (generation: number, current: MachineState, token: string, input: AdvanceInput, plan: Plan, capacity: number, status?: 'TIMED_OUT' | 'CANCELLED' | 'FAILED', providerIntent?: ProviderIntentFenceObservation) => Promise<Yield>;
 type FinalizeImmediateYield = (key: string, identity: EventIdentity, value: Yield) => Promise<Yield | undefined>;
 type CommitClaim = (generation: number, claimed: MachineState, claimedCommand: OutboxCommand, key: string, input: AdvanceInput, waiting: Yield) => Promise<{ generation: number; authority: StoreLinearizedDispatchRequest['authority'] } | { replay: Yield }>;
 
@@ -131,6 +141,8 @@ export class DispatchCoordinator {
 
   async resume(args: DispatchResumeArgs): Promise<Yield> {
     const { generation, current, input, key, plan, admissionOk, maxInFlight } = args;
+    const terminalManaged = terminalOneShotManagedCommand(current);
+    if (terminalManaged) return this.host.asYield(current, { outcome: 'BLOCKED', reason: 'UnknownDispatch', launchToken: terminalManaged.launchToken });
     // Historical rows remain durable recovery evidence but are inert after an
     // epoch/frame transition. Select only the exact current frame so a retired
     // UNKNOWN attempt cannot shadow its fresh reservation.
@@ -153,7 +165,7 @@ export class DispatchCoordinator {
         return this.host.commitYield(generation, reduced.state, key, input.identity, this.host.asYield(reduced.state, reduced));
       }
       if (!this.host.driver?.observe || this.options.signal?.aborted) {
-        if (current.schema === 2 && current.managed && this.host.retireManagedAttempt) {
+        if (commandExecutionOwner(current, command) === 'DELIBERATION' && this.host.retireManagedAttempt) {
           return this.host.retireManagedAttempt(generation, current, command.launchToken, input, plan, maxInFlight, this.options.signal?.aborted ? 'CANCELLED' : 'TIMED_OUT');
         }
         const y: Yield = { kind: 'BLOCKED', code: 'UnknownDispatch', reason: 'UnknownDispatch', retryable: false, launchToken: command.launchToken, snapshot: this.host.snapshot(current) };
@@ -175,18 +187,29 @@ export class DispatchCoordinator {
       // proof (written after provider exit and scratch removal) opens that
       // transition; otherwise retain CLAIMED so no fresh epoch can overlap.
       let managedTeardown: Ref | undefined;
+      let providerIntent: ProviderIntentFenceObservation | undefined;
       if (command.roleView) {
         const observeTeardown = this.host.driver?.observeTeardown;
         if (observeTeardown) {
-          try { managedTeardown = await Reflect.apply(observeTeardown, this.host.driver!.receiver, [command.launchToken, command.commandDigest, this.options.signal]); }
+          try { managedTeardown = await Reflect.apply(observeTeardown, this.host.driver!.receiver, [command.launchToken, command.commandDigest, this.options.signal, command]); }
           catch { managedTeardown = undefined; }
         }
-        if (!managedTeardown) {
+        if (!managedTeardown && this.host.driver?.observeProviderIntent) {
+          try { providerIntent = await Reflect.apply(this.host.driver.observeProviderIntent, this.host.driver.receiver, [command.launchToken, command.commandDigest, command]); }
+          catch { providerIntent = { kind: 'AMBIGUOUS' }; }
+        }
+        if (!managedTeardown && classifyManagedRecovery({ started: true, providerIntent: providerIntent ?? { kind: 'AMBIGUOUS' }, completeResultChain: false }) !== 'RETRY_FULL_RESERVATION') {
           const y: Yield = { kind: 'BLOCKED', code: 'UnknownDispatch', reason: 'managed provider teardown is unproven', retryable: false, launchToken: command.launchToken, snapshot: this.host.snapshot(current) };
           return this.host.commitEventOnly(generation, current, input, key, plan, maxInFlight, y);
         }
-        try { this.host.validateRef(managedTeardown); } catch { managedTeardown = undefined; }
-        if (!managedTeardown || managedTeardown.scope !== 'outbox/teardown') {
+        if (managedTeardown) {
+          try { this.host.validateRef(managedTeardown); }
+          catch {
+            const y: Yield = { kind: 'BLOCKED', code: 'UnknownDispatch', reason: 'managed provider teardown is invalid', retryable: false, launchToken: command.launchToken, snapshot: this.host.snapshot(current) };
+            return this.host.commitEventOnly(generation, current, input, key, plan, maxInFlight, y);
+          }
+        }
+        if (managedTeardown && managedTeardown.scope !== 'outbox/teardown') {
           const y: Yield = { kind: 'BLOCKED', code: 'UnknownDispatch', reason: 'managed provider teardown is invalid', retryable: false, launchToken: command.launchToken, snapshot: this.host.snapshot(current) };
           return this.host.commitEventOnly(generation, current, input, key, plan, maxInFlight, y);
         }
@@ -237,7 +260,9 @@ export class DispatchCoordinator {
       }
       return this.host.commitEventOnly(generation, current, input, key, plan, maxInFlight, this.host.asYield(current, { outcome: 'WAITING' }));
     }
-    if (!this.host.driver) {
+    const driver = this.host.driver;
+    const routeAvailable = driver && (!driver.available || Reflect.apply(driver.available, driver.receiver, [command, current]));
+    if (!routeAvailable) {
       const request = new ProseDriver().request(command);
       const requestRef: Ref = { id: `human-receipt:${command.launchToken}`, scope: 'outbox', digest: digest(request), bytes: canonicalString(request) };
       const y: Yield = { kind: 'BLOCKED', code: 'HumanReceiptRequired', reason: 'ProseDriver cannot prove launch-token dispatch; submit a receipt', receipt: requestRef, launchToken: command.launchToken, retryable: false, snapshot: this.host.snapshot(current) };
@@ -246,9 +271,15 @@ export class DispatchCoordinator {
 
     const claimed = JSON.parse(JSON.stringify(current)) as MachineState;
     let claimedCommand = commandForToken(claimed, command.launchToken)!;
-    if (claimed.schema === 2 && claimed.managed?.proposal && this.host.driver.prepare) {
-      Reflect.apply(this.host.driver.prepare, this.host.driver.receiver, [claimedCommand, claimed]);
+    if (claimed.schema === 2 && claimed.managed?.proposal && driver.prepare) {
+      Reflect.apply(driver.prepare, driver.receiver, [claimedCommand, claimed]);
       claimedCommand = claimed.outbox[claimedCommand.commandId]!;
+    }
+    if (driver.available && !Reflect.apply(driver.available, driver.receiver, [claimedCommand, claimed])) {
+      const request = new ProseDriver().request(command);
+      const requestRef: Ref = { id: `human-receipt:${command.launchToken}`, scope: 'outbox', digest: digest(request), bytes: canonicalString(request) };
+      const y: Yield = { kind: 'BLOCKED', code: 'HumanReceiptRequired', reason: 'command execution plane became unavailable before claim', receipt: requestRef, launchToken: command.launchToken, retryable: false, snapshot: this.host.snapshot(current) };
+      return this.host.commitEventOnly(generation, current, input, key, plan, maxInFlight, y);
     }
     claim(claimedCommand, `lease-${process.pid}-${claimed.revision + 1}`, claimed.modeEpoch, claimed.writerFence);
     const preparedToken = claimedCommand.launchToken;
@@ -321,7 +352,7 @@ export class DispatchCoordinator {
         stopCancellationWatch();
         task.outcomeCommitted = true;
         const teardown = managedRole && this.host.driver?.observeTeardown
-          ? Promise.resolve(Reflect.apply(this.host.driver.observeTeardown, this.host.driver.receiver, [token, task.commandDigest])).catch(() => undefined)
+          ? Promise.resolve(Reflect.apply(this.host.driver.observeTeardown, this.host.driver.receiver, [token, task.commandDigest, undefined, command])).catch(() => undefined)
           : Promise.resolve(undefined);
         task.noReceiptOutcome = teardown.then((evidence) => this.host.commitDispatcherOutcome(token, task.commandDigest, plan, capacity, undefined, leaseId, undefined, evidence)).catch(() => undefined);
       }
@@ -424,8 +455,14 @@ export class DispatchCoordinator {
         const candidate = current ? commandForToken(current, token) : undefined;
         if (!current || current.schema !== 2 || !current.managed || !candidate
           || candidate.state !== 'UNKNOWN' || candidate.commandDigest !== command.commandDigest
+          || commandExecutionOwner(current, candidate) !== 'DELIBERATION'
           || candidate.leaseId !== command.leaseId) return undefined;
-        const result = await this.host.retireManagedAttempt(loaded.generation, current, token, processedInput, plan, capacity, status);
+        let providerIntent: ProviderIntentFenceObservation = { kind: 'AMBIGUOUS' };
+        if (driver.observeProviderIntent) {
+          try { providerIntent = await Reflect.apply(driver.observeProviderIntent, driver.receiver, [token, candidate.commandDigest, candidate]); }
+          catch { providerIntent = { kind: 'AMBIGUOUS' }; }
+        }
+        const result = await this.host.retireManagedAttempt(loaded.generation, current, token, processedInput, plan, capacity, status, providerIntent);
         this.notifyYield(result);
         return result;
       } catch { return undefined; }

@@ -125,6 +125,14 @@ and cannot feed policy or authority. Do not persist, edit, or build an operator
 API around private `managed` MachineState fields. See the [adaptive operator
 contract](../orchestrator/DELIBERATION.md).
 
+The installed host boundary is not a package API. The fingerprinted private
+`runtime/bridge.mjs resolve-plan` route accepts the exact existing
+closed `DIRECT | AUTO | EXPLORE` request; managed routes additionally carry exact deliberation/rollout policies. It calls the private resolver once. Direct
+returns a complete Plan with no managed composition; Focus/Explore validate and
+enter the existing START path. Current Explore requires a fresh one-use
+process-local exact binding verified by composition and kernel admission. No
+authorization type, mode enum, state field, or root export is added.
+
 ### Private decision inbox and phase handoff
 
 `dist/decision-inbox.js` is a private, additive route. `listDecisionInbox`

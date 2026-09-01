@@ -88,6 +88,16 @@ Focus/Explore topology, eligibility corridor, capability refusal, diagnostics,
 and kill/revocation procedure. Do not hand-edit private managed state or treat
 diagnostics as rollout authority.
 
+The installed invocation seam is the verified private
+`"$NODE" runtime/bridge.mjs resolve-plan` route. The trusted parent supplies
+one canonical closed `DIRECT | AUTO | EXPLORE` request. Managed routes additionally supply exact deliberation and rollout policies; the route never infers a
+mode from prose. It calls the pre-Plan resolver once. Direct returns the
+complete Plan without managed inputs. Focus/Explore validate the authored Wave
+and enter existing managed START in the same process. A current Explore also
+requires the route's one-use process-local authorization bound to the exact
+intent, authority digest, Wave, run/phase, and rollout policy; a legacy boolean,
+Report text, metric, or prior invocation is not authority.
+
 ## Worker route and effort selection
 
 Resolve each worker route once from this exact closed table:

@@ -76,7 +76,7 @@ test('publication lease lifecycle is shared by memory and file stores', async ()
   }
 });
 
-test('managed START binds proposal, lease, and reservation without changing public Yield', async () => {
+test('managed START binds proposal and lease but ordinary commands own no managed reservation', async () => {
   const root = await mkdtemp(join(tmpdir(), 'p3-managed-start-'));
   try {
     const kernel = makeRunKernel({ plan, rootDir: root, maxInFlight: 1, managedCapability: createManagedCapability() });
@@ -86,7 +86,8 @@ test('managed START binds proposal, lease, and reservation without changing publ
     const state = JSON.parse(await readFile(join(root, '.kernel', 'generations', `g${current.generation}`, 'state.json'), 'utf8'));
     assert.equal(state.schema, 2);
     assert.equal(typeof state.managed.proposal.key, 'string');
-    assert.equal(Object.keys(state.managed.reservations).length, 1);
+    assert.equal(Object.keys(state.managed.reservations).length, 0);
+    assert.equal(Object.keys(state.managed.attempts).length, 0);
     assert.equal(state.managed.leaseSets[state.managed.proposal.leaseSetId].status, 'PROMOTED');
     const store = new FileArtifactStore(root);
     await assert.rejects(() => store.promotePublicationLease(state.managed.proposal.leaseSetId), /unavailable|absent/);
@@ -171,7 +172,7 @@ test('managed kill switch blocks before admission callback', async () => {
   assert.equal(calls, 0);
 });
 
-test('managed reservations conservatively admit two independent commands', async () => {
+test('ordinary commands do not consume managed reservations or wave counters', async () => {
   const twoStepPlan = { phaseId: 'p3-capacity', steps: [{ stepId: 'a' }, { stepId: 'b' }] };
   const runId = 'two-commands';
   const event = { kind: 'START', intentRef: { id: 'plan', digest: digest(twoStepPlan), bytes: canonicalString(twoStepPlan) } };
@@ -184,13 +185,9 @@ test('managed reservations conservatively admit two independent commands', async
     const current = JSON.parse(await readFile(join(root, '.kernel', 'CURRENT'), 'utf8'));
     const state = JSON.parse(await readFile(join(root, '.kernel', 'generations', `g${current.generation}`, 'state.json'), 'utf8'));
     assert.equal(Object.keys(state.outbox).length, 2);
-    assert.equal(Object.keys(state.managed.reservations).length, 2);
-    assert.equal(state.managed.waveCounters.calls, 2);
-    assert.equal(state.managed.waveCounters.inTok, 2);
-    assert.equal(state.managed.waveCounters.outTok, 2);
-    assert.equal(state.managed.waveCounters.reportBytes, 2);
-    assert.equal(state.managed.waveCounters.refs, 2);
-    assert.equal(state.managed.waveCounters.persistedBytes, 2);
+    assert.equal(Object.keys(state.managed.reservations).length, 0);
+    assert.equal(Object.keys(state.managed.attempts).length, 0);
+    assert.deepEqual(state.managed.waveCounters, { waves: 0, calls: 0, inTok: 0, outTok: 0, reportBytes: 0, refs: 0, persistedBytes: 0, deadline: Number.MAX_SAFE_INTEGER });
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

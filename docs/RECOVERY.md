@@ -70,6 +70,22 @@ anchors, settlements, leases, and journal. See the [adaptive operator
 contract](../orchestrator/DELIBERATION.md) for kill/revocation and the bounded
 diagnostic counters.
 
+Explore authorization has no recovery form: it is minted and consumed inside
+one installed `resolve-plan` process and is never written to the journal,
+MachineState, Wave, Report, manifest, or a sidecar file. A crash or later
+request must return to the parent and obtain fresh current intent/run/policy
+authority; `explicitExplore`, prior output, or recovered Report text cannot be
+replayed to admit another Wave. Already admitted history continues through the
+existing exact reader/recovery paths without re-running Plan selection.
+
+Managed provider entry has one permanent content-addressed intent fence per
+attempt. The runtime creates it exclusively, fsyncs the file and its parent,
+and never removes it. Recovery may allocate a fresh fully charged epoch only
+when absence is positively proved. A present, malformed, unreadable, or
+mismatched fence retains the charged command in visible custody and forbids
+provider replacement; an exact retained result chain is reconciled without
+re-attesting mutable post-provider host state.
+
 ## Accepted Body recovery
 
 Run retention commands only through the verified installed

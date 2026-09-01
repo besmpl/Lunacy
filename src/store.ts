@@ -6,7 +6,7 @@ import { assertManagedGraph, verifyManagedCapability, verifyManagedRolloutProjec
 import type { DriverReceipt } from './outbox.js';
 import { canonicalString, digest, identityKey, parseCanonical } from './canonical.js';
 import { validateDependencyTopology } from './dependency.js';
-import { deriveTopology, isManagedDissent, reconcileWave, settlementPrefixDigest, validateReport, validateWave, type AcceptedReport, type DeliberationPolicy, type DeliberationReport, type DeliberationWave } from './deliberation.js';
+import { deriveTopology, isManagedDissent, reconcileWave, resolveWaveSemanticClosure, retainedDeliberationPolicy, settlementPrefixDigest, validateReport, validateWave, type AcceptedReport, type DeliberationPolicy, type DeliberationReport, type DeliberationWave } from './deliberation.js';
 import { validatePlan } from './validator.js';
 import { CURRENT_BYTE_CEILING, JOURNAL_BYTE_CEILING, JOURNAL_EVENT_CEILING, MANAGED_METADATA_BYTE_CEILING, READ_ONLY_STATE_BYTE_CEILING } from './limits.js';
 import { assertStableIdentity, ensurePrivateDirectory, filesystemIdentity, inspectTrustedPath, sameFilesystemIdentity, trustedIdentity, type FilesystemIdentity } from './filesystem.js';
@@ -228,19 +228,13 @@ function workerEnvelopeIsValid(ref: Ref): boolean {
  * its Wave to the exact authored policy version and the deterministic frame
  * catalog shape used by the managed reducer. */
 function managedPolicyForWave(wave: DeliberationWave): DeliberationPolicy {
-  const frameCatalog = wave.gear === 'EXPLORE'
-    ? wave.generatorLenses.map((frame, index) => ({ frameId: frame.frameId, tag: index === 4 ? 'wild' as const : 'code' as const, text: frame.frameId }))
-    : [];
-  return {
-    version: wave.authorship.policyVersion,
-    frameCatalog,
-    maxMaterialDecisions: 0,
-    maxSettlementBytes: wave.limits.maxTotalReportBytes,
-    maxResolvedRoleInputBytes: wave.limits.maxResolvedRoleInputBytes,
-    convergeCount: 3,
-    nonObviousNovelty: 0,
-    viableFloor: 0,
-  };
+  return retainedDeliberationPolicy(wave);
+}
+
+function managedClosureForWave(wave: DeliberationWave): { committedEvidence: ReadonlySet<string>; reachableConstraints: ReadonlySet<string> } {
+  const closure = resolveWaveSemanticClosure(wave);
+  invariant(closure.ok, 'managed Wave semantic closure is invalid');
+  return closure.value;
 }
 
 /** Validate accepted rows as a prefix projection rather than trusting the
@@ -263,7 +257,7 @@ function validateAcceptedReportProjection(rows: readonly Record<string, unknown>
     try { wave = parseCanonical<DeliberationWave>(waveRef.bytes); }
     catch { throw new Error('ManifestMismatch: managed accepted report Wave bytes are invalid'); }
     const policy = managedPolicyForWave(wave);
-    const waveValidation = validateWave(wave, { runId: state.runId, phaseId: state.phaseId, policy, committedEvidence: new Set(), reachableConstraints: new Set() });
+    const waveValidation = validateWave(wave, { runId: state.runId, phaseId: state.phaseId, policy, ...managedClosureForWave(wave) });
     invariant(waveValidation.ok && digest(wave) === waveRef.digest, 'managed accepted report Wave binding is invalid');
     const topology = deriveTopology(waveRef, waveValidation.value);
     invariant(topology.slots.some((slot) => slot.slotOrdinal === parsed.slotOrdinal), 'managed accepted report slot is outside the topology');
@@ -307,7 +301,7 @@ function managedSettlementPrefixStore(state: MachineState, token: Record<string,
   try {
     const wave = parseCanonical<DeliberationWave>((token.waveRef as Ref).bytes!);
     const policy = managedPolicyForWave(wave);
-    const admitted = validateWave(wave, { runId: state.runId, phaseId: state.phaseId, policy, committedEvidence: new Set(), reachableConstraints: new Set() });
+    const admitted = validateWave(wave, { runId: state.runId, phaseId: state.phaseId, policy, ...managedClosureForWave(wave) });
     if (!admitted.ok || admitted.value.authorship.settlementPrefixDigest !== settlementPrefixDigest(refs)) return undefined;
   } catch { return undefined; }
   return refs;
@@ -329,8 +323,8 @@ function managedSuccessorWaveIsBoundStore(state: MachineState, token: Record<str
     const next = parseCanonical<DeliberationWave>(successor.bytes!);
     const focusPolicy = managedPolicyForWave(focus);
     const nextPolicy = managedPolicyForWave(next);
-    const focusValid = validateWave(focus, { runId: state.runId, phaseId: state.phaseId, policy: focusPolicy, committedEvidence: new Set(), reachableConstraints: new Set() });
-    const nextValid = validateWave(next, { runId: state.runId, phaseId: state.phaseId, policy: nextPolicy, committedEvidence: new Set(), reachableConstraints: new Set() });
+    const focusValid = validateWave(focus, { runId: state.runId, phaseId: state.phaseId, policy: focusPolicy, ...managedClosureForWave(focus) });
+    const nextValid = validateWave(next, { runId: state.runId, phaseId: state.phaseId, policy: nextPolicy, ...managedClosureForWave(next) });
     if (!focusValid.ok || !nextValid.ok || focusValid.value.gear !== 'FOCUS' || nextValid.value.gear !== 'EXPLORE') return false;
     const a = nextValid.value.authorship;
     const f = focusValid.value.authorship;
@@ -358,7 +352,7 @@ function managedSettlementRecordIsValid(settlement: Ref, token: Record<string, u
     const waveRef = token.waveRef as Ref;
     const wave = parseCanonical<DeliberationWave>(waveRef.bytes ?? '');
     const policy = managedPolicyForWave(wave);
-    const admitted = validateWave(wave, { runId: state.runId, phaseId: state.phaseId, policy, committedEvidence: new Set(), reachableConstraints: new Set() });
+    const admitted = validateWave(wave, { runId: state.runId, phaseId: state.phaseId, policy, ...managedClosureForWave(wave) });
     if (!admitted.ok || record.frontierOrdinal !== admitted.value.authorship.prospectiveEffectFrontierOrdinal) return false;
   } catch { return false; }
   if (!refIsValid(record.waveRef) || canonicalString(record.waveRef) !== canonicalString(token.waveRef) || !Array.isArray(record.orderedReportRefs) || canonicalString(record.orderedReportRefs) !== canonicalString(token.orderedReportRefs)) return false;
@@ -395,7 +389,7 @@ function managedSettlementRecordIsValid(settlement: Ref, token: Record<string, u
       const waveRef = token.waveRef as Ref;
       const wave = parseCanonical<DeliberationWave>(waveRef.bytes!);
       const policy = managedPolicyForWave(wave);
-      const validWave = validateWave(wave, { runId: state.runId, phaseId: state.phaseId, policy, committedEvidence: new Set(), reachableConstraints: new Set() });
+      const validWave = validateWave(wave, { runId: state.runId, phaseId: state.phaseId, policy, ...managedClosureForWave(wave) });
       if (!validWave.ok) return false;
       const report = parseCanonical<DeliberationReport>(generatorRef.bytes!);
       const slot = deriveTopology(waveRef, validWave.value).slots.find((candidate) => candidate.slotOrdinal === report.slotOrdinal);

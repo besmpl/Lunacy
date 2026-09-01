@@ -5,7 +5,7 @@ import { access, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
-import { authorPlan, validateWave } from '../dist/deliberation.js';
+import { authorPlan, deriveTopology, validateWave } from '../dist/deliberation.js';
 import { canonicalString, digest, digestBytes } from '../dist/canonical.js';
 
 const retained = ['maxModelCalls', 'maxWaveBytes', 'maxRefs', 'maxResolvedRoleInputBytes', 'maxReportBytes', 'maxTotalReportBytes'];
@@ -47,6 +47,9 @@ function expectNormalized(reader, input) {
 test('L3b six-key writer contraction', () => {
   const { wave, waveRef } = authoredWave();
   assert.deepEqual(Object.keys(wave.limits).sort(), retained.slice().sort());
+  assert.deepEqual(wave.generatorLenses, [{ text: 'counterexample' }, { text: 'simplify' }]);
+  assert.equal(wave.limits.maxModelCalls, 3);
+  assert.equal(deriveTopology(waveRef, wave).slots.length, wave.limits.maxModelCalls);
   assert.equal(digestBytes(new TextEncoder().encode(waveRef.bytes)), waveRef.digest);
   expectNormalized(validateWave, waveRef);
 

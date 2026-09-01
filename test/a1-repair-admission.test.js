@@ -220,8 +220,8 @@ test('managed migration does not reserve ACKED history before targeted REPAIR ad
     loaded = await new FileArtifactStore(rootDir).load();
     const current = Object.values(loaded.state.outbox).find((item) => item.attemptEpoch === loaded.state.attemptEpoch);
     assert.equal(current.state, 'PENDING');
-    assert.equal(loaded.state.managed.reservations[current.commandId].epoch, loaded.state.attemptEpoch);
-    assert.equal(loaded.state.managed.attempts[current.commandId].status, 'LIVE');
+    assert.equal(loaded.state.managed.reservations[current.commandId], undefined);
+    assert.equal(loaded.state.managed.attempts[current.commandId], undefined);
   } finally {
     await rm(rootDir, { recursive: true, force: true });
   }

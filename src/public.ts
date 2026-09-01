@@ -3,6 +3,8 @@ import { canonicalClaims, proveAdmission } from './admission.js';
 import { appendJournal, applyAuthorityAdoption, applyDispatchReceipt, applyParentDecision, applyManagedReservations, applyManagedRolloutPolicy, bindManagedProposal, commandForToken, migrateMachineState, nextWriterFence, reduce, refreshAdmission, retireManagedAttempt, validateManagedDecisionBinding, type PreparedDecisionPublication } from './reducer.js';
 import { claim, commandInCurrentFrame, unknown, type DriverReceipt } from './outbox.js';
 import { ProseDriver, type EffectDriver } from './driver.js';
+import { executionCapacity } from './execution-plane.js';
+import { isOneShotManagedDecision, ONE_SHOT_ROLLOUT_GENERATION_FLOOR, requestsManagedSuccessor, terminalOneShotManagedCommand } from './one-shot.js';
 import { isStoreGenerationConflict, storeForRoot, type ArtifactStore, type StoreLinearizedDispatchRequest } from './store.js';
 import type { FilesystemIdentity } from './filesystem.js';
 import { validatePlan } from './validator.js';
@@ -13,6 +15,7 @@ import { DispatchCoordinator, type DispatchDriverSnapshot, type ActiveDispatchTa
 import { AccelerationMetrics, defaultMetrics } from './metrics.js';
 import { JOURNAL_BYTE_CEILING, JOURNAL_EVENT_CEILING } from './limits.js';
 import { assertManagedGraph, createManagedCapability, createManagedRolloutPolicy, managedAdmissionAllowed, managedRolloutDecision, verifyManagedCapability, verifyManagedRolloutPolicy, type ManagedCapability, type ManagedCapabilityInput, type ManagedRolloutDecision, type ManagedRolloutPolicy, type ManagedRolloutPolicyInput } from './managed-capability.js';
+import { consumeExploreAuthorization } from './explore-authorization.js';
 import type { AdvanceInput, CompactSnapshot, Event, EventIdentity, MachineState, Plan, Ref, Yield } from './model.js';
 export type { AdvanceInput, CompactSnapshot, Cursor, Event, EventIdentity, Plan, PlanStep, Ref, Yield, RunId, PhaseId, StepId, EventId, Sha256, LaunchToken } from './model.js';
 
@@ -361,6 +364,7 @@ function evaluateManagedRollout(
   capability: ManagedCapability | undefined,
   config: NonNullable<KernelOptions['managedRollout']>,
   policy: ManagedRolloutPolicy,
+  exploreAuthorization?: unknown,
 ): ManagedRolloutDecision {
   const direct = () => managedRolloutDecision(policy, capability, {
     gear: 'DIRECT', synthetic: false, disposable: false, effectDenied: false,
@@ -382,6 +386,18 @@ function evaluateManagedRollout(
     const compiled = compileWavePlan(checkedRef.value, validated.value);
     if (!compiled.ok) throw new Error('wave plan invalid');
     const topology = deriveTopology(checkedRef.value, validated.value);
+    if (policy.generation >= ONE_SHOT_ROLLOUT_GENERATION_FLOOR) {
+      const exactFocus = validated.value.gear === 'FOCUS'
+        && validated.value.generatorLenses.length === 2
+        && validated.value.generatorLenses[0]?.text === 'counterexample'
+        && validated.value.generatorLenses[1]?.text === 'simplify'
+        && validated.value.limits.maxModelCalls === 3
+        && topology.slots.length === 3;
+      const exactExplore = validated.value.gear === 'EXPLORE'
+        && validated.value.limits.maxModelCalls === 9
+        && topology.slots.length === 9;
+      if ((!exactFocus && !exactExplore) || capability?.ceilings.calls !== validated.value.limits.maxModelCalls) throw new Error('current Wave/capability topology mismatch');
+    }
     if (!verifyWavePlan(compiled.value, topology).ok) throw new Error('wave topology invalid');
     const supplied = validatePlan(planInput).plan;
     const compiledPlan = validatePlan(compiled.value).plan;
@@ -389,6 +405,15 @@ function evaluateManagedRollout(
     const refs = [...validated.value.question.evidence, ...validated.value.question.constraints];
     const sealedEvidenceOnly = refs.every((item) => typeof item.bytes === 'string' && validateDeliberationRef(item).ok);
     const claimsOrEffects = compiledPlan.steps.some((step) => (step.claims ?? []).some((claim) => claim.mode !== 'READ'));
+    const currentExplore = validated.value.gear === 'EXPLORE' && policy.generation >= ONE_SHOT_ROLLOUT_GENERATION_FLOOR;
+    const exploreAuthorized = !currentExplore || consumeExploreAuthorization(exploreAuthorization, {
+      intent: validated.value.authorship.intent,
+      authorityDigest: validated.value.authorship.authorityDigest,
+      waveDigest: checkedRef.value.digest,
+      runId: validated.value.authorship.runId,
+      phaseId: validated.value.authorship.phaseId,
+      rolloutPolicyDigest: policy.digest,
+    });
     return managedRolloutDecision(policy, capability, {
       gear: validated.value.gear,
       synthetic: config.synthetic === true,
@@ -399,11 +424,14 @@ function evaluateManagedRollout(
       childDelegation: false,
       claimsOrEffects,
       sealedEvidenceOnly,
-      explicitExplore: config.explicitExplore === true,
+      explicitExplore: config.explicitExplore === true && exploreAuthorized,
       decisionUnsettled: config.decisionUnsettled === true,
-      openEnded: config.openEnded === true,
-      highStakes: config.highStakes === true,
-      openlyPhrased: config.openlyPhrased === true,
+      // Current Explore is explicit-only. Suppress the retained D4 facts when
+      // the invocation-local proof is absent so an automatic policy or the
+      // legacy boolean cannot authorize a newly admitted Explore Wave.
+      openEnded: config.openEnded === true && exploreAuthorized,
+      highStakes: config.highStakes === true && exploreAuthorized,
+      openlyPhrased: config.openlyPhrased === true && exploreAuthorized,
     });
   } catch {
     const gear = wave?.gear === 'EXPLORE' ? 'EXPLORE' : 'FOCUS';
@@ -431,14 +459,14 @@ class KernelImpl implements RunKernel {
   get activeDispatches(): Map<string, ActiveDispatchTask> { return this.coordinator.activeDispatches; }
   get dispatchOptions(): DispatchCoordinator['options'] { return this.coordinator.dispatchOptions; }
 
-  constructor(private readonly options: KernelOptions, configuredMaxInFlight: number, private readonly store: ArtifactStore, driver?: DispatchDriverSnapshot, dispatcher: DispatcherOptions = {}) {
+  constructor(private readonly options: KernelOptions, configuredMaxInFlight: number, private readonly store: ArtifactStore, driver?: DispatchDriverSnapshot, dispatcher: DispatcherOptions = {}, invocation?: { exploreAuthorization?: unknown }) {
     this.configuredMaxInFlight = configuredMaxInFlight;
     this.#managedCapability = options.managedCapability && options.managedCapability !== null ? createManagedCapability(options.managedCapability as ManagedCapabilityInput) : undefined;
     this.#managedKillSwitch = options.managedKillSwitch ?? false;
     this.metrics = options.acceleration?.metrics ?? defaultMetrics;
     if (options.managedRollout) {
       this.#managedRolloutPolicy = createManagedRolloutPolicy(options.managedRollout.policy);
-      this.#managedRolloutDecision = evaluateManagedRollout(options.plan, this.#managedCapability, options.managedRollout, this.#managedRolloutPolicy);
+      this.#managedRolloutDecision = evaluateManagedRollout(options.plan, this.#managedCapability, options.managedRollout, this.#managedRolloutPolicy, invocation?.exploreAuthorization);
       if (this.#managedRolloutPolicy.mode !== 'disabled' && this.#managedRolloutDecision.reason !== 'DIRECT_BYPASS') {
         this.safeMetric(this.#managedKillSwitch ? 'managedWavesKilled' : this.#managedRolloutDecision.admitted ? 'managedWavesAdmitted' : 'managedWavesRefused');
         const gear = rolloutGear(options.managedRollout.wave);
@@ -476,7 +504,11 @@ class KernelImpl implements RunKernel {
   }
 
   private managedRuntimeEnabled(): boolean {
-    return Boolean(this.#managedCapability && !this.#managedKillSwitch && (!this.#managedRolloutPolicy || this.#managedRolloutDecision?.admitted));
+    // A persisted managed run keeps its exact capability/policy available
+    // after COMPLETE_PLAN even though the caller's new ordinary Plan no longer
+    // matches the historical Wave topology. Fresh START admission is still
+    // fenced separately by managedRequested/#managedRolloutDecision below.
+    return Boolean(this.#managedCapability && !this.#managedKillSwitch && (!this.#managedRolloutPolicy || this.#managedRolloutPolicy.mode !== 'disabled'));
   }
 
   private safeMetric(name: import('./metrics.js').AccelerationCounter): void {
@@ -517,6 +549,7 @@ class KernelImpl implements RunKernel {
     const disposition = typeof requested.disposition === 'string' ? requested.disposition : typeof requested.kind === 'string' ? requested.kind : typeof requested.decision === 'string' ? requested.decision : undefined;
     if (!disposition || !['SELECTION', 'SYNTHESIS', 'WIDEN', 'NO_SETTLEMENT'].includes(disposition)) throw new Conflict('unsupported deliberation decision');
     if (disposition === 'NO_SETTLEMENT') return undefined;
+    if (isOneShotManagedDecision(state, token) && requestsManagedSuccessor(value)) throw new Conflict('one-shot managed Wave cannot publish a successor');
     const binding = validateManagedDecisionBinding(state, token, value);
     if (!binding) throw new Conflict('full canonical deliberation result or settlement binding is invalid');
     const requestedSettlement = Object.prototype.hasOwnProperty.call(requested, 'nullableSettlement')
@@ -641,7 +674,7 @@ class KernelImpl implements RunKernel {
       const persisted = current.managed.capability;
       const sameCapability = Boolean(this.#managedCapability && verifyManagedCapability(persisted)
         && persisted.checksum === this.#managedCapability.checksum);
-      const rolloutAvailable = !current.managed.rollout || Boolean(this.#managedRolloutPolicy && this.#managedRolloutDecision?.admitted
+      const rolloutAvailable = !current.managed.rollout || Boolean(this.#managedRolloutPolicy && this.#managedRolloutPolicy.mode !== 'disabled'
         && current.managed.rollout.generation === this.#managedRolloutPolicy.generation
         && current.managed.rollout.digest === this.#managedRolloutPolicy.digest
         && current.managed.rollout.mode === this.#managedRolloutPolicy.mode);
@@ -663,6 +696,8 @@ class KernelImpl implements RunKernel {
       // parent decision is the only event allowed to resolve a DUE gate.
       if (current.status === 'COMPLETE') throw new Conflict('run is complete');
       if (current.barrier === 'CLOSED' && input.event.kind !== 'PARENT_DECISION') throw new Conflict('barrier is closed');
+      const terminalManaged = terminalOneShotManagedCommand(current);
+      if (terminalManaged && input.event.kind === 'RESUME') return asYield(current, { outcome: 'BLOCKED', reason: 'UnknownDispatch', launchToken: terminalManaged.launchToken });
       if (current.status === 'BLOCKED' && current.gate !== 'DUE' && input.event.kind !== 'PARENT_DECISION') throw new Conflict('run is blocked');
     }
     let plan: Plan; let recoveryAgainstCommittedPlan = false;
@@ -783,8 +818,10 @@ class KernelImpl implements RunKernel {
     // Managed admission is fail-closed before invoking the caller's
     // admission hook.  A kill switch therefore cannot leak a policy probe,
     // acquire a lease, or enter any downstream admission seam.
-    const managedRequested = this.#managedRolloutPolicy ? Boolean(this.#managedRolloutDecision?.admitted) : Boolean(this.#managedCapability);
-    if (this.#managedRolloutPolicy && this.#managedRolloutPolicy.mode !== 'disabled' && this.#managedRolloutDecision?.reason !== 'DIRECT_BYPASS' && !managedRequested) {
+    const managedRequested = current?.schema === 2 && Boolean(current.managed)
+      ? true
+      : this.#managedRolloutPolicy ? Boolean(this.#managedRolloutDecision?.admitted) : Boolean(this.#managedCapability);
+    if (!current && this.#managedRolloutPolicy && this.#managedRolloutPolicy.mode !== 'disabled' && this.#managedRolloutDecision?.reason !== 'DIRECT_BYPASS' && !managedRequested) {
       return asYield(current ?? emptyState(String(input.runId), plan.phaseId), { outcome: 'BLOCKED', reason: 'managed rollout cohort refused' });
     }
     if (managedRequested && this.#managedKillSwitch) {
@@ -796,7 +833,7 @@ class KernelImpl implements RunKernel {
     // command, but a malformed live declaration must never admit successors
     // until the caller restores the authoritative plan.  Keep the public
     // lifecycle unchanged while making the reducer capacity explicit.
-    const recoveryCapacity = recoveryAgainstCommittedPlan ? 0 : this.configuredMaxInFlight;
+    const activeCapacity = recoveryAgainstCommittedPlan ? 0 : executionCapacity(current, this.configuredMaxInFlight, current ? undefined : this.options.managedRollout?.wave);
 
     let managedLease: import('./store.js').PublicationLease | undefined;
     if (managedRequested && this.#managedCapability && !this.#managedKillSwitch && !current && input.event.kind === 'START') {
@@ -839,7 +876,10 @@ class KernelImpl implements RunKernel {
       // A FINDINGS decision opens a fresh attempt.  Keep admission under the
       // same mandatory direct validator; effects still launch only on a later
       // RESUME, so this event never calls an external driver inline.
-      if (reduced.outcome === 'WAITING' && reduced.state.gate === 'NOT-DUE' && reduced.state.barrier === 'OPEN' && !reduced.deferAdmission) refreshAdmission(reduced.state, plan, recoveryCapacity);
+      if (reduced.outcome === 'WAITING' && reduced.state.gate === 'NOT-DUE' && reduced.state.barrier === 'OPEN' && !reduced.deferAdmission) {
+        const resultingPlan = validatePlan(planFromCommittedState(reduced.state)).plan;
+        refreshAdmission(reduced.state, resultingPlan, recoveryAgainstCommittedPlan ? 0 : executionCapacity(reduced.state, this.configuredMaxInFlight));
+      }
       if (this.managedRuntimeEnabled()) reduced.state = this.prepareManagedState(reduced.state, loaded.generation, input);
       return this.commitYield(loaded.generation, reduced.state, key, input.identity, asYield(reduced.state, reduced));
     }
@@ -856,7 +896,7 @@ class KernelImpl implements RunKernel {
       // only then discover that its journal cannot represent the outcome.
       if (!segmentedJournalEnabled(this.store) && !journalHasRecordBudget(current, maximumInternalRecords)) return asYield(current, { outcome: 'BLOCKED', reason: 'JournalCeiling' });
       try {
-        return await this.coordinator.resume({ generation: loaded.generation, current, input, key, plan, admissionOk, maxInFlight: recoveryCapacity });
+        return await this.coordinator.resume({ generation: loaded.generation, current, input, key, plan, admissionOk, maxInFlight: activeCapacity });
       } catch (error) {
         if ((error as Error).message === 'JournalCeiling') return asYield(current, { outcome: 'BLOCKED', reason: 'JournalCeiling' });
         throw error;
@@ -865,7 +905,7 @@ class KernelImpl implements RunKernel {
 
     let reduced;
     try {
-      reduced = reduce(current, plan, input.identity, input.event, recoveryCapacity, admissionOk, segmentedJournalEnabled(this.store));
+      reduced = reduce(current, plan, input.identity, input.event, activeCapacity, admissionOk, segmentedJournalEnabled(this.store));
     }
     catch (error) {
       if ((error as Error).message === 'JournalCeiling') return asYield(current ?? emptyState(String(input.runId), plan.phaseId), { outcome: 'BLOCKED', reason: 'JournalCeiling' });
@@ -876,6 +916,7 @@ class KernelImpl implements RunKernel {
       catch (error) { if ((error as Error).message.includes('managed proposal') || (error as Error).message.includes('managed graph')) throw new Conflict((error as Error).message); throw error; }
     }
     if (reduced.outcome === 'BLOCKED' && !reduced.state) return asYield(emptyState(String(input.runId), plan.phaseId), reduced);
+    if (reduced.outcome === 'BLOCKED' && reduced.state === current && input.event.kind === 'WORKER_ENVELOPE') return asYield(current, reduced);
     if (reduced.outcome === 'BLOCKED' && reduced.state === current && (input.event.kind === 'DISPATCH_RECEIPT' || input.event.kind === 'PARENT_DECISION')) throw new Conflict(reduced.reason ?? 'event rejected');
     return this.commitYield(loaded.generation, reduced.state, key, input.identity, asYield(reduced.state, reduced));
   }
@@ -939,17 +980,18 @@ class KernelImpl implements RunKernel {
     if (state.schema !== 2 || !state.managed) return;
     if (!this.#managedCapability || this.#managedKillSwitch || state.managed.killSwitch || !verifyManagedCapability(state.managed.capability) || state.managed.capability.checksum !== this.#managedCapability.checksum || !managedAdmissionAllowed({ capability: this.#managedCapability, generation, killSwitch: this.#managedKillSwitch }, generation, this.#managedKillSwitch)) throw new Conflict('managed capability unavailable');
     if (state.managed.rollout) {
-      if (!this.#managedRolloutPolicy || !verifyManagedRolloutPolicy(this.#managedRolloutPolicy) || !this.#managedRolloutDecision?.admitted
+      if (!this.#managedRolloutPolicy || !verifyManagedRolloutPolicy(this.#managedRolloutPolicy)
         || state.managed.rollout.generation !== this.#managedRolloutPolicy.generation
         || state.managed.rollout.digest !== this.#managedRolloutPolicy.digest
         || state.managed.rollout.mode !== this.#managedRolloutPolicy.mode) throw new Conflict('managed rollout policy unavailable');
     }
   }
 
-  private async commitRetireManagedAttempt(generation: number, current: MachineState, token: string, input: AdvanceInput, plan: Plan, capacity: number, status: 'TIMED_OUT' | 'CANCELLED' | 'FAILED' = 'TIMED_OUT'): Promise<Yield> {
+  private async commitRetireManagedAttempt(generation: number, current: MachineState, token: string, input: AdvanceInput, plan: Plan, capacity: number, status: 'TIMED_OUT' | 'CANCELLED' | 'FAILED' = 'TIMED_OUT', providerIntent?: import('./driver.js').ProviderIntentFenceObservation): Promise<Yield> {
     this.assertManagedCas(current, generation);
-    const reduced = retireManagedAttempt(current, input.identity, token, plan, capacity, status, segmentedJournalEnabled(this.store));
-    if (reduced.outcome === 'BLOCKED' || reduced.state === current) return asYield(current, reduced);
+    const reduced = retireManagedAttempt(current, input.identity, token, plan, capacity, status, segmentedJournalEnabled(this.store), providerIntent);
+    if (reduced.state === current) return asYield(current, reduced);
+    if (reduced.outcome === 'BLOCKED') return this.commitYield(generation, reduced.state, identityKey(input.identity), input.identity, asYield(reduced.state, reduced));
     if (this.managedRuntimeEnabled() && this.#managedCapability) applyManagedReservations(reduced.state, this.#managedCapability);
     return this.commitYield(generation, reduced.state, identityKey(input.identity), input.identity, asYield(reduced.state, reduced));
   }
@@ -1150,19 +1192,21 @@ export function makeRunKernelForBridge(options: KernelOptions, expectedRootIdent
 }
 
 /** Private composition entry; intentionally not re-exported from the package index. */
-export function makeComposedKernel(options: KernelOptions, driver?: EffectDriver, dispatcher?: DispatcherOptions): RunKernel {
+export function makeComposedKernel(options: KernelOptions, driver?: EffectDriver, dispatcher?: DispatcherOptions, invocation?: { exploreAuthorization?: unknown }): RunKernel {
   const configuredMaxInFlight = validateKernelOptions(options);
   let snapshot: DispatchDriverSnapshot | undefined;
   if (driver !== undefined) {
     if (!driver || typeof driver !== 'object') throw new InvalidPlan('driver is invalid');
+    const available = driver.available;
     const prepare = driver.prepare;
     const dispatch = driver.dispatch;
     const observe = driver.observe;
     const observeTeardown = driver.observeTeardown;
-    if ((prepare !== undefined && typeof prepare !== 'function') || typeof dispatch !== 'function' || (observe !== undefined && typeof observe !== 'function') || (observeTeardown !== undefined && typeof observeTeardown !== 'function')) throw new InvalidPlan('driver is invalid');
-    snapshot = { receiver: driver, prepare, dispatch, observe, observeTeardown };
+    const observeProviderIntent = driver.observeProviderIntent;
+    if ((available !== undefined && typeof available !== 'function') || (prepare !== undefined && typeof prepare !== 'function') || typeof dispatch !== 'function' || (observe !== undefined && typeof observe !== 'function') || (observeTeardown !== undefined && typeof observeTeardown !== 'function') || (observeProviderIntent !== undefined && typeof observeProviderIntent !== 'function')) throw new InvalidPlan('driver is invalid');
+    snapshot = { receiver: driver, available, prepare, dispatch, observe, observeTeardown, observeProviderIntent };
   }
-  return new KernelImpl(options, configuredMaxInFlight, storeForRoot(options.rootDir), snapshot, dispatcher);
+  return new KernelImpl(options, configuredMaxInFlight, storeForRoot(options.rootDir), snapshot, dispatcher, invocation);
 }
 
 /** Private bridge composition entry.  The bridge holds the run-root identity
@@ -1170,17 +1214,19 @@ export function makeComposedKernel(options: KernelOptions, driver?: EffectDriver
  * composed dispatcher from silently following a renamed/replaced root.  This
  * is intentionally not exported from the package root or composition
  * subpath: hosts receive only the existing RunKernel seam. */
-export function makeComposedKernelForBridge(options: KernelOptions, expectedRootIdentity: FilesystemIdentity, driver?: EffectDriver, dispatcher?: DispatcherOptions): RunKernel {
+export function makeComposedKernelForBridge(options: KernelOptions, expectedRootIdentity: FilesystemIdentity, driver?: EffectDriver, dispatcher?: DispatcherOptions, invocation?: { exploreAuthorization?: unknown }): RunKernel {
   const configuredMaxInFlight = validateKernelOptions(options);
   let snapshot: DispatchDriverSnapshot | undefined;
   if (driver !== undefined) {
     if (!driver || typeof driver !== 'object') throw new InvalidPlan('driver is invalid');
+    const available = driver.available;
     const prepare = driver.prepare;
     const dispatch = driver.dispatch;
     const observe = driver.observe;
     const observeTeardown = driver.observeTeardown;
-    if ((prepare !== undefined && typeof prepare !== 'function') || typeof dispatch !== 'function' || (observe !== undefined && typeof observe !== 'function') || (observeTeardown !== undefined && typeof observeTeardown !== 'function')) throw new InvalidPlan('driver is invalid');
-    snapshot = { receiver: driver, prepare, dispatch, observe, observeTeardown };
+    const observeProviderIntent = driver.observeProviderIntent;
+    if ((available !== undefined && typeof available !== 'function') || (prepare !== undefined && typeof prepare !== 'function') || typeof dispatch !== 'function' || (observe !== undefined && typeof observe !== 'function') || (observeTeardown !== undefined && typeof observeTeardown !== 'function') || (observeProviderIntent !== undefined && typeof observeProviderIntent !== 'function')) throw new InvalidPlan('driver is invalid');
+    snapshot = { receiver: driver, available, prepare, dispatch, observe, observeTeardown, observeProviderIntent };
   }
-  return new KernelImpl(options, configuredMaxInFlight, storeForRoot(options.rootDir, expectedRootIdentity), snapshot, dispatcher);
+  return new KernelImpl(options, configuredMaxInFlight, storeForRoot(options.rootDir, expectedRootIdentity), snapshot, dispatcher, invocation);
 }

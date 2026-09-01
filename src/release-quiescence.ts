@@ -45,6 +45,30 @@ export type ReleaseQuiescenceReport = Readonly<{
   effectCount: number; processCount: number; capturedAt: string;
 }>;
 
+export type ReleaseGenerationClassification = 'DIRECT' | 'MANAGED_WITHOUT_ROLLOUT' | 'MANAGED_ROLLOUT';
+export type ReleaseGenerationCensusRow = Readonly<{
+  root: string;
+  classification: ReleaseGenerationClassification;
+  generations: readonly number[];
+  storeGeneration: number;
+  stateDigest: string;
+  metadataDigest: string;
+  rootIdentity: Readonly<{ dev: string; ino: string }>;
+}>;
+export type ReleaseGenerationCensus = Readonly<{
+  candidateFloor: number;
+  maximumSupportedGeneration: number | null;
+  roots: readonly ReleaseGenerationCensusRow[];
+  digest: string;
+}>;
+export type ReleaseGenerationCensusInput = Readonly<{
+  installedTarget: string;
+  runRoots: readonly string[];
+  candidateFloor: number;
+  quiescence: ReleaseQuiescenceReport;
+  releaseOwnership: NonNullable<ReleaseQuiescenceInput['releaseOwnership']>;
+}>;
+
 /** Private production-only predecessor-release gate. The deployment tool
  * calls this only for the closed v2 0.2.12 -> 0.3.0 operation. */
 export type ExactLegacyDeployQuiescenceInput = ReleaseQuiescenceInput & Readonly<{ runRoots: readonly string[] }>;
@@ -395,4 +419,72 @@ export async function verifyReleaseQuiescence(input: ReleaseQuiescenceInput): Pr
   }
   validateProcesses(snapshot, target.path, roots, effects, input.selfPid);
   return Object.freeze({ status: 'QUIESCENT', installedTarget: target.path, runRoots: Object.freeze([...roots]), runCount: roots.length, effectCount: effects.length, processCount: snapshot.processes.length, capturedAt: snapshot.capturedAt });
+}
+
+function supportedRolloutGenerations(state: MachineState): number[] {
+  if (state.schema !== 2 || !state.managed) return [];
+  const managed = state.managed;
+  const projections = [
+    managed.rollout,
+    managed.rolloutOrigin,
+    managed.proposal?.rolloutOrigin,
+    ...Object.values(managed.attempts ?? {}).map((row) => row.rolloutOrigin),
+    ...Object.values(managed.acceptedReports ?? {}).map((row) => row.rolloutOrigin),
+    ...Object.values(managed.settlementOrigins ?? {}),
+    ...Object.values(state.decisionTokens).map((row) => row.rolloutOrigin),
+  ].filter((projection): projection is NonNullable<typeof projection> => projection !== undefined);
+  const generations = projections.map((projection) => projection.generation);
+  if (generations.some((generation) => !Number.isSafeInteger(generation) || generation < 0)) fail('supported rollout generation is invalid');
+  return [...new Set(generations)].sort((left, right) => left - right);
+}
+
+/**
+ * Classify every quiesced configured root under the existing release claims
+ * and prove that the candidate one-shot floor is strictly newer than every
+ * rollout generation the current reader can restore. The returned digest is
+ * repeated immediately before publication to reject any intervening drift.
+ */
+export async function verifyReleaseGenerationCensus(input: ReleaseGenerationCensusInput): Promise<ReleaseGenerationCensus> {
+  if (!input || typeof input !== 'object' || !input.quiescence || input.quiescence.status !== 'QUIESCENT') fail('generation census requires quiescence');
+  if (!Number.isSafeInteger(input.candidateFloor) || input.candidateFloor <= 0) fail('candidate one-shot generation floor is invalid');
+  const installedTarget = canonicalPath(input.installedTarget, 'installed target');
+  if (input.quiescence.installedTarget !== installedTarget) fail('generation census target differs from quiescence');
+  const roots = await validateRootSet(input.runRoots, true);
+  if (canonicalString(roots) !== canonicalString(input.quiescence.runRoots) || input.quiescence.runCount !== roots.length) fail('generation census roots differ from quiescence');
+  await validateReleaseOwnership(input.releaseOwnership, installedTarget, roots);
+
+  const rows: ReleaseGenerationCensusRow[] = [];
+  for (const root of roots) {
+    const before = await inspectTrustedPath(root, 'generation census root', { surface: true, kind: 'directory' }).catch((error) => fail(`generation census root is unreadable: ${(error as Error).message}`));
+    if (!before) fail(`generation census root is absent: ${root}`);
+    let loaded;
+    try { loaded = await new FileArtifactStore(root).loadReadOnly(); }
+    catch (error) { fail(`generation census root ${root} is unreadable: ${(error as Error).message}`); }
+    if (!loaded!.state) fail(`generation census root ${root} has no committed state`);
+    const after = await inspectTrustedPath(root, 'generation census root', { surface: true, kind: 'directory' }).catch(() => undefined);
+    if (!after || !sameFilesystemIdentity(before.identity, after.identity)) fail(`generation census root changed during classification: ${root}`);
+    const generations = supportedRolloutGenerations(loaded!.state);
+    if (generations.some((generation) => generation >= input.candidateFloor)) fail(`candidate one-shot generation floor ${input.candidateFloor} is not strictly newer than supported generation ${Math.max(...generations)}`);
+    const classification: ReleaseGenerationClassification = loaded!.state.schema !== 2
+      ? 'DIRECT'
+      : generations.length === 0
+        ? 'MANAGED_WITHOUT_ROLLOUT'
+        : 'MANAGED_ROLLOUT';
+    rows.push(Object.freeze({
+      root,
+      classification,
+      generations: Object.freeze(generations),
+      storeGeneration: loaded!.generation,
+      stateDigest: digest(loaded!.state),
+      metadataDigest: digest(loaded!.metadata),
+      rootIdentity: Object.freeze({ ...before.identity }),
+    }));
+  }
+  await validateReleaseOwnership(input.releaseOwnership, installedTarget, roots);
+  const maximumSupportedGeneration = rows.reduce<number | null>((maximum, row) => {
+    const candidate = row.generations.at(-1);
+    return candidate === undefined ? maximum : maximum === null ? candidate : Math.max(maximum, candidate);
+  }, null);
+  const body = { candidateFloor: input.candidateFloor, maximumSupportedGeneration, roots: rows };
+  return Object.freeze({ ...body, roots: Object.freeze(rows), digest: digest(body) });
 }
