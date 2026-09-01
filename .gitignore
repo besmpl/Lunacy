@@ -1,3 +1,15 @@
 node_modules/
 dist/
 *.tsbuildinfo
+Lunacy/runs/*/.work/
+Lunacy/runs/*/.work.prune-*
+Lunacy/runs/*/.RUN-RECEIPT.json.tmp
+Lunacy/runs/*/.ABANDON-RECEIPT.json.tmp
+Lunacy/runs/*/.lunacy-run-finalization.json
+Lunacy/runs/*/.lunacy-parent-acceptance.json
+Lunacy/runs/*/.lunacy-parent-abandonment.json
+Lunacy/runs/*/.lunacy-release-exclusion.lock
+Lunacy/runs/*/.lunacy-body-writer.lock
+Lunacy/runs/*/.work.migrate-tmp/
+Lunacy/runs/*/.lunacy-body-migration.json
+Lunacy/runs/*/.lunacy-body-migration.json.stage-*

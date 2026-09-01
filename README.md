@@ -231,6 +231,8 @@ orchestrator/DELIBERATION.md    Adaptive Direct/Focus/Explore operator contract 
 WORKSPACE.md                     Multi-run state, immutable evidence, report/gate/decision limits.
 worker/ENGINEERING.md            Worker engineering + bounded output/terminal evidence doctrine.
 references/CODEX_LUNA_COMPAT.md Narrow Luna-only catalog compatibility procedure.
+docs/SESSION_ARTIFACT_LIFECYCLE.md Implementation-ready Seed/Body/Custody retention architecture.
+docs/SESSION_ARTIFACT_ROADMAP.md Detailed release cells, files, tests, rollout, and rollback.
 README.md                        Human-facing overview.
 ```
 
@@ -248,6 +250,26 @@ Package install and managed runtime deployment do not create an ambient
 adaptive rollout. The installed operator profile's private D3 composition,
 eligibility, validation, kill, and recovery procedure is the
 [adaptive operator contract](orchestrator/DELIBERATION.md).
+
+Accepted-run payload retention is private and admission-controlled. New runs
+use `.work` only when the verified installed policy is `ON`; create it with the
+launcher `admit-body` route and publish raw output with `with-body-writer`.
+After the parent binds the accepted product result, `seal-run --dry-run` checks
+the exact candidate and `seal-run --accept` publishes `RUN-RECEIPT.json` before
+crash-resumable Body cleanup. Switching admission `OFF` never disables doctor,
+resume, or cleanup for already admitted runs. See
+[session artifact lifecycle](docs/SESSION_ARTIFACT_LIFECYCLE.md) and
+[recovery](docs/RECOVERY.md).
+Retention-aware deploy and check commands pass the closed admission value and
+at least one repeatable absolute `--retention-run-parent`; deployment performs
+a bounded, read-only admitted-state/schema census only beneath those parents.
+Legacy inspection uses the verified launcher route `audit-run-artifacts
+--run-root ABSOLUTE` and does not mutate run bytes or metadata. Migration is
+never automatic or bulk: `migrate-run-body --run-root ABSOLUTE --accept` admits
+one Git-backed Markdown-only COMPLETE run, retains originals through normal
+acceptance/sealing, and removes only receipt- and marker-bound originals after
+the reference guard is clean. Live rollout remains blocked until the lifecycle
+metric prerequisite is accepted.
 
 The private managed skill deployment also carries the event-driven Codex drive
 adapter, its one-token supervisor, closed schemas, and capability probe. Run

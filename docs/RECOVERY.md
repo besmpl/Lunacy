@@ -69,3 +69,44 @@ investigating and preserve the Wave, Reports, receipts, transport/teardown,
 anchors, settlements, leases, and journal. See the [adaptive operator
 contract](../orchestrator/DELIBERATION.md) for kill/revocation and the bounded
 diagnostic counters.
+
+## Accepted Body recovery
+
+Run retention commands only through the verified installed
+`runtime/retention-launcher.mjs`. Admission `OFF` stops new `.work` creation but
+does not strand an existing Body, staged receipt, continuation marker,
+tombstone, or published receipt. Inspect one explicit run with `seal-run
+--doctor --run-root ABSOLUTE`. `RESUME_PRE_RENAME`, `RESUME_PRE_PUBLISH`, and
+`RESUME_CLEANUP` are resumed with `seal-run --resume --run-root ABSOLUTE`.
+
+Before receipt publication, recovery may expose the complete `.work` or its
+receipt-bound tombstone; it never deletes payload. After publication, resume
+deletes only the marker's exact remaining identities, then the exact
+acceptance input, and removes the continuation marker last. Any unknown entry,
+identity/content drift, unsafe file kind, mount ambiguity, open handle, or
+malformed record is an attention state: preserve bytes and escalate. Never
+rename a tombstone back by hand, recompute deletion authority, remove
+`.kernel`/`.codex-effects`, or clean `CLAIMED`/`UNKNOWN` Custody.
+
+Deploy, check, and admission downgrade use an explicit repeatable absolute
+`--retention-run-parent`. The bounded read-only preflight scans only direct run
+children under those declared parents and refuses any admitted state/schema
+the candidate cannot recover; it is not a global filesystem discovery claim.
+
+## Legacy Body migration recovery
+
+Inspect one selected run with `audit-run-artifacts --run-root ABSOLUTE` through
+the verified launcher. Recovery is closed: a verified temp may be recopied; a
+complete `.work` without a marker may publish the marker; marker plus Body
+retains originals and waits for reference rewrite, acceptance, and normal
+sealing; an active normal finalizer is resumed only by `seal-run --resume`.
+After a matching accepted receipt and no Body, rerun `migrate-run-body
+--run-root ABSOLUTE --accept` to verify the reference guard and continue exact
+source unlinks. Changed sources, unknown pre-receipt absence, collisions, and
+unscannable references retain bytes and refuse.
+
+The pilot rollback is repository recovery, not receipt reconstruction: run
+`git restore -- <exact marker-recorded source paths>` and verify the restored
+aggregate against the saved marker before considering rollback complete. Never
+remove an unbound `.work.migrate-tmp`, reconstruct missing bytes from the
+receipt, or migrate multiple runs from audit output.

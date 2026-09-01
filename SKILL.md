@@ -30,6 +30,24 @@ Host parent selection: GPT-5.6 Sol at `high` is the preferred parent/orchestrato
 
 Read `orchestrator/PLANNING.md` when creating/materially replanning. Point implementation/repair/recovery/adversary workers to `worker/ENGINEERING.md`. Project-specific authority outranks both generic doctrines.
 
+## Accepted-run retention
+
+For a newly admitted run, raw logs, surveys, and non-runtime reports go to
+`.work` only through the verified `with-body-writer` launcher route. Managed
+reports remain at the runtime-owned report path. New Body requires installed
+admission `ON` and the private `admit-body` route; writers never create it.
+Before a runtime parent submits `PARENT_DECISION PASS`, it uses the atomic
+accept-runtime-pass wrapper to bind Outcome, authority, terminal transition,
+and product identity. The final parent evaluates `seal-run --dry-run`, invokes
+`seal-run --accept`, and evaluates the observable. Disabling admission stops
+only new Body: doctor, resume, and exact cleanup remain installed. Never cite
+Body from durable product docs or treat `CLAIMED`/`UNKNOWN` Custody as payload.
+Explicit `BLOCKED`/`STOPPED` abandonment is a distinct installed-policy-gated
+`seal-run --abandon --authority` route. It requires closed parent authority,
+retains unresolved Custody, and publishes `ABANDON-RECEIPT.json` without any
+product result identity; normal `--resume` remains available when that route
+is later disabled.
+
 ## Optional managed runtime drive
 
 The managed skill may run an explicitly selected phase through the private

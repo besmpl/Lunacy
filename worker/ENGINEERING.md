@@ -59,6 +59,13 @@ Prefer the smallest coherent diff/design that preserves clarity and architecture
 
 ## Implementation
 
+Raw output for an admitted run is temporary Body, not a durable report. Publish
+it only with `runtime/retention-launcher.mjs with-body-writer`; do not redirect
+a child directly into `.work`, create `.work` from a writer, or copy raw output
+into a managed report. The parent alone prepares acceptance and seals after
+PASS. Existing Body/finalization recovery continues when admission is OFF, and
+`CLAIMED` or `UNKNOWN` effect material remains Custody.
+
 - Make the change end-to-end across the complete affected inventory.
 - Reuse domain objects/utilities when correct rather than cloning logic.
 - If behavior exposes a genuine hole in an existing abstraction, improve that abstraction within scope rather than bolt on a parallel path.

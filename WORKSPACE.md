@@ -30,13 +30,42 @@ Lunacy/
 
 Legacy root-level `Lunacy/PLAN.md`, `STATE.md`, `phases/`, etc. migrate once into one run. Do not keep old/new authority copies in parallel.
 
+## Seed / Body / Custody lifecycle
+
+New Body is admitted only when the verified installed retention policy is `ON`,
+and `.work` is created only by `admitRunBody`. The supported Body writer never
+creates `.work`; it publishes raw logs and non-runtime reports through
+`runtime/retention-launcher.mjs with-body-writer`. Managed runtime reports stay
+at their exact `phases/*/reports` compatibility paths. Existing Body or a
+finalization marker must remain resumable when admission is switched `OFF`.
+
+Seed is the bounded run authority and accepted Outcome. Body is disposable
+session payload under `.work`. Custody is `.kernel`, `.codex-effects`, external
+evidence, and every `CLAIMED`, `UNKNOWN`, malformed, or unresolved effect. A
+parent prepares the private acceptance witness before runtime `PASS`, then
+invokes dry-run/accept only after evaluating the final observable. Durable
+product documentation never cites Body. There is no optional polish or proof
+node before or after the accepted journey; later polish is a new authority.
+
+A `BLOCKED` or `STOPPED` run may be pruned only through the verified
+`retention-launcher.mjs seal-run --abandon --authority ABSOLUTE` route, with
+deployment abandonment policy `ON`. The closed authority retains all
+`UNKNOWN`/malformed Custody and publishes `ABANDON-RECEIPT.json`, never an
+accepted result claim. Disabling abandonment blocks new abandonment only;
+`seal-run --resume` remains available for an admitted transaction.
+
+Legacy Body migration is an explicit one-run operation through the verified
+launcher. Audit first; never bulk-select runs. Originals remain until a normal
+accepted `RUN-RECEIPT.json` matches the migration marker and every durable
+inbound reference has been rewritten into the accepted product manifest.
+
 ## Artifact mutability contract
 
 **Mutable current-control files:** `PLAN.md`, `STATE.md`, phase `STEPS.md`, `PROJECT_NOTES.md`, run `USER_NOTES.md`.
 
 **Append-only:** `DECISIONS.md`. Supersede a prior decision with a new entry; do not rewrite history.
 
-**Immutable once finalized:** worker/adversary reports, decision briefs, gate packs, hard-gate records, and durable evidence snapshots/logs referenced by a FINAL artifact.
+**Immutable while retained:** worker/adversary reports, decision briefs, gate packs, hard-gate records, and durable evidence snapshots/logs referenced by a FINAL artifact. Accepted Body may be removed only by the receipt-bound lifecycle; Custody remains protected.
 
 Never reopen a FINAL worker report to append gate findings, newer hashes, revised test counts, overlap amendments, or parent adjudication. If code/evidence changes after FINAL:
 

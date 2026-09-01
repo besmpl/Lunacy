@@ -2,7 +2,7 @@
 
 import { createHash, randomUUID } from 'node:crypto';
 import { constants as fsConstants, existsSync, promises as fs } from 'node:fs';
-import { basename, dirname, join, relative, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { assertStableIdentity, ensurePrivateDirectory, filesystemIdentity, inspectTrustedPath, sameFilesystemIdentity, trustedIdentity } from '../dist/filesystem.js';
@@ -24,6 +24,9 @@ const lockName = '.lunacy-runtime-deploy.lock';
 const transactionSchema = 1;
 const lockSchema = 1;
 const crashExitCode = 97;
+const MAX_RETENTION_RUN_PARENTS = 64;
+const MAX_RETENTION_RUNS_PER_PARENT = 4096;
+const MAX_RETENTION_RUN_ENTRIES = 4096;
 const transactionPhases = new Set(['prepared', 'old-moved', 'published', 'committed']);
 const recoveryPhases = new Set([
   null,
@@ -47,6 +50,87 @@ function canonical(value) {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
   if (value && typeof value === 'object') return `{${Object.keys(value).sort(stableCompare).map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(',')}}`;
   return JSON.stringify(value);
+}
+
+const retentionRecordSchemas = new Map([
+  ['RUN-RECEIPT.json', 'lunacy-run-receipt/v1'],
+  ['.RUN-RECEIPT.json.tmp', 'lunacy-run-receipt/v1'],
+  ['ABANDON-RECEIPT.json', 'lunacy-run-abandon-receipt/v1'],
+  ['.ABANDON-RECEIPT.json.tmp', 'lunacy-run-abandon-receipt/v1'],
+  ['.lunacy-run-finalization.json', 'lunacy-run-finalization/v1'],
+  ['.lunacy-parent-acceptance.json', new Set(['lunacy-parent-acceptance/v1', 'lunacy-runtime-acceptance-candidate/v1', 'lunacy-runtime-acceptance/v1'])],
+  ['.lunacy-parent-abandonment.json', 'lunacy-run-abandonment/v1'],
+  ['.lunacy-body-migration.json', 'lunacy-body-migration/v1'],
+]);
+const MIGRATION_MARKER_STAGE_PREFIX = '.lunacy-body-migration.json.stage-';
+function retentionManagedName(name) { return name === '.work' || name === '.work.migrate-tmp' || name.startsWith('.work.prune-') || name.startsWith(MIGRATION_MARKER_STAGE_PREFIX) || retentionRecordSchemas.has(name); }
+async function readRetentionRecord(path, label, links = 1) {
+  const stat = await fs.lstat(path); if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== links) throw new Error(`${label} is not an exclusive regular file`);
+  const bytes = await readBounded(path, MAX_MANIFEST_BYTES, label);
+  const text = bytes.toString('utf8'); if (!Buffer.from(text, 'utf8').equals(bytes)) throw new Error(`${label} is not UTF-8`);
+  let value; try { value = JSON.parse(text); } catch { throw new Error(`${label} is malformed`); }
+  if (text !== canonical(value) && text !== `${canonical(value)}\n` || !value || typeof value !== 'object' || Array.isArray(value) || typeof value.schema !== 'string') throw new Error(`${label} is not a canonical schema record`);
+  return value.schema;
+}
+async function captureRetentionRunParents(parents) {
+  const states = new Set(); const bindings = [];
+  for (const parent of parents) {
+    const trustedParent = await inspectTrustedPath(parent, 'retention run parent', { surface: true, kind: 'directory' });
+    if (!trustedParent) throw new Error(`retention run parent is absent: ${parent}`);
+    const children = (await fs.readdir(parent, { withFileTypes: true })).sort((a, b) => stableCompare(a.name, b.name));
+    if (children.length > MAX_RETENTION_RUNS_PER_PARENT) throw new Error(`retention run parent exceeds its entry limit: ${parent}`);
+    for (const child of children) {
+      if (!child.name || child.name.includes('/') || child.name.includes('\\')) throw new Error(`retention run child name is unsafe under ${parent}`);
+      if (child.isSymbolicLink()) throw new Error(`retention run parent contains a symlink: ${join(parent, child.name)}`);
+      if (!child.isDirectory()) continue;
+      const runRoot = join(parent, child.name); const trustedRun = await inspectTrustedPath(runRoot, 'retention run root', { surface: true, kind: 'directory' });
+      if (!trustedRun) throw new Error(`retention run root changed during census: ${runRoot}`);
+      const entries = (await fs.readdir(runRoot, { withFileTypes: true })).sort((a, b) => stableCompare(a.name, b.name));
+      if (entries.length > MAX_RETENTION_RUN_ENTRIES) throw new Error(`retention run exceeds its entry limit: ${runRoot}`);
+      const managed = entries.filter((entry) => retentionManagedName(entry.name)); if (managed.length === 0) continue;
+      const runStates = [];
+      for (const entry of managed) {
+        const path = join(runRoot, entry.name);
+        if (entry.isSymbolicLink()) throw new Error(`retention state is a symlink: ${path}`);
+        if (entry.name === '.work') {
+          if (!entry.isDirectory()) throw new Error(`non-managed .work cannot be recovered: ${runRoot}`);
+          runStates.push('BODY/lunacy-body/v1'); continue;
+        }
+        if (entry.name === '.work.migrate-tmp') {
+          if (!entry.isDirectory()) throw new Error(`non-managed migration temp cannot be recovered: ${runRoot}`);
+          runStates.push('MIGRATION_TEMP/lunacy-body-migration/v1'); continue;
+        }
+        if (entry.name.startsWith(MIGRATION_MARKER_STAGE_PREFIX)) {
+          if (!/^\.lunacy-body-migration\.json\.stage-[0-9a-f]{64}$/.test(entry.name) || !entry.isFile()) throw new Error(`non-managed migration marker stage cannot be recovered: ${path}`);
+          const staged = await fs.lstat(path); if (staged.isSymbolicLink() || !staged.isFile() || ![1, 2].includes(staged.nlink) || staged.size < 0 || staged.size > MAX_MANIFEST_BYTES) throw new Error(`unsafe migration marker stage cannot be recovered: ${path}`);
+          const published = await fs.lstat(join(runRoot, '.lunacy-body-migration.json')).catch(() => undefined);
+          if (staged.nlink === 1 && published) throw new Error(`unbound migration marker stage collides with final marker: ${path}`);
+          if (staged.nlink === 2 && (!published || !published.isFile() || published.dev !== staged.dev || published.ino !== staged.ino || published.nlink !== 2)) throw new Error(`unbound linked migration marker stage cannot be recovered: ${path}`);
+          runStates.push('MIGRATION_MARKER_STAGE/lunacy-body-migration/v1'); continue;
+        }
+        if (entry.name.startsWith('.work.prune-')) {
+          if (!/^\.work\.prune-[0-9a-f]{64}$/.test(entry.name) || !entry.isDirectory()) throw new Error(`non-managed Body tombstone cannot be recovered: ${path}`);
+          runStates.push('TOMBSTONE/lunacy-run-finalization/v1'); continue;
+        }
+        if (!entry.isFile()) throw new Error(`retention record is not a file: ${path}`);
+        const expected = retentionRecordSchemas.get(entry.name); let links = 1;
+        if (entry.name === '.lunacy-body-migration.json') { const value = await fs.lstat(path); if (value.nlink === 2) { const stages = managed.filter((candidate) => /^\.lunacy-body-migration\.json\.stage-[0-9a-f]{64}$/.test(candidate.name)); if (stages.length !== 1) throw new Error(`linked migration marker has no exact stage: ${path}`); const staged = await fs.lstat(join(runRoot, stages[0].name)); if (staged.dev !== value.dev || staged.ino !== value.ino || staged.nlink !== 2) throw new Error(`linked migration marker has an unbound stage: ${path}`); links = 2; } }
+        const schemaValue = await readRetentionRecord(path, `retention record ${path}`, links);
+        if (expected instanceof Set ? !expected.has(schemaValue) : schemaValue !== expected) throw new Error(`retention candidate cannot recover schema ${schemaValue}: ${path}`);
+        runStates.push(`${entry.name}/${schemaValue}`);
+      }
+      runStates.sort(stableCompare); for (const state of runStates) states.add(state);
+      bindings.push({ parent, run: child.name, dev: trustedRun.identity.dev, ino: trustedRun.identity.ino, states: runStates });
+    }
+  }
+  bindings.sort((a, b) => stableCompare(`${a.parent}/${a.run}`, `${b.parent}/${b.run}`)); const stateSchemas = [...states].sort(stableCompare);
+  return Object.freeze({ schema: 'lunacy-retention-deployment-census/v1', parents: Object.freeze([...parents]), stateSchemas: Object.freeze(stateSchemas), bindings: Object.freeze(bindings), digest: hash(Buffer.from(canonical({ parents, stateSchemas, bindings }))) });
+}
+async function retentionDeploymentPreflight(parents) {
+  if (parents.length === 0) return Object.freeze({ schema: 'lunacy-retention-deployment-census/v1', parents: Object.freeze([]), stateSchemas: Object.freeze([]), bindings: Object.freeze([]), digest: hash(Buffer.from(canonical({ parents: [], stateSchemas: [], bindings: [] }))) });
+  const first = await captureRetentionRunParents(parents); const second = await captureRetentionRunParents(parents);
+  if (canonical(first) !== canonical(second)) throw new Error('retention run-parent census changed during deployment preflight');
+  return first;
 }
 // Envelope identity paths are digests of canonical JSON values. Keep this
 // helper at module scope so fresh creation, resume validation, and quiescence
@@ -325,6 +409,9 @@ const managedRootFiles = new Set([
   'runtime/WORKFRONT.md',
   'runtime/package.json',
   'runtime/bridge.mjs',
+  'runtime/retention-launcher.mjs',
+  'runtime/retention-platform-helpers.json',
+  'runtime/retention-policy.json',
 ]);
 const managedDirectories = new Set(['runtime/dist', 'runtime/schemas', 'runtime/tools']);
 function isDeploymentOwnedPath(path) {
@@ -1248,7 +1335,7 @@ function assertExactLegacyRecoveryBinding(transaction, bundles) {
 }
 
 function parseArgs(argv) {
-  let target = process.env.LUNACY_SKILL_ROOT || defaultTarget; let check = false; let restore = false; let exactLegacyDeploy = false; let payload; let inventory; let aggregate; let candidatePayload; let candidateInventory; let candidateAggregate; let releaseManifest; let releaseEnvelope = false; let envelopeStatus = false; let resumeRelease = false;
+  let target = process.env.LUNACY_SKILL_ROOT || defaultTarget; let check = false; let restore = false; let exactLegacyDeploy = false; let payload; let inventory; let aggregate; let candidatePayload; let candidateInventory; let candidateAggregate; let releaseManifest; let releaseEnvelope = false; let envelopeStatus = false; let resumeRelease = false; let retentionAdmission = 'OFF'; let retentionAdmissionExplicit = false; let retentionAbandonment = 'OFF'; let retentionAbandonmentExplicit = false; const retentionRunParents = [];
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--check') { check = true; continue; }
@@ -1263,8 +1350,11 @@ function parseArgs(argv) {
     if (arg === '--candidate-inventory') { candidateInventory = argv[++i]; if (!candidateInventory || candidateInventory.startsWith('--')) throw new Error('--candidate-inventory requires a path'); continue; }
     if (arg === '--candidate-aggregate') { candidateAggregate = argv[++i]; if (!candidateAggregate || candidateAggregate.startsWith('--') || !/^[0-9a-f]{64}$/.test(candidateAggregate)) throw new Error('--candidate-aggregate requires a 64-character SHA-256 digest'); continue; }
     if (arg === '--target') { target = argv[++i]; if (!target || target.startsWith('--')) throw new Error('--target requires a path'); continue; }
+    if (arg === '--retention-admission') { retentionAdmission = argv[++i]; retentionAdmissionExplicit = true; if (retentionAdmission !== 'OFF' && retentionAdmission !== 'ON') throw new Error('retention admission must be OFF or ON'); continue; }
+    if (arg === '--retention-abandonment') { retentionAbandonment = argv[++i]; retentionAbandonmentExplicit = true; if (retentionAbandonment !== 'OFF' && retentionAbandonment !== 'ON') throw new Error('retention abandonment must be OFF or ON'); continue; }
+    if (arg === '--retention-run-parent') { const parent = argv[++i]; if (!parent || parent.startsWith('--') || !isAbsolute(parent) || resolve(parent) !== parent) throw new Error('--retention-run-parent requires an absolute canonical path'); retentionRunParents.push(parent); continue; }
     if (arg === '--release-manifest') { releaseManifest = argv[++i]; if (!releaseManifest || releaseManifest.startsWith('--')) throw new Error('--release-manifest requires a path'); continue; }
-    if (arg === '--help' || arg === '-h') { console.log('Usage: node tools/deploy-skill.mjs [--target SKILL_ROOT] [--check] [--release-envelope]\n       node tools/deploy-skill.mjs --target SKILL_ROOT --restore --payload PAYLOAD_DIR --inventory INVENTORY.json --aggregate SHA256\n       private exact predecessor deploy: --exact-0.2.12-to-candidate plus rollback and candidate payload/inventory/aggregate and --release-manifest\n       add --release-manifest MANIFEST.json for the production release boundary\n       --release-envelope-status inspects the private resumable envelope without mutation'); process.exit(0); }
+    if (arg === '--help' || arg === '-h') { console.log('Usage: node tools/deploy-skill.mjs [--target SKILL_ROOT] [--check] [--retention-admission OFF|ON] [--retention-abandonment OFF|ON] --retention-run-parent ABSOLUTE [--release-envelope]\n       node tools/deploy-skill.mjs --target SKILL_ROOT --restore --payload PAYLOAD_DIR --inventory INVENTORY.json --aggregate SHA256\n       private exact predecessor deploy: --exact-0.2.12-to-candidate plus rollback and candidate payload/inventory/aggregate and --release-manifest\n       add --release-manifest MANIFEST.json for the production release boundary\n       --retention-run-parent is repeatable and scopes the bounded admitted-state census\n       --release-envelope-status inspects the private resumable envelope without mutation'); process.exit(0); }
     throw new Error(`unknown argument ${arg}`);
   }
   if ([check, restore, exactLegacyDeploy].filter(Boolean).length > 1) throw new Error('--check, --restore, and --exact-0.2.12-to-candidate are mutually exclusive');
@@ -1273,7 +1363,10 @@ function parseArgs(argv) {
   if (exactLegacyDeploy && (!payload || !inventory || aggregate === undefined || !candidatePayload || !candidateInventory || candidateAggregate === undefined || !releaseManifest)) throw new Error('--exact-0.2.12-to-candidate requires rollback and candidate payload/inventory/aggregate plus --release-manifest');
   if (!restore && !exactLegacyDeploy && (payload || inventory || aggregate !== undefined)) throw new Error('--payload, --inventory, and --aggregate require --restore or --exact-0.2.12-to-candidate');
   if (!exactLegacyDeploy && (candidatePayload || candidateInventory || candidateAggregate !== undefined)) throw new Error('candidate payload, inventory, and aggregate require --exact-0.2.12-to-candidate');
-  return { target: resolve(target), check, restore, exactLegacyDeploy, releaseEnvelope, envelopeStatus, resumeRelease, payload: payload ? resolve(payload) : undefined, inventory: inventory ? resolve(inventory) : undefined, aggregate, candidatePayload: candidatePayload ? resolve(candidatePayload) : undefined, candidateInventory: candidateInventory ? resolve(candidateInventory) : undefined, candidateAggregate, releaseManifest: releaseManifest ? resolve(releaseManifest) : undefined };
+  if (retentionRunParents.length > MAX_RETENTION_RUN_PARENTS || new Set(retentionRunParents).size !== retentionRunParents.length) throw new Error('retention run parents are duplicate or exceed their limit');
+  retentionRunParents.sort(stableCompare);
+  if ((retentionAdmissionExplicit || retentionAbandonmentExplicit) && retentionRunParents.length === 0) throw new Error('--retention-run-parent is required with retention policy options');
+  return { target: resolve(target), check, restore, exactLegacyDeploy, releaseEnvelope, envelopeStatus, resumeRelease, retentionAdmission, retentionAdmissionExplicit, retentionAbandonment, retentionAbandonmentExplicit, retentionRunParents, payload: payload ? resolve(payload) : undefined, inventory: inventory ? resolve(inventory) : undefined, aggregate, candidatePayload: candidatePayload ? resolve(candidatePayload) : undefined, candidateInventory: candidateInventory ? resolve(candidateInventory) : undefined, candidateAggregate, releaseManifest: releaseManifest ? resolve(releaseManifest) : undefined };
 }
 
 function makeWrapper(expectedDigest, expectedFiles, expectedRuntimeVersion, expectedManifestDigest, expectedLauncherDigest, expectedNode) {
@@ -1392,7 +1485,7 @@ function makeWrapper(expectedDigest, expectedFiles, expectedRuntimeVersion, expe
   ].join('\n');
 }
 
-async function executeOperation({ target, check, restore, exactLegacyDeploy, payload, inventory, aggregate, candidatePayload, candidateInventory, candidateAggregate, exactLegacyManifest, exactLegacyBundles }, targetLock) {
+async function executeOperation({ target, check, restore, exactLegacyDeploy, payload, inventory, aggregate, candidatePayload, candidateInventory, candidateAggregate, exactLegacyManifest, exactLegacyBundles, retentionAdmission, retentionAbandonment, retentionCensus }, targetLock) {
   // Complete any durable transaction left by a previous crash before taking
   // a new source snapshot.  Recovery touches only our marker/stage/backup
   // names and preserves every non-runtime skill-root path.
@@ -1460,6 +1553,11 @@ async function executeOperation({ target, check, restore, exactLegacyDeploy, pay
     { source: join(sourceRoot, 'tools', 'probe-codex-exec.mjs'), relative: 'runtime/tools/probe-codex-exec.mjs' },
     { source: join(sourceRoot, 'tools', 'bind-release-process-snapshot.mjs'), relative: 'runtime/tools/bind-release-process-snapshot.mjs' },
     { source: join(sourceRoot, 'tools', 'verify-release-quiescence.mjs'), relative: 'runtime/tools/verify-release-quiescence.mjs' },
+    { source: join(sourceRoot, 'tools', 'seal-run.mjs'), relative: 'runtime/tools/seal-run.mjs' },
+    { source: join(sourceRoot, 'tools', 'with-body-writer.mjs'), relative: 'runtime/tools/with-body-writer.mjs' },
+    { source: join(sourceRoot, 'tools', 'audit-run-artifacts.mjs'), relative: 'runtime/tools/audit-run-artifacts.mjs' },
+    { source: join(sourceRoot, 'tools', 'migrate-run-body.mjs'), relative: 'runtime/tools/migrate-run-body.mjs' },
+    { source: join(sourceRoot, 'tools', 'retention-launcher.mjs'), relative: 'runtime/retention-launcher.mjs' },
   ].filter((file) => {
     // Some recovery/deployment tests exercise this script from a tracked-only
     // temporary checkout.  The P2 inbox contract is additive and may not be
@@ -1481,6 +1579,17 @@ async function executeOperation({ target, check, restore, exactLegacyDeploy, pay
     payloadSourceFiles.push({ relative: file.relative, bytes, digest });
     sourceRecords.push({ path: file.relative, digest });
   }
+  const retentionPolicy = Buffer.from(`${canonical({ schema: 'lunacy-retention-policy/v1', newBodyAdmission: retentionAdmission, abandonment: retentionAbandonment })}\n`);
+  payloadSourceFiles.push({ relative: 'runtime/retention-policy.json', bytes: retentionPolicy, digest: hash(retentionPolicy) });
+  sourceRecords.push({ path: 'runtime/retention-policy.json', digest: hash(retentionPolicy) });
+  const helperPaths = process.platform === 'darwin' ? ['/bin/ps', '/sbin/mount', '/usr/sbin/lsof'] : [];
+  const helpers = [];
+  for (const path of helperPaths) { const stat = await fs.stat(path); if (!stat.isFile() || (stat.mode & 0o111) === 0 || (stat.mode & 0o022) !== 0 || stat.size > 16 * 1024 * 1024) throw new Error(`retention platform helper is unavailable: ${path}`); const bytes = await fs.readFile(path); const after = await fs.stat(path); if (after.dev !== stat.dev || after.ino !== stat.ino || after.size !== stat.size || bytes.length !== stat.size) throw new Error(`retention platform helper changed: ${path}`); helpers.push({ path, dev: String(stat.dev), ino: String(stat.ino), mode: stat.mode & 0o7777, digest: hash(bytes) }); }
+  const retentionHelpers = Buffer.from(`${canonical({ schema: 'lunacy-retention-platform-helpers/v1', platform: process.platform, helpers })}\n`);
+  payloadSourceFiles.push({ relative: 'runtime/retention-platform-helpers.json', bytes: retentionHelpers, digest: hash(retentionHelpers) });
+  sourceRecords.push({ path: 'runtime/retention-platform-helpers.json', digest: hash(retentionHelpers) });
+  payloadSourceFiles.sort((a, b) => stableCompare(a.relative, b.relative));
+  sourceRecords.sort((a, b) => stableCompare(a.path, b.path));
   const sourceDigest = hash(Buffer.from(sourceRecords.map((record) => `${record.path}\0${record.digest}`).join('\n')));
   const packageValue = JSON.parse(payloadSourceFiles.find((file) => file.relative === 'runtime/package.json').bytes.toString('utf8'));
   const manifest = { schema, bridgeVersion: '0.2.0', runtimeVersion: packageValue.version, sourceDigest, files: sourceRecords.map((record) => record.path) };
@@ -1496,6 +1605,11 @@ async function executeOperation({ target, check, restore, exactLegacyDeploy, pay
 
 This directory is generated from the canonical Desktop Lunacy runtime source.
 Use "$NODE" runtime/bridge.mjs --help for one-event transitions.
+Retention audit and mutations are available only through the verified
+runtime/retention-launcher.mjs. Legacy migration is one explicit Git-backed
+run at a time; audit is read-only and migration requires --accept. Explicit BLOCKED/STOPPED abandonment uses
+the policy-gated seal-run --abandon --authority route; resume remains enabled
+after the abandonment switch is turned OFF.
 Use "$NODE" runtime/bridge.mjs drive --help for the private event-driven Codex
 drive route.  The managed runtime also carries the exact closed Codex result,
 launch-intent, launch, and terminal schemas plus the capability probe under runtime/schemas/
@@ -1527,11 +1641,11 @@ or --mode markdown explicitly for each run.
     const actualManifestBytes = await readBounded(join(runtimeTarget, 'DEPLOYMENT.json'), MAX_MANIFEST_BYTES, 'deployment manifest');
     if (!actualManifestBytes.equals(manifestBytes)) throw new Error('manifest bytes do not match canonical source');
     const verified = await verifyManagedTree(runtimeTarget, expectedInventory, 'managed deployment', managedAggregate, preservedFiles);
-    console.log(JSON.stringify({ status: 'current', target, sourceDigest, managedFiles: verified.files, managedDirectories: verified.directories, managedAggregate }));
+    console.log(JSON.stringify({ status: 'current', target, sourceDigest, managedFiles: verified.files, managedDirectories: verified.directories, managedAggregate, retentionCensusDigest: retentionCensus.digest, retentionStateSchemas: retentionCensus.stateSchemas }));
     return;
   }
   const verified = await publishManagedTree(target, payloadFiles, manifestBytes, expectedInventory, preservedFiles, targetLock.owner);
-  console.log(JSON.stringify({ status: 'deployed', target, sourceDigest, files: sourceRecords.length, managedFiles: verified.files, managedDirectories: verified.directories, managedAggregate }));
+  console.log(JSON.stringify({ status: 'deployed', target, sourceDigest, files: sourceRecords.length, managedFiles: verified.files, managedDirectories: verified.directories, managedAggregate, retentionCensusDigest: retentionCensus.digest, retentionStateSchemas: retentionCensus.stateSchemas }));
 }
 
 async function readProductionSnapshot(path, ownership) {
@@ -1554,8 +1668,7 @@ async function readProductionSnapshot(path, ownership) {
   return snapshot;
 }
 
-async function main() {
-  const args = parseArgs(process.argv.slice(2));
+async function executeMain(args) {
   if (args.envelopeStatus) {
     const { releaseOperationStatus } = await import('../dist/release-operation.js');
     let manifest;
@@ -1692,6 +1805,18 @@ async function main() {
     }
     throw error;
   });
+}
+
+async function main() {
+  const args = parseArgs(process.argv.slice(2));
+  if (args.envelopeStatus) return executeMain(args);
+  if (!args.releaseManifest) await ensureDir(args.target, 'skill root');
+  else if (!await inspectTrustedPath(args.target, 'installed skill target', { surface: true, kind: 'directory' })) throw new Error('release installed target is absent');
+  if (!args.retentionAdmissionExplicit && !args.retentionAbandonmentExplicit) { args.retentionCensus = await retentionDeploymentPreflight([]); return executeMain(args); }
+  const admission = await import('../dist/release-admission.js'); const physicalTarget = resolve(await fs.realpath(args.target));
+  const ownerDigest = hash(Buffer.from(canonical({ schema: 'lunacy-retention-admission/v1', installedRuntime: physicalTarget, runRoot: '', operation: 'ADMIT' })));
+  const owner = admission.currentReleaseOwner(ownerDigest); const claim = await admission.acquireOwnedFileClaim(join(args.target, '.lunacy-retention-admission.lock'), owner, { waitMs: 120_000, reclaimStaleReleaseOwner: true, nonReleaseOwnerIsBusy: true, writerReclaimProtocol: true, label: 'retention policy deployment' });
+  try { args.retentionCensus = await retentionDeploymentPreflight(args.retentionRunParents); return await executeMain(args); } finally { await claim.release(); }
 }
 
 main().catch((error) => { console.error(error?.stack ?? String(error)); process.exitCode = 1; });

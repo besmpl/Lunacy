@@ -8,6 +8,8 @@ import { inspectTrustedPath, sameFilesystemIdentity, syncDirectory } from './fil
 export const RELEASE_EXCLUSION_LOCK = '.lunacy-release-exclusion.lock';
 export const BRIDGE_OPERATION_LOCK = '.bridge.lock';
 export const WRITER_LOCK = '.writer.lock';
+export const BODY_WRITER_LOCK = '.lunacy-body-writer.lock';
+export const RETENTION_ADMISSION_LOCK = '.lunacy-retention-admission.lock';
 const MAX_CLAIM_ACQUISITION_WAIT_MS = 120_000;
 const MANIFEST_V1_SCHEMA = 'lunacy-release-operation/v1';
 const MANIFEST_V2_SCHEMA = 'lunacy-release-operation/v2';
@@ -479,6 +481,119 @@ export async function assertReleaseAdmissionOpen(runRoot: string): Promise<void>
     const parent = dirname(directory);
     if (parent === directory) return;
     directory = parent;
+  }
+}
+
+const RETENTION_WAIT_MS = 120_000;
+
+function retentionOwner(operation: 'ADMIT' | 'WRITE' | 'FINALIZE' | 'ABANDON', installedRuntime: string, runRoot: string): ReleaseOwner {
+  return currentReleaseOwner(createHash('sha256').update(canonicalString({
+    schema: 'lunacy-retention-admission/v1', installedRuntime, runRoot, operation,
+  })).digest('hex'));
+}
+
+async function canonicalPhysicalDirectory(path: string, label: string): Promise<string> {
+  const canonical = canonicalPath(resolve(path), label);
+  const physical = resolve(await fs.realpath(canonical).catch((error) => fail(`${label} is unreadable: ${(error as Error).message}`)));
+  const trusted = await inspectTrustedPath(physical, label, { surface: true, kind: 'directory' }).catch((error) => fail(`${label} is unsafe: ${(error as Error).message}`));
+  if (!trusted) fail(`${label} is absent`);
+  return physical;
+}
+
+async function readRetentionPolicy(runtime: string): Promise<Readonly<{ newBodyAdmission: 'ON' | 'OFF'; abandonment: 'ON' | 'OFF' }>> {
+  const path = join(runtime, 'retention-policy.json');
+  const trusted = await inspectTrustedPath(path, 'retention policy', { surface: true, kind: 'file' }).catch((error) => fail(`retention policy is unsafe: ${(error as Error).message}`));
+  if (!trusted || trusted.stat.size < 1 || trusted.stat.size > 1024 || trusted.stat.nlink !== 1) fail('retention policy is absent or invalid');
+  const handle = await fs.open(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+  let bytes: Buffer;
+  try { bytes = await handle.readFile(); } finally { await handle.close(); }
+  const text = bytes.toString('utf8');
+  let value: unknown; try { if (!text.endsWith('\n')) throw new Error('missing newline'); value = parseCanonical<unknown>(text.slice(0, -1)); } catch { fail('retention policy is not canonical'); }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) fail('retention policy is not canonical'); const policy = value as Record<string, unknown>;
+  if (Object.keys(policy).sort().join(',') !== 'abandonment,newBodyAdmission,schema' || policy.schema !== 'lunacy-retention-policy/v1' || !['OFF', 'ON'].includes(policy.newBodyAdmission as string) || !['OFF', 'ON'].includes(policy.abandonment as string)) fail('retention policy is not canonical');
+  return Object.freeze({ newBodyAdmission: policy.newBodyAdmission as 'ON' | 'OFF', abandonment: policy.abandonment as 'ON' | 'OFF' });
+}
+
+export async function withRunAbandonmentPolicy<T>(installedRuntimeInput: string, signal: AbortSignal | undefined, operation: () => Promise<T>): Promise<T> {
+  if (typeof operation !== 'function') fail('abandonment operation callback is required'); const installedRuntime = await canonicalPhysicalDirectory(installedRuntimeInput, 'installed runtime'); const owner = retentionOwner('ABANDON', installedRuntime, '');
+  const claim = await acquireOwnedFileClaim(join(dirname(installedRuntime), RETENTION_ADMISSION_LOCK), owner, { waitMs: RETENTION_WAIT_MS, signal, reclaimStaleReleaseOwner: true, nonReleaseOwnerIsBusy: true, writerReclaimProtocol: true, label: 'retention abandonment policy' });
+  try { if ((await readRetentionPolicy(installedRuntime)).abandonment !== 'ON') fail('run abandonment is OFF'); return await operation(); }
+  finally { await claim.release(); }
+}
+
+async function assertBodyWritableState(runRoot: string): Promise<void> {
+  const body = await inspectTrustedPath(join(runRoot, '.work'), 'run Body', { allowMissing: true, surface: true, kind: 'directory' }).catch((error) => fail(`run Body is unsafe: ${(error as Error).message}`));
+  if (!body) fail('run Body is not admitted');
+  for (const name of ['RUN-RECEIPT.json', 'ABANDON-RECEIPT.json', '.lunacy-run-finalization.json', '.RUN-RECEIPT.json.tmp', '.ABANDON-RECEIPT.json.tmp']) {
+    const terminal = await inspectTrustedPath(join(runRoot, name), `retention terminal ${name}`, { allowMissing: true, surface: true }).catch((error) => fail(`retention terminal is unsafe: ${(error as Error).message}`));
+    if (terminal) fail('run Body is terminal or finalizing');
+  }
+  const names = await fs.readdir(runRoot);
+  if (names.some((name) => name.startsWith('.work.prune-'))) fail('run Body has a finalization tombstone');
+}
+
+/** Maintained Body publication fence: release-open, Body claim, release-open. */
+export async function withBodyWriterAdmission<T>(runRootInput: string, signal: AbortSignal | undefined, operation: () => Promise<T>): Promise<T> {
+  if (typeof operation !== 'function') fail('Body writer operation callback is required');
+  const runRoot = await canonicalPhysicalDirectory(runRootInput, 'run root');
+  await assertReleaseAdmissionOpen(runRoot);
+  const owner = retentionOwner('WRITE', '', runRoot);
+  const claim = await acquireOwnedFileClaim(join(runRoot, BODY_WRITER_LOCK), owner, { waitMs: RETENTION_WAIT_MS, signal, reclaimStaleReleaseOwner: true, nonReleaseOwnerIsBusy: true, writerReclaimProtocol: true, label: 'Body writer admission' });
+  try {
+    await assertReleaseAdmissionOpen(runRoot);
+    await assertBodyWritableState(runRoot);
+    return await operation();
+  } finally { await claim.release(); }
+}
+
+/** The only first-Body creation surface. Policy and run claims linearize ON/OFF. */
+export async function admitRunBody(installedRuntimeInput: string, runRootInput: string, signal?: AbortSignal): Promise<'ADMITTED' | 'ALREADY_ADMITTED'> {
+  const installedRuntime = await canonicalPhysicalDirectory(installedRuntimeInput, 'installed runtime');
+  const runRoot = await canonicalPhysicalDirectory(runRootInput, 'run root');
+  const owner = retentionOwner('ADMIT', installedRuntime, runRoot);
+  const claims: OwnedFileClaim[] = [];
+  try {
+    claims.push(await acquireOwnedFileClaim(join(dirname(installedRuntime), RETENTION_ADMISSION_LOCK), owner, { waitMs: RETENTION_WAIT_MS, signal, reclaimStaleReleaseOwner: true, nonReleaseOwnerIsBusy: true, writerReclaimProtocol: true, label: 'retention policy admission' }));
+    if ((await readRetentionPolicy(installedRuntime)).newBodyAdmission !== 'ON') fail('new Body admission is OFF');
+    claims.push(await acquireOwnedFileClaim(join(runRoot, RELEASE_EXCLUSION_LOCK), owner, { waitMs: RETENTION_WAIT_MS, signal, reclaimStaleReleaseOwner: true, nonReleaseOwnerIsBusy: true, label: 'run release admission' }));
+    claims.push(await acquireOwnedFileClaim(join(runRoot, BODY_WRITER_LOCK), owner, { waitMs: RETENTION_WAIT_MS, signal, reclaimStaleReleaseOwner: true, nonReleaseOwnerIsBusy: true, writerReclaimProtocol: true, label: 'Body writer admission' }));
+    if ((await readRetentionPolicy(installedRuntime)).newBodyAdmission !== 'ON') fail('new Body admission is OFF');
+    const existing = await inspectTrustedPath(join(runRoot, '.work'), 'run Body', { allowMissing: true, surface: true, kind: 'directory' }).catch((error) => fail(`run Body is unsafe: ${(error as Error).message}`));
+    if (existing) { await assertBodyWritableState(runRoot); return 'ALREADY_ADMITTED'; }
+    for (const name of ['RUN-RECEIPT.json', 'ABANDON-RECEIPT.json', '.lunacy-run-finalization.json']) if (await inspectTrustedPath(join(runRoot, name), `retention terminal ${name}`, { allowMissing: true, surface: true })) fail('terminal run cannot admit Body');
+    if ((await fs.readdir(runRoot)).some((name) => name.startsWith('.work.prune-'))) fail('finalizing run cannot admit Body');
+    await fs.mkdir(join(runRoot, '.work'), { mode: 0o700 });
+    await syncDirectory(join(runRoot, '.work'), 'new Body');
+    await syncDirectory(runRoot, 'run root');
+    return 'ADMITTED';
+  } finally {
+    let failure: unknown;
+    for (const claim of claims.reverse()) try { await claim.release(); } catch (error) { failure ??= error; }
+    if (failure) throw failure;
+  }
+}
+
+export type RunFinalizationOwnership = Readonly<{ owner: ReleaseOwner; claims: readonly OwnedFileClaim[] }>;
+
+/** Exact finalizer order: run release, Body writer, bridge, store writer. */
+export async function withRunFinalizationExclusion<T>(runRootInput: string, signal: AbortSignal | undefined, operation: (ownership: RunFinalizationOwnership) => Promise<T>): Promise<T> {
+  if (typeof operation !== 'function') fail('finalization callback is required');
+  const runRoot = await canonicalPhysicalDirectory(runRootInput, 'run root');
+  const owner = retentionOwner('FINALIZE', '', runRoot);
+  const claims: OwnedFileClaim[] = [];
+  try {
+    claims.push(await acquireOwnedFileClaim(join(runRoot, RELEASE_EXCLUSION_LOCK), owner, { waitMs: RETENTION_WAIT_MS, signal, reclaimStaleReleaseOwner: true, nonReleaseOwnerIsBusy: true, label: 'run finalization release exclusion' }));
+    claims.push(await acquireOwnedFileClaim(join(runRoot, BODY_WRITER_LOCK), owner, { waitMs: RETENTION_WAIT_MS, signal, reclaimStaleReleaseOwner: true, nonReleaseOwnerIsBusy: true, writerReclaimProtocol: true, label: 'run finalization Body exclusion' }));
+    const kernel = await inspectTrustedPath(join(runRoot, '.kernel'), 'managed run kernel', { allowMissing: true, surface: true, kind: 'directory' }).catch((error) => fail(`managed run kernel is unsafe: ${(error as Error).message}`));
+    if (kernel) {
+      claims.push(await acquireOwnedFileClaim(join(runRoot, '.kernel', BRIDGE_OPERATION_LOCK), owner, { waitMs: RETENTION_WAIT_MS, signal, reclaimStaleReleaseOwner: true, nonReleaseOwnerIsBusy: true, label: 'run finalization bridge exclusion' }));
+      claims.push(await acquireOwnedFileClaim(join(runRoot, '.kernel', WRITER_LOCK), owner, { waitMs: RETENTION_WAIT_MS, signal, reclaimStaleReleaseOwner: true, nonReleaseOwnerIsBusy: true, writerReclaimProtocol: true, label: 'run finalization writer exclusion' }));
+    }
+    return await operation(Object.freeze({ owner, claims: Object.freeze([...claims]) }));
+  } finally {
+    let failure: unknown;
+    for (const claim of claims.reverse()) try { await claim.release(); } catch (error) { failure ??= error; }
+    if (failure) throw failure;
   }
 }
 

@@ -183,3 +183,12 @@ test('direct routing remains separate from closed managed Sol/high and Luna/max 
   assert.match(readme, /Writable managed action remains[^.]*Sol\/high[\s\S]*adaptive Focus\/Explore deliberation uses[^.]*Luna\/max/);
   assert.match(readme, /direct route choice alone does not change runtime schemas, policy digests, or driver behavior/);
 });
+
+test('Seed Body Custody doctrine keeps admission, placement, acceptance, and cleanup coupled', async () => {
+  const [skill, workspace, engineering, planning, recovery] = await Promise.all([
+    source('SKILL.md'), source('WORKSPACE.md'), source('worker/ENGINEERING.md'), source('orchestrator/PLANNING.md'), source('docs/RECOVERY.md'),
+  ]);
+  assert.match(workspace, /New Body is admitted only when[^.]*policy is `ON`/); assert.match(workspace, /created only by `admitRunBody`/); assert.match(workspace, /Existing Body or a\s+finalization marker must remain resumable when admission is switched `OFF`/);
+  assert.match(skill, /raw logs, surveys, and non-runtime reports go to\s+`\.work` only through the verified `with-body-writer` launcher route/); assert.match(skill, /Managed\s+reports remain at the runtime-owned report path/); assert.match(skill, /Before a runtime parent submits `PARENT_DECISION PASS`/); assert.match(skill, /Never cite\s+Body from durable product docs/); assert.match(skill, /`CLAIMED`\/`UNKNOWN` Custody/);
+  assert.match(engineering, /do not redirect\s+a child directly into `\.work`/); assert.match(planning, /Do not create optional polish, proof-only, or retention-only nodes/); assert.match(recovery, /receipt-bound tombstone/); assert.match(recovery, /remove\s+`\.kernel`\/`\.codex-effects`/);
+});

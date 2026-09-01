@@ -68,6 +68,7 @@ export type SubmitDecisionResult = Readonly<{
   revision: number;
   eventId: string;
 }>;
+export type ParentDecisionSubmission = Readonly<{ event: Readonly<{ kind: 'PARENT_DECISION'; token: string; value: unknown }>; eventId: string; identity: EventIdentity; eventDigest: string; eventIdentityDigest: string }>;
 
 export type PhaseHandoffAuthorization = Readonly<{
   kind: 'PROMOTE_PHASE';
@@ -259,6 +260,18 @@ function validateInbox(value: unknown): asserts value is DecisionInboxEntry {
   for (const field of ['brief', 'evidence', 'receipts', 'paths']) if (value.redaction[field] !== null) fail('inbox redaction is invalid');
 }
 
+/** One immutable constructor shared by normal submission and the private
+ * retention parent-gate wrapper. It never submits or writes. */
+export function constructParentDecisionSubmission(input: Readonly<{ selection: DecisionInboxSelection; inbox: DecisionInboxEntry; state: MachineState; value: unknown; eventId?: string }>): ParentDecisionSubmission {
+  const selection = validateSelection(input.selection); const inbox = canonicalSnapshot<DecisionInboxEntry>(input.inbox, 'inbox'); validateInbox(inbox); const state = canonicalSnapshot<MachineState>(input.state, 'state');
+  const selectedToken = token(selection.token, 'selection.token'); const event = Object.freeze({ kind: 'PARENT_DECISION' as const, token: selectedToken, value: input.value });
+  const eventId = input.eventId === undefined ? `inbox-${digest({ runId: selection.runId, phaseId: state.phaseId, token: selectedToken, value: input.value }).slice(0, 32)}` : id(input.eventId, 'eventId');
+  const currentIdentity: EventIdentity = { runId: selection.runId, phaseId: state.phaseId, stepId: 'run', attemptEpoch: state.attemptEpoch, authorityEpoch: state.authorityEpoch, barrierEpoch: state.barrierEpoch, eventId, payloadDigest: digest(event) };
+  const priorIdentity: EventIdentity = { ...currentIdentity, attemptEpoch: inbox.cursor.attemptEpoch, authorityEpoch: inbox.cursor.authorityEpoch, barrierEpoch: inbox.cursor.barrierEpoch };
+  const identity = Object.prototype.hasOwnProperty.call(state.processed, identityKey(priorIdentity)) ? priorIdentity : currentIdentity;
+  return Object.freeze({ event, eventId, identity: Object.freeze(identity), eventDigest: digest(event), eventIdentityDigest: digest(identity) });
+}
+
 /** Submit exactly one parent decision through RunKernel.advance. */
 export async function submitParentDecision(input: SubmitDecisionInput): Promise<SubmitDecisionResult> {
   if (!plainObject(input)) fail('submit input is malformed');
@@ -291,17 +304,9 @@ export async function submitParentDecision(input: SubmitDecisionInput): Promise<
   // Snapshot once so payloadDigest and the kernel see identical bytes even if
   // the caller mutates the original object after this function yields.
   const decisionValue = value;
-  const event = { kind: 'PARENT_DECISION' as const, token: selectedToken, value: decisionValue };
-  const eventId = input.eventId === undefined ? `inbox-${digest({ runId: selection.runId, phaseId: state.phaseId, token: selectedToken, value: decisionValue }).slice(0, 32)}` : id(input.eventId, 'eventId');
-  const currentIdentity: EventIdentity = { runId: selection.runId, phaseId: state.phaseId, stepId: 'run', attemptEpoch: state.attemptEpoch, authorityEpoch: state.authorityEpoch, barrierEpoch: state.barrierEpoch, eventId, payloadDigest: digest(event) };
-  // An authority adoption increments epochs as part of its accepted event.
-  // Rebuild the original identity from the inbox cursor when that exact
-  // processed key is already durable, so retries remain kernel replays rather
-  // than being mistaken for a new post-adoption event.
-  const priorIdentity: EventIdentity = { ...currentIdentity, attemptEpoch: inbox.cursor.attemptEpoch, authorityEpoch: inbox.cursor.authorityEpoch, barrierEpoch: inbox.cursor.barrierEpoch };
-  const replayIdentity = Object.prototype.hasOwnProperty.call(state.processed, identityKey(priorIdentity)) ? priorIdentity : currentIdentity;
-  const identity = replayIdentity;
-  const replayed = replayIdentity === priorIdentity && Object.prototype.hasOwnProperty.call(state.processed, identityKey(replayIdentity));
+  const submission = constructParentDecisionSubmission({ selection, inbox, state, value: decisionValue, ...(input.eventId === undefined ? {} : { eventId: input.eventId }) });
+  const { event, eventId, identity } = submission;
+  const replayed = Object.prototype.hasOwnProperty.call(state.processed, identityKey(identity));
   if (inbox.status === 'ABSENT' || inbox.status === 'ATTENTION' || (inbox.status === 'CONSUMED' && !current.consumed)) {
     return { schema: DECISION_INBOX_SCHEMA, version: DECISION_INBOX_VERSION, status: 'attention', code: 'BindingMismatch', consumed: Boolean(current.consumed), revision: state.revision, eventId };
   }

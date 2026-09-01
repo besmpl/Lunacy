@@ -1,0 +1,22 @@
+{
+  "yieldDigests": [
+    "9f1f14919c9fcce0c905475d6e356f696433fc63c363f5552f4e536156b74826",
+    "155373011d6ec3d0fe1a6d1e7adae271f145178579fbb80f8220150a2e5b11d5",
+    "7c51ca60fa68bcd60110cb6c3970a65caaf403b20574c9fa37f8723890ffdbb2",
+    "bd6f4fe160f16e9785ca20d44a05cfd4b353e8b6abdb322517c7362c4f55153a",
+    "9763191ed76f17a011964484652677949eb7f053a492ae9c52cb9a50550e0208"
+  ],
+  "eventDigests": [
+    "ab6eccf0a8c72dcaea8693c04e9d6e1cca51c6e4e6a617b5b76ba709edf9f73a",
+    "cda3b50ebcb064e356e4b891efbe6b2867aad66d155db403b92e3bf9ed6f1185",
+    "ae213cf2ea43f6e4d8059806c03b7fbb65fe02215fd7cb629da901fc66b7d37d",
+    "134e45e9040412450b306ceafafbbd95d85c8b433cc99c910e7fdda3bd54e987",
+    "e00391b73543e4c683e6580796a2f556b98bdeb4800de3b248fca60c4dbc41e8"
+  ],
+  "stateCurrentDigest": "0d3402a2a48c466ff7a7ce4d35e9c746c4e3a7211113e7d41acb1e3cb5970309",
+  "stateDigest": "3f481f726810b13a3e456ea3c3aa8c69ecd99088750d16b154d1810d3bc43f93",
+  "replayDigest": "9763191ed76f17a011964484652677949eb7f053a492ae9c52cb9a50550e0208",
+  "bridge": { "statePath": "/STATE.md", "stepsPath": "/phases/compat/STEPS.md" },
+  "exports": ["Conflict", "InvalidEvent", "InvalidPlan", "KernelError", "makeRunKernel"],
+  "packageExports": [".", "./dist/composition.js"]
+}

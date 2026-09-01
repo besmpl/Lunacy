@@ -25,8 +25,15 @@ async function sourceFixture() {
   await writeFile(join(repo, 'dist', 'bridge-cli.js'), 'export function runBridgeCli() { return 0; }\n');
   // The deployment manager imports this trust helper from ../dist; keep the
   // fixture otherwise tiny so the crash matrix does not serialize 130 files.
-  await cp(join(root, 'dist', 'filesystem.js'), join(repo, 'dist', 'filesystem.js'));
+  for (const name of ['canonical.js', 'filesystem.js', 'release-admission.js']) {
+    await cp(join(root, 'dist', name), join(repo, 'dist', name));
+  }
   await cp(join(root, 'tools', 'deploy-skill.mjs'), join(repo, 'tools', 'deploy-skill.mjs'));
+  await cp(join(root, 'tools', 'retention-launcher.mjs'), join(repo, 'tools', 'retention-launcher.mjs'));
+  await cp(join(root, 'tools', 'seal-run.mjs'), join(repo, 'tools', 'seal-run.mjs'));
+  await cp(join(root, 'tools', 'with-body-writer.mjs'), join(repo, 'tools', 'with-body-writer.mjs'));
+  await cp(join(root, 'tools', 'audit-run-artifacts.mjs'), join(repo, 'tools', 'audit-run-artifacts.mjs'));
+  await cp(join(root, 'tools', 'migrate-run-body.mjs'), join(repo, 'tools', 'migrate-run-body.mjs'));
   for (const name of ['BRIDGE.md', 'BEADS.md', 'WORKFRONT.md', 'CODEX_EXEC.md']) await writeFile(join(repo, 'docs', name), `# ${name}\n`);
   for (const name of ['codex-worker-result.schema.json', 'codex-launch-intent-record.schema.json', 'codex-launch-record.schema.json', 'codex-terminal-record.schema.json']) await writeFile(join(repo, 'schemas', name), '{"type":"object"}\n');
   await writeFile(join(repo, 'tools', 'probe-codex-exec.mjs'), 'export {};\n');
