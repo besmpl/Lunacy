@@ -1245,7 +1245,10 @@ export class CodexExecSupervisor {
       if (immutableFlagSync(path, this.simulatedImmutableFlags, this.observeImmutable)) fail(`${label} remained immutable after child entry`);
     };
     release(this.policy.workspace, witnesses.workspace, 'Codex workspace');
-    release(this.policy.runRoot, witnesses.runRoot, 'Codex run root');
+    // A run root may intentionally be the workspace. The one filesystem
+    // object owns one immutable flag, so releasing the same identity twice
+    // would misdiagnose the first successful release as flag loss.
+    if (!sameSyncPathIdentity(witnesses.workspace, witnesses.runRoot)) release(this.policy.runRoot, witnesses.runRoot, 'Codex run root');
     if (!sameSyncPathIdentity(witnesses.workspace, syncPathWitness(this.policy.workspace)) || !sameSyncPathIdentity(witnesses.runRoot, syncPathWitness(this.policy.runRoot))) fail('Codex run root/workspace changed during post-entry immutable release');
     if (immutableFlagSync(this.policy.workspace, this.simulatedImmutableFlags, this.observeImmutable) || immutableFlagSync(this.policy.runRoot, this.simulatedImmutableFlags, this.observeImmutable)) fail('Codex run root/workspace remained immutable after child entry');
     this.immutableRoots = false;
@@ -1264,7 +1267,7 @@ export class CodexExecSupervisor {
       } catch { /* preserve conservative intent/terminal evidence */ }
     };
     release(this.policy.workspace, witnesses?.workspace);
-    release(this.policy.runRoot, witnesses?.runRoot);
+    if (!witnesses?.workspace || !witnesses.runRoot || !sameSyncPathIdentity(witnesses.workspace, witnesses.runRoot)) release(this.policy.runRoot, witnesses?.runRoot);
   }
 
   private async readFinal(path: string): Promise<Awaited<ReturnType<typeof readBoundedUtf8File>> & { result?: CodexWorkerResult }> {

@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os';
 import { canonicalString, digest, identityKey, parseCanonical } from './canonical.js';
 import { acceptedStartPlanDigests, makeComposedKernelForBridge, makeRunKernelForBridge, type DispatcherOptions, type RunKernel } from './public.js';
 import type { EffectDriver } from './driver.js';
+import { retainedManagedComposition, type ManagedBridgeContext, type RetainedManagedComposition } from './managed-bridge-context.js';
+import { composeKernelForBridge } from './composition.js';
 import { FileArtifactStore, isFileArtifactStoreAbort, type StoreSnapshot } from './store.js';
 import { assertStableIdentity, ensurePrivateDirectory, filesystemIdentity, inspectTrustedPath, sameFilesystemIdentity, trustedIdentity, type FilesystemIdentity } from './filesystem.js';
 import { validatePlan } from './validator.js';
@@ -115,6 +117,10 @@ export type BridgeOptions = {
    * a driver and still truthfully returns HumanReceiptRequired. */
   driver?: EffectDriver;
   dispatcher?: DispatcherOptions;
+  /** Invocation-local retained managed inputs. Never persisted or projected. */
+  managedContext?: ManagedBridgeContext;
+  /** Admission-only composed inputs prepared by resolve-plan before START. */
+  managedAdmission?: RetainedManagedComposition;
 };
 
 /** Snapshot only supported own-enumerable dispatcher controls, once. */
@@ -1283,7 +1289,10 @@ export async function transition(options: BridgeOptions, transitionInput: Bridge
 
   const requestedStatePath = statePath;
   const requestedStepsPath = stepsPath;
-  return await withBridgeOperationLock(rootPath, async (lockedRootIdentity) => {
+  let releaseProviderGate!: () => void;
+  const providerGate = new Promise<void>((resolvePromise) => { releaseProviderGate = resolvePromise; });
+  try {
+    return await withBridgeOperationLock(rootPath, async (lockedRootIdentity) => {
     const rootStat = await lstatNoFollow(rootPath, 'runDir');
     if (rootStat && !rootStat.isDirectory()) throw new BridgeError('PathMismatch', 'runDir is not a directory');
     const currentSnapshot = await storeSnapshot(rootPath, counters, lockedRootIdentity, dispatcherSignal);
@@ -1447,9 +1456,20 @@ export async function transition(options: BridgeOptions, transitionInput: Bridge
     const input: AdvanceInput = { runId, identity, event: clone(eventSnapshot), ...(effectiveExpectedRevision === undefined ? {} : { expectedRevision: effectiveExpectedRevision }) };
     let yieldValue: Yield;
     try {
-      const kernel: RunKernel = options.driver === undefined
-        ? makeRunKernelForBridge({ plan: kernelPlan, rootDir: rootPath }, lockedRootIdentity)
-        : makeComposedKernelForBridge({ plan: kernelPlan, rootDir: rootPath }, lockedRootIdentity, options.driver, dispatcher);
+      if (options.managedContext !== undefined && options.managedAdmission !== undefined) throw new BridgeError('InvalidDeclaration', 'managed context and admission composition are mutually exclusive');
+      const kernel: RunKernel = options.managedContext !== undefined
+        ? composeKernelForBridge({
+          plan: kernelPlan,
+          rootDir: rootPath,
+          ...retainedManagedComposition(currentSnapshot.state, options.managedContext, options.driver),
+          providerGate,
+          dispatcher,
+        }, lockedRootIdentity)
+        : options.managedAdmission !== undefined
+          ? composeKernelForBridge({ plan: kernelPlan, rootDir: rootPath, ...options.managedAdmission, providerGate, dispatcher }, lockedRootIdentity)
+        : options.driver === undefined
+          ? makeRunKernelForBridge({ plan: kernelPlan, rootDir: rootPath }, lockedRootIdentity)
+          : composeKernelForBridge({ plan: kernelPlan, rootDir: rootPath, driver: options.driver, providerGate, dispatcher }, lockedRootIdentity);
       yieldValue = await kernel.advance(input);
     } catch (error) {
       if (error instanceof BridgeError) throw error;
@@ -1470,7 +1490,12 @@ export async function transition(options: BridgeOptions, transitionInput: Bridge
     try { projection = await project(rootPath, { runDir: rootPath, runId, mode: 'runtime', statePath: requestedStatePath, stepsPath: requestedStepsPath }, after.state, counters); }
     catch (error) { if (error instanceof BridgeError) throw error; throw new BridgeError('ProjectionFailed', (error as Error).message); }
     return { mode: 'runtime', yield: yieldValue, projected: true, projection, ...(beadsObservation === undefined ? {} : { beads: beadsObservation }), counters: finishCounters(counters) };
-  });
+    });
+  } finally {
+    // withBridgeOperationLock removes and fsyncs its lock before resolving.
+    // Only then may the exact claimed provider invocation cross its boundary.
+    releaseProviderGate();
+  }
 }
 
 async function requireQuiescent(rootDir: string, options: BridgeOptions, allowDisabled = false, expectedRootIdentity?: FilesystemIdentity): Promise<BridgeManifest> {

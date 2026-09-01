@@ -1,9 +1,13 @@
 import { canonicalString, digest, identityKey, parseCanonical } from './canonical.js';
-import { canonicalizeDeclaration } from './bridge.js';
+import { canonicalizeDeclaration, transition } from './bridge.js';
 import { initRun, resumeRun, type LifecycleResult, type TerminalEffectDriver } from './orchestration.js';
 import { FileArtifactStore, isCanonicalRootPath } from './store.js';
 import { validateCodexHostPolicy, codexHostPolicyDigest, type CodexHostPolicy } from './codex-host-policy.js';
 import type { DecisionToken, EventIdentity, MachineState, Plan, Yield } from './model.js';
+import type { ManagedBridgeContext } from './managed-bridge-context.js';
+import { makeCodexExecDriver } from './codex-exec-driver.js';
+import { validateManagedDecisionBinding } from './reducer.js';
+import { validatePlan } from './validator.js';
 
 /** Private, projection-only decision inbox.  It is deliberately not exported
  * from the package root: tokens remain owned and consumed by RunKernel. */
@@ -56,6 +60,7 @@ export type SubmitDecisionInput = Readonly<{
   plan: Plan;
   policy?: CodexHostPolicy;
   driver?: TerminalEffectDriver;
+  managedContext?: ManagedBridgeContext;
 }>;
 
 export type SubmitDecisionResult = Readonly<{
@@ -299,7 +304,10 @@ export async function submitParentDecision(input: SubmitDecisionInput): Promise<
   const loaded = await new FileArtifactStore(selection.runRoot).loadReadOnly(selection.runId);
   const state = loaded.state; if (!state) fail('committed state is absent');
   const current = state.decisionTokens[selectedToken];
-  if (!current || ((current.kind !== 'GATE' || (value !== 'PASS' && value !== 'FINDINGS')) && adoptionDigest(value, current) === undefined)) return { schema: DECISION_INBOX_SCHEMA, version: DECISION_INBOX_VERSION, status: 'attention', code: 'Malformed', consumed: false, revision: inbox.run.revision, eventId: input.eventId ?? '' };
+  const managedBinding = current?.kind === 'DELIBERATION_SELECTION' || current?.kind === 'DELIBERATION'
+    ? validateManagedDecisionBinding(state, selectedToken, value)
+    : undefined;
+  if (!current || (managedBinding === undefined && (current.kind !== 'GATE' || (value !== 'PASS' && value !== 'FINDINGS')) && adoptionDigest(value, current) === undefined)) return { schema: DECISION_INBOX_SCHEMA, version: DECISION_INBOX_VERSION, status: 'attention', code: 'Malformed', consumed: false, revision: inbox.run.revision, eventId: input.eventId ?? '' };
   // Structured adoption values survive the dynamic import/advance await.
   // Snapshot once so payloadDigest and the kernel see identical bytes even if
   // the caller mutates the original object after this function yields.
@@ -333,15 +341,44 @@ export async function submitParentDecision(input: SubmitDecisionInput): Promise<
   const rawPlanDigest = current.kind === 'AUTHORITY_ADOPTION' ? (() => { try { return digest(rawPlan); } catch { return undefined; } })() : undefined;
   const requestedAdoptionDigest = current.kind === 'AUTHORITY_ADOPTION' ? adoptionDigest(decisionValue, current) : undefined;
   if (current.kind === 'AUTHORITY_ADOPTION' && requestedAdoptionDigest !== current.targetDigest && requestedAdoptionDigest !== rawPlanDigest) return { schema: DECISION_INBOX_SCHEMA, version: DECISION_INBOX_VERSION, status: 'attention', code: 'BindingMismatch', consumed: false, revision: state.revision, eventId };
-  const acceptedPlanDigest = current.kind === 'AUTHORITY_ADOPTION' ? current.targetDigest : state.planDigest;
+  const managedCompletePlan = managedBinding?.result?.kind === 'COMPLETE_PLAN' ? managedBinding.result.plan as Plan : undefined;
+  const acceptedPlanDigest = current.kind === 'AUTHORITY_ADOPTION'
+    ? current.targetDigest
+    : managedCompletePlan === undefined
+      ? state.planDigest
+      : digest(validatePlan(managedCompletePlan).plan);
   if (acceptedPlanDigest === undefined || digest(submittedPlan) !== acceptedPlanDigest) return { schema: DECISION_INBOX_SCHEMA, version: DECISION_INBOX_VERSION, status: 'attention', code: 'BindingMismatch', consumed: false, revision: state.revision, eventId };
   if (current.consumed && !replayed) return { schema: DECISION_INBOX_SCHEMA, version: DECISION_INBOX_VERSION, status: 'attention', code: 'Consumed', consumed: true, revision: state.revision, eventId };
   let yielded: Yield;
   let winnerWitness: typeof FRESH_DECISION_WINNER | undefined;
   const kernelPlan = current.kind === 'AUTHORITY_ADOPTION' ? rawPlan : submittedPlan;
   try {
-    yielded = await (await import('./public.js')).makeRunKernel({ plan: kernelPlan, rootDir: selection.runRoot }).advance({ runId: selection.runId, expectedRevision: state.revision, identity, event });
-    if (!replayed && driver !== undefined) winnerWitness = FRESH_DECISION_WINNER;
+    if (input.managedContext !== undefined) {
+      const ordinaryDriver = driver ?? (policy === undefined ? undefined : makeCodexExecDriver({ policy: validateCodexHostPolicy(policy) }));
+      const result = await transition({
+        runDir: selection.runRoot,
+        runId: selection.runId,
+        mode: 'runtime',
+        plan: kernelPlan,
+        managedContext: input.managedContext,
+        ...(ordinaryDriver === undefined ? {} : { driver: ordinaryDriver }),
+      }, {
+        event,
+        eventId,
+        phaseId: identity.phaseId,
+        stepId: identity.stepId,
+        expectedRevision: state.revision,
+        attemptEpoch: identity.attemptEpoch,
+        authorityEpoch: identity.authorityEpoch,
+        barrierEpoch: identity.barrierEpoch,
+        ...(identity.launchToken === undefined ? {} : { launchToken: identity.launchToken }),
+      });
+      if (result.yield === undefined) throw new Error('DecisionInbox: managed decision did not produce a runtime yield');
+      yielded = result.yield;
+    } else {
+      yielded = await (await import('./public.js')).makeRunKernel({ plan: kernelPlan, rootDir: selection.runRoot }).advance({ runId: selection.runId, expectedRevision: state.revision, identity, event });
+    }
+    if (!replayed && (driver !== undefined || policy !== undefined)) winnerWitness = FRESH_DECISION_WINNER;
   }
   catch (error) {
     // Two identical submitters may both pass the read-only fence before one
@@ -368,7 +405,7 @@ export async function submitParentDecision(input: SubmitDecisionInput): Promise<
     // Clear it before the tail-call so an error cannot make this submission
     // consume the witness a second time.
     winnerWitness = undefined;
-    await resumeRun({ command: 'resume', runDir: selection.runRoot, runId: selection.runId, plan: kernelPlan, driver, ...(policy === undefined ? {} : { policy }) });
+    await resumeRun({ command: 'resume', runDir: selection.runRoot, runId: selection.runId, plan: kernelPlan, driver, ...(policy === undefined ? {} : { policy }), ...(input.managedContext === undefined ? {} : { managedContext: input.managedContext }) });
   }
   return { schema: DECISION_INBOX_SCHEMA, version: DECISION_INBOX_VERSION, status: replayed ? 'replayed' : 'committed', consumed: !replayed, revision: yielded.snapshot.revision, eventId, yield: yielded };
 }

@@ -1,13 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { digest } from '../dist/canonical.js';
 import {
   CODEX_MODEL, DEFAULT_REASONING_EFFORT, MAX_REASONING_EFFORT, buildCodexArguments, buildWorkerHandoff,
-  createCodexHostPolicy, expectedReportPath, reasoningEffortFor, validateCodexHostPolicy,
+  commandAuthorityPaths, createCodexHostPolicy, expectedReportPath, launchAuthoritySnapshotPaths,
+  launchAuthoritySnapshotRoot, reasoningEffortFor, validateCodexHostPolicy,
 } from '../dist/codex-host-policy.js';
+import { attestCodexHostAuthority } from '../dist/codex-exec-supervisor.js';
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'lunacy-codex-policy-'));
@@ -76,4 +79,46 @@ test('policy rejects unsafe paths, environment names, and max reason references'
   assert.throws(() => createCodexHostPolicy({ ...policy, environmentNames: ['SECRET_FILE'] }), /allowlisted/);
   assert.throws(() => createCodexHostPolicy({ ...policy, environmentNames: ['PATH'] }), /allowlisted/);
   assert.throws(() => createCodexHostPolicy({ ...policy, maxOverrides: [{ ...policy.maxOverrides[0], planDigest: 'f'.repeat(64) }] }), /planDigest/);
+});
+
+test('ordinary authority firewall retains adopted Plan proof and risks but excludes every raw research surface', async () => {
+  const { root, policy: base } = await fixture();
+  const planPath = join(root, 'PLAN.md');
+  const decisionsPath = join(root, 'DECISIONS.md');
+  const accepted = 'ADOPTED-PLAN\nACCEPTED-CRITERIA\nACCEPTED-PROOF\nACCEPTED-RISK\n';
+  await mkdir(join(root, 'phases', 'phase-a'), { recursive: true });
+  await writeFile(planPath, accepted);
+  await writeFile(decisionsPath, 'ACCEPTED-DECISION\n');
+  await writeFile(join(root, 'schema.json'), '{}\n');
+  await writeFile(join(root, 'phases', 'phase-a', 'STEPS.md'), '# accepted step\n');
+  await writeFile(join(base.skillRoot, 'worker', 'ENGINEERING.md'), '# engineering\n');
+  const poisoned = [
+    join(root, '.kernel', 'wave.json'),
+    join(root, 'phases', 'phase-a', 'reports', 'raw-report.md'),
+    join(root, 'renderer.md'),
+    join(root, '.work', 'Body.md'),
+    join(root, 'conversation-transcript.md'),
+  ];
+  for (const [index, path] of poisoned.entries()) {
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, `RAW-POISON-${index}\n`);
+  }
+  const policy = createCodexHostPolicy({ ...base, workerSchemaDigest: createHash('sha256').update('{}\n').digest('hex'), instructionPaths: [planPath, decisionsPath, ...poisoned] });
+  const frame = command(policy);
+  assert.deepEqual(policy.instructionPaths, [planPath, decisionsPath]);
+  const authorityPaths = commandAuthorityPaths(policy, frame);
+  for (const path of poisoned) assert.equal(authorityPaths.includes(path), false);
+  assert.ok(authorityPaths.includes(planPath));
+  assert.ok(authorityPaths.includes(decisionsPath));
+
+  const handoff = buildWorkerHandoff(policy, frame).text;
+  for (const path of poisoned) assert.equal(handoff.includes(path), false);
+  const snapshotRoot = launchAuthoritySnapshotRoot(policy, frame);
+  await attestCodexHostAuthority(policy, frame, snapshotRoot);
+  const snapshotPaths = launchAuthoritySnapshotPaths(policy, frame);
+  const snapshotBytes = (await Promise.all([...snapshotPaths.values()].map((path) => readFile(path, 'utf8')))).join('\n');
+  assert.match(snapshotBytes, /ADOPTED-PLAN/);
+  assert.match(snapshotBytes, /ACCEPTED-PROOF/);
+  assert.match(snapshotBytes, /ACCEPTED-RISK/);
+  assert.doesNotMatch(snapshotBytes, /RAW-POISON-/);
 });

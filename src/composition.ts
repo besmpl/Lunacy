@@ -16,6 +16,8 @@ export type CompositionOptions = KernelOptions & DispatcherOptions & {
   managedDeliberationPolicy?: CodexDeliberationHostPolicy;
   /** Private invocation-local proof. It is never persisted or projected. */
   exploreAuthorization?: unknown;
+  /** Bridge-only barrier resolved after its filesystem operation lock exits. */
+  providerGate?: Promise<void>;
   /** Backward/host-friendly aliases for the private controls. */
   dispatchTimeoutMs?: number;
   abortSignal?: AbortSignal;
@@ -47,7 +49,7 @@ function projectDispatcher(dispatcher: DispatcherOptions | undefined): Dispatche
 }
 
 const COMPOSITION_CONTROL_KEYS = new Set([
-  'driver', 'managedDeliberationPolicy', 'exploreAuthorization', 'dispatcher', 'timeoutMs', 'dispatchTimeoutMs',
+  'driver', 'managedDeliberationPolicy', 'exploreAuthorization', 'providerGate', 'dispatcher', 'timeoutMs', 'dispatchTimeoutMs',
   'signal', 'abortSignal', 'onYield', 'maxInFlight',
 ]);
 
@@ -142,11 +144,28 @@ function multiplexDrivers(ordinaryDriver: EffectDriver | undefined, deliberation
   };
 }
 
+/** Delay only provider entry; availability, preparation, and recovery reads
+ * remain inside the root-bound transition that selected the exact command. */
+function afterProviderGate(driver: EffectDriver, gate: Promise<void>): EffectDriver {
+  const methods = snapshotDriver(driver)!;
+  return {
+    ...(driver.available === undefined ? {} : { available: driver.available.bind(driver) }),
+    ...(driver.prepare === undefined ? {} : { prepare: driver.prepare.bind(driver) }),
+    dispatch(command, token, signal) {
+      return gate.then(() => Reflect.apply(methods.dispatch, methods.receiver, [command, token, signal]));
+    },
+    ...(driver.observe === undefined ? {} : { observe: driver.observe.bind(driver) }),
+    ...(driver.observeTeardown === undefined ? {} : { observeTeardown: driver.observeTeardown.bind(driver) }),
+    ...(driver.observeProviderIntent === undefined ? {} : { observeProviderIntent: driver.observeProviderIntent.bind(driver) }),
+  };
+}
+
 /** Private host composition hook; callers still receive only the RunKernel seam. */
 function compose(options: CompositionOptions, expectedRootIdentity?: FilesystemIdentity): RunKernel {
   const legacyDriver = options.driver;
   const managedPolicy = options.managedDeliberationPolicy;
   const suppliedExploreAuthorization = options.exploreAuthorization;
+  const providerGate = options.providerGate;
   const dispatcher = options.dispatcher;
   const timeoutMs = options.timeoutMs;
   const dispatchTimeoutMs = options.dispatchTimeoutMs;
@@ -185,6 +204,7 @@ function compose(options: CompositionOptions, expectedRootIdentity?: FilesystemI
     const deliberation = new CodexDeliberationDriver({ policy, wave: options.managedRollout.wave!, deliberationPolicy: options.managedRollout.deliberationPolicy });
     driver = multiplexDrivers(legacyDriver, deliberation);
   }
+  if (driver && providerGate) driver = afterProviderGate(driver, providerGate);
   const merged: DispatcherOptions = {
     ...projectDispatcher(dispatcher),
     ...(timeoutMs === undefined && dispatchTimeoutMs === undefined ? {} : { timeoutMs: timeoutMs ?? dispatchTimeoutMs }),

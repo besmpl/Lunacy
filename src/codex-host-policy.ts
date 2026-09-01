@@ -394,11 +394,17 @@ export function createCodexHostPolicy(input: CodexHostPolicyInput): CodexHostPol
   const workerSchemaDigest = asDigest(input.workerSchemaDigest, 'workerSchemaDigest');
   const effectsRoot = asPath(input.effectsRoot ?? join(runRoot, '.codex-effects'), 'effectsRoot');
   if (!within(runRoot, effectsRoot)) fail('effectsRoot must be under runRoot');
-  // A managed skill bundle may live beside the run root.  It is still an
-  // explicit path and never inferred from ambient HOME/PATH.
+  // Ordinary workers receive only parent-sealed authority documents.  Raw
+  // managed research stays in durable recovery/provenance storage and cannot
+  // be promoted into worker authority merely by adding its pathname here.
+  // PLAN.md is added again by commandAuthorityPaths; DECISIONS.md remains the
+  // sole optional companion for compact accepted proof/risks and constraints.
   const rawInstructionPaths = input.instructionPaths ?? [join(runRoot, 'PLAN.md'), join(runRoot, 'DECISIONS.md')];
   if (!Array.isArray(rawInstructionPaths)) fail('instructionPaths must be an array');
-  const instructionPaths = Object.freeze([...new Set(rawInstructionPaths)].map((path, index) => asPath(path, `instructionPaths[${index}]`)));
+  const sealedInstructionPaths = new Set([join(runRoot, 'PLAN.md'), join(runRoot, 'DECISIONS.md')]);
+  const instructionPaths = Object.freeze([...new Set(rawInstructionPaths)]
+    .map((path, index) => asPath(path, `instructionPaths[${index}]`))
+    .filter((path) => sealedInstructionPaths.has(path)));
   const rawWritableRoots = input.writableRoots ?? [workspace, runRoot];
   if (!Array.isArray(rawWritableRoots)) fail('writableRoots must be an array');
   const writableRoots = Object.freeze([...new Set(rawWritableRoots)].map((path, index) => {

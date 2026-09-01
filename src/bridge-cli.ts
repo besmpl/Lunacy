@@ -11,22 +11,29 @@ import type { EvidenceCopyPolicy } from './evidence-copy.js';
 import type { Event, Plan } from './model.js';
 import { drive, type TerminalEffectDriver } from './orchestration.js';
 import { lifecycle, type LifecycleCommand, type LifecycleResult } from './orchestration.js';
-import { composeKernelForBridge } from './composition.js';
 import { compileWavePlan, deliberationPolicyFromAsset, deriveTopology, resolveWaveSemanticClosure, validateWave, verifyWavePlan, type DeliberationWave } from './deliberation.js';
 import { verifyManagedCapability, verifyManagedRolloutPolicy, type ManagedCapability, type ManagedRolloutPolicy } from './managed-capability.js';
 import { attestCodexDeliberationHost, validateCodexDeliberationHostPolicy, type CodexDeliberationHostPolicy } from './codex-host-policy.js';
 import { mintExploreAuthorization } from './explore-authorization.js';
 import { ONE_SHOT_ROLLOUT_GENERATION_FLOOR } from './one-shot.js';
 import { validatePlan } from './validator.js';
-import { withBridgeOperationLock } from './bridge.js';
+import { transition } from './bridge.js';
 import { parsePrePlanRequest, resolveTypedPrePlan } from './pre-plan-request.js';
+import { createManagedBridgeContext, type ManagedBridgeContext } from './managed-bridge-context.js';
+
+type ManagedContextFlags = {
+  managedCapability?: string;
+  managedRollout?: string;
+  managedDeliberationPolicy?: string;
+  managedHostPolicy?: string;
+};
 
 type Flags = {
   runDir?: string; runId?: string; mode?: BridgeMode; modeProvided: boolean; plan?: string; event?: string; eventId?: string; phaseId?: string; stepId?: string;
   state?: string; steps?: string; expectedRevision?: number; attemptEpoch?: number; authorityEpoch?: number; barrierEpoch?: number; launchToken?: string;
   action?: 'disable' | 'delete'; help: boolean;
   beadsMode?: BeadsBridgeMode; beadsEvidenceCopy?: EvidenceCopyPolicy; bdPath?: string; beadsWorkspace?: string; beadsDigest?: string; beadsHome?: string; beadsConfig?: string; beadsAck?: string; beadsPhase?: string;
-};
+} & ManagedContextFlags;
 
 function usage(): string {
   return `Usage: lunacy-bridge --run-dir RUN --run-id ID --mode runtime --plan PLAN.json --event EVENT.json [options]
@@ -64,6 +71,10 @@ Options:
   --authority-epoch N     Identity epoch
   --barrier-epoch N       Identity epoch
   --launch-token TOKEN    Dispatch/receipt identity token
+  --managed-capability PATH          Retained managed capability JSON
+  --managed-rollout PATH             Retained managed rollout JSON
+  --managed-deliberation-policy PATH Retained deliberation policy asset
+  --managed-host-policy PATH         Retained managed host policy JSON
   --beads-mode off|shadow|active  Explicit read-only Beads planning mode
   --beads-evidence-copy off|prefer|require  Private snapshot copy policy (default off)
   --bd-path PATH          Absolute operator-provisioned bd v1.2.2 executable
@@ -130,58 +141,59 @@ async function runResolvePlanCli(argv: string[]): Promise<number> {
   }
   if (!flags.deliberationPolicy || !flags.rolloutPolicy || !flags.runDir || !flags.capability || !flags.hostPolicy) throw new Error('--deliberation-policy, --rollout-policy, --run-dir, --capability, and --host-policy are required for Focus/Explore');
   if (!flags.runDir.startsWith('/') || resolve(flags.runDir) !== flags.runDir) throw new Error('--run-dir must be absolute and normalized');
-  const result = await withBridgeOperationLock(flags.runDir, async (lockedRootIdentity) => {
-    const input = request.authorship;
-    const policyValidation = deliberationPolicyFromAsset(await readCanonical(flags.deliberationPolicy!), input.policyVersion);
-    if (!policyValidation.ok) throw new Error(`deliberation policy asset is invalid: ${policyValidation.path} ${policyValidation.message}`.trim());
-    const deliberationPolicy = policyValidation.value;
-    const rolloutPolicyValue = await readCanonical(flags.rolloutPolicy!);
-    if (!verifyManagedRolloutPolicy(rolloutPolicyValue)) throw new Error('rollout policy must be the exact closed current document');
-    const rolloutPolicy = rolloutPolicyValue as ManagedRolloutPolicy;
-    if (rolloutPolicy.mode === 'disabled') throw new Error('managed rollout is disabled');
-    if (rolloutPolicy.generation < ONE_SHOT_ROLLOUT_GENERATION_FLOOR) throw new Error('new managed admission requires the current rollout generation floor');
-    const capabilityValue = await readCanonical(flags.capability!);
-    if (!verifyManagedCapability(capabilityValue)) throw new Error('managed capability must be the exact closed document');
-    const capability = capabilityValue as ManagedCapability;
-    const hostPolicyValue = await readCanonical(flags.hostPolicy!);
-    let hostPolicy: CodexDeliberationHostPolicy;
-    try { hostPolicy = validateCodexDeliberationHostPolicy(hostPolicyValue as CodexDeliberationHostPolicy); }
-    catch (error) { throw new Error(`managed deliberation host policy is invalid: ${(error as Error).message}`); }
+  const input = request.authorship;
+  const policyValidation = deliberationPolicyFromAsset(await readCanonical(flags.deliberationPolicy), input.policyVersion);
+  if (!policyValidation.ok) throw new Error(`deliberation policy asset is invalid: ${policyValidation.path} ${policyValidation.message}`.trim());
+  const deliberationPolicy = policyValidation.value;
+  const rolloutPolicyValue = await readCanonical(flags.rolloutPolicy);
+  if (!verifyManagedRolloutPolicy(rolloutPolicyValue)) throw new Error('rollout policy must be the exact closed current document');
+  const rolloutPolicy = rolloutPolicyValue as ManagedRolloutPolicy;
+  if (rolloutPolicy.mode === 'disabled') throw new Error('managed rollout is disabled');
+  if (rolloutPolicy.generation < ONE_SHOT_ROLLOUT_GENERATION_FLOOR) throw new Error('new managed admission requires the current rollout generation floor');
+  const capabilityValue = await readCanonical(flags.capability);
+  if (!verifyManagedCapability(capabilityValue)) throw new Error('managed capability must be the exact closed document');
+  const capability = capabilityValue as ManagedCapability;
+  const hostPolicyValue = await readCanonical(flags.hostPolicy);
+  let hostPolicy: CodexDeliberationHostPolicy;
+  try { hostPolicy = validateCodexDeliberationHostPolicy(hostPolicyValue as CodexDeliberationHostPolicy); }
+  catch (error) { throw new Error(`managed deliberation host policy is invalid: ${(error as Error).message}`); }
 
-    const resolution = resolveTypedPrePlan(request, deliberationPolicy);
-    if (resolution.kind !== 'DELIBERATION_REQUIRED') return resolution;
-    if (typeof resolution.wave.bytes !== 'string') throw new Error('authored Wave bytes are unavailable');
-    const wave = parseCanonical<DeliberationWave>(resolution.wave.bytes);
-    const closure = resolveWaveSemanticClosure(wave);
-    if (!closure.ok) throw new Error(`authored Wave semantic closure is invalid: ${closure.path} ${closure.message}`.trim());
-    const checkedWave = validateWave(wave, { runId: input.runId, phaseId: input.phaseId, policy: deliberationPolicy, committedEvidence: closure.value.committedEvidence, reachableConstraints: closure.value.reachableConstraints });
-    if (!checkedWave.ok) throw new Error(`authored Wave is invalid: ${checkedWave.path} ${checkedWave.message}`.trim());
-    const compiled = compileWavePlan(resolution.wave, checkedWave.value);
-    if (!compiled.ok) throw new Error(`authored Wave Plan is invalid: ${compiled.path} ${compiled.message}`.trim());
-    const plan = validatePlan(compiled.value).plan;
-    const verifiedPlan = verifyWavePlan(plan, deriveTopology(resolution.wave, checkedWave.value));
-    if (!verifiedPlan.ok) throw new Error(`authored Wave topology is invalid: ${verifiedPlan.path} ${verifiedPlan.message}`.trim());
-    // Host attestation and complete cohort preparation precede durable START.
-    await attestCodexDeliberationHost(hostPolicy);
-    const exploreAuthorization = resolution.gear === 'EXPLORE' ? mintExploreAuthorization({
-      intent: input.intent, authorityDigest: input.authorityDigest, waveDigest: resolution.wave.digest,
-      runId: input.runId, phaseId: input.phaseId, rolloutPolicyDigest: rolloutPolicy.digest,
-    }) : undefined;
-    const kernel = composeKernelForBridge({
-      plan, rootDir: flags.runDir!, workspace: hostPolicy.targetWorkspace, maxInFlight: resolution.gear === 'EXPLORE' ? 5 : 2,
-      managedCapability: capability,
-      managedRollout: { policy: rolloutPolicy, wave: resolution.wave, deliberationPolicy, decisionUnsettled: true, ...(resolution.gear === 'EXPLORE' ? { explicitExplore: true } : {}) },
-      managedDeliberationPolicy: hostPolicy, ...(exploreAuthorization === undefined ? {} : { exploreAuthorization }),
-    }, lockedRootIdentity);
-    const event: Event = { kind: 'START', intentRef: { id: 'plan', digest: digest(plan), bytes: canonicalString(plan) } };
-    const start = await kernel.advance({ runId: input.runId, event, identity: { runId: input.runId, phaseId: input.phaseId, stepId: 'run', attemptEpoch: 0, authorityEpoch: 0, barrierEpoch: 0, eventId: 'resolve-plan:start', payloadDigest: digest(event) } });
-    return { ...resolution, start };
-  });
+  const resolution = resolveTypedPrePlan(request, deliberationPolicy);
+  if (resolution.kind !== 'DELIBERATION_REQUIRED') {
+    await writeOutput(`${canonicalString(resolution)}\n`);
+    return 0;
+  }
+  if (typeof resolution.wave.bytes !== 'string') throw new Error('authored Wave bytes are unavailable');
+  const wave = parseCanonical<DeliberationWave>(resolution.wave.bytes);
+  const closure = resolveWaveSemanticClosure(wave);
+  if (!closure.ok) throw new Error(`authored Wave semantic closure is invalid: ${closure.path} ${closure.message}`.trim());
+  const checkedWave = validateWave(wave, { runId: input.runId, phaseId: input.phaseId, policy: deliberationPolicy, committedEvidence: closure.value.committedEvidence, reachableConstraints: closure.value.reachableConstraints });
+  if (!checkedWave.ok) throw new Error(`authored Wave is invalid: ${checkedWave.path} ${checkedWave.message}`.trim());
+  const compiled = compileWavePlan(resolution.wave, checkedWave.value);
+  if (!compiled.ok) throw new Error(`authored Wave Plan is invalid: ${compiled.path} ${compiled.message}`.trim());
+  const plan = validatePlan(compiled.value).plan;
+  const verifiedPlan = verifyWavePlan(plan, deriveTopology(resolution.wave, checkedWave.value));
+  if (!verifiedPlan.ok) throw new Error(`authored Wave topology is invalid: ${verifiedPlan.path} ${verifiedPlan.message}`.trim());
+  // Host attestation and complete cohort preparation precede durable START.
+  await attestCodexDeliberationHost(hostPolicy);
+  const exploreAuthorization = resolution.gear === 'EXPLORE' ? mintExploreAuthorization({
+    intent: input.intent, authorityDigest: input.authorityDigest, waveDigest: resolution.wave.digest,
+    runId: input.runId, phaseId: input.phaseId, rolloutPolicyDigest: rolloutPolicy.digest,
+  }) : undefined;
+  const managedAdmission = {
+    workspace: hostPolicy.targetWorkspace,
+    managedCapability: capability,
+    managedRollout: { policy: rolloutPolicy, wave: resolution.wave, deliberationPolicy, decisionUnsettled: true as const, ...(resolution.gear === 'EXPLORE' ? { explicitExplore: true as const } : {}) },
+    managedDeliberationPolicy: hostPolicy, ...(exploreAuthorization === undefined ? {} : { exploreAuthorization }),
+  };
+  const event: Event = { kind: 'START', intentRef: { id: 'plan', digest: digest(plan), bytes: canonicalString(plan) } };
+  const started = await transition({ runDir: flags.runDir, runId: input.runId, mode: 'runtime', plan, managedAdmission }, { event, eventId: 'resolve-plan:start', phaseId: input.phaseId, stepId: 'run', attemptEpoch: 0, authorityEpoch: 0, barrierEpoch: 0 });
+  const result = { ...resolution, start: started.yield };
   await writeOutput(`${canonicalString(result)}\n`);
   return 0;
 }
 
-type LifecycleFlags = { command: LifecycleCommand; runDir?: string; runId?: string; mode?: BridgeMode; modeProvided: boolean; plan?: string; policy?: string; state?: string; steps?: string; maxTransitions?: number; help: boolean };
+type LifecycleFlags = { command: LifecycleCommand; runDir?: string; runId?: string; mode?: BridgeMode; modeProvided: boolean; plan?: string; policy?: string; state?: string; steps?: string; maxTransitions?: number; help: boolean } & ManagedContextFlags;
 
 function parseLifecycleArgs(argv: string[], positionalCommand?: LifecycleCommand): LifecycleFlags {
   const flags: LifecycleFlags = { command: positionalCommand ?? 'run', modeProvided: false, help: false };
@@ -200,12 +212,16 @@ function parseLifecycleArgs(argv: string[], positionalCommand?: LifecycleCommand
     else if (name === 'state') flags.state = value;
     else if (name === 'steps') flags.steps = value;
     else if (name === 'max-transitions') flags.maxTransitions = numberFlag(name, value);
+    else if (name === 'managed-capability') flags.managedCapability = value;
+    else if (name === 'managed-rollout') flags.managedRollout = value;
+    else if (name === 'managed-deliberation-policy') flags.managedDeliberationPolicy = value;
+    else if (name === 'managed-host-policy') flags.managedHostPolicy = value;
     else throw new Error(`unknown lifecycle option --${name}`);
   }
   return flags;
 }
 
-type DriveFlags = { runDir?: string; runId?: string; mode?: BridgeMode; modeProvided: boolean; plan?: string; policy?: string; maxTransitions?: number; help: boolean };
+type DriveFlags = { runDir?: string; runId?: string; mode?: BridgeMode; modeProvided: boolean; plan?: string; policy?: string; maxTransitions?: number; help: boolean } & ManagedContextFlags;
 
 function parseDriveArgs(argv: string[]): DriveFlags {
   const flags: DriveFlags = { modeProvided: false, help: false };
@@ -221,6 +237,10 @@ function parseDriveArgs(argv: string[]): DriveFlags {
     else if (name === 'plan') flags.plan = value;
     else if (name === 'policy') flags.policy = value;
     else if (name === 'max-transitions') flags.maxTransitions = numberFlag(name, value);
+    else if (name === 'managed-capability') flags.managedCapability = value;
+    else if (name === 'managed-rollout') flags.managedRollout = value;
+    else if (name === 'managed-deliberation-policy') flags.managedDeliberationPolicy = value;
+    else if (name === 'managed-host-policy') flags.managedHostPolicy = value;
     else throw new Error(`unknown drive option --${name}`);
   }
   return flags;
@@ -260,6 +280,7 @@ function parseArgs(argv: string[]): Flags {
       case 'beads-mode': if (value !== 'off' && value !== 'shadow' && value !== 'active') throw new Error('--beads-mode must be off, shadow, or active'); flags.beadsMode = value; break;
       case 'beads-evidence-copy': if (value !== 'off' && value !== 'prefer' && value !== 'require') throw new Error('--beads-evidence-copy must be off, prefer, or require'); flags.beadsEvidenceCopy = value; break;
       case 'bd-path': flags.bdPath = value; break; case 'beads-workspace': flags.beadsWorkspace = value; break; case 'beads-sha256': flags.beadsDigest = value; break; case 'beads-home': flags.beadsHome = value; break; case 'beads-config': flags.beadsConfig = value; break; case 'beads-phase': flags.beadsPhase = value; break; case 'beads-ack': flags.beadsAck = value; break;
+      case 'managed-capability': flags.managedCapability = value; break; case 'managed-rollout': flags.managedRollout = value; break; case 'managed-deliberation-policy': flags.managedDeliberationPolicy = value; break; case 'managed-host-policy': flags.managedHostPolicy = value; break;
       default: throw new Error(`unknown option --${name}`);
     }
   }
@@ -269,6 +290,15 @@ function parseArgs(argv: string[]): Flags {
 async function readCanonical(path: string): Promise<unknown> {
   const text = path === '-' ? await readFile('/dev/stdin', 'utf8') : await readFile(path, 'utf8');
   try { return parseCanonical(text); } catch (error) { throw new Error(`${path} must contain canonical JSON: ${(error as Error).message}`); }
+}
+
+async function managedContextFrom(flags: ManagedContextFlags): Promise<ManagedBridgeContext | undefined> {
+  const paths = [flags.managedCapability, flags.managedRollout, flags.managedDeliberationPolicy, flags.managedHostPolicy];
+  if (paths.every((path) => path === undefined)) return undefined;
+  if (paths.some((path) => path === undefined)) throw new Error('--managed-capability, --managed-rollout, --managed-deliberation-policy, and --managed-host-policy must be supplied together');
+  if (paths.filter((path) => path === '-').length > 1) throw new Error("'-' may name only one managed context document");
+  const [capability, rolloutPolicy, deliberationPolicyAsset, hostPolicy] = await Promise.all(paths.map((path) => readCanonical(path!)));
+  return createManagedBridgeContext({ capability: capability as ManagedCapability, rolloutPolicy: rolloutPolicy as ManagedRolloutPolicy, deliberationPolicyAsset, hostPolicy: hostPolicy as CodexDeliberationHostPolicy });
 }
 
 async function beadsOptions(flags: Flags): Promise<BridgeOptions['beads'] | undefined> {
@@ -299,6 +329,7 @@ async function runLifecycleCli(argv: string[], injectedDriver?: TerminalEffectDr
   if (!flags.modeProvided || flags.mode !== 'runtime') throw new Error('--mode runtime is required for lifecycle');
   if (!flags.runDir || !flags.runId || !flags.plan) throw new Error('--run-dir, --run-id, and --plan are required for lifecycle');
   const plan = planFrom(await readCanonical(flags.plan));
+  const managedContext = await managedContextFrom(flags);
   let policy: unknown;
   if (flags.policy) policy = await readCanonical(flags.policy);
   if (flags.command !== 'init' && !injectedDriver && !flags.policy) throw new Error('--policy is required for run/resume when no driver is injected');
@@ -310,7 +341,7 @@ async function runLifecycleCli(argv: string[], injectedDriver?: TerminalEffectDr
   process.once('SIGINT', onSigint); process.once('SIGTERM', onSigterm);
   if (externalSignal?.aborted) abort();
   try {
-    const result: LifecycleResult = await lifecycle({ command: flags.command, runDir: flags.runDir, runId: flags.runId, plan, ...(flags.state === undefined ? {} : { statePath: flags.state }), ...(flags.steps === undefined ? {} : { stepsPath: flags.steps }), ...(injectedDriver === undefined ? {} : { driver: injectedDriver }), ...(policy === undefined ? {} : { policy: policy as any }), signal: controller.signal, ...(flags.maxTransitions === undefined ? {} : { maxTransitions: flags.maxTransitions }) });
+    const result: LifecycleResult = await lifecycle({ command: flags.command, runDir: flags.runDir, runId: flags.runId, plan, ...(flags.state === undefined ? {} : { statePath: flags.state }), ...(flags.steps === undefined ? {} : { stepsPath: flags.steps }), ...(injectedDriver === undefined ? {} : { driver: injectedDriver }), ...(policy === undefined ? {} : { policy: policy as any }), ...(managedContext === undefined ? {} : { managedContext }), signal: controller.signal, ...(flags.maxTransitions === undefined ? {} : { maxTransitions: flags.maxTransitions }) });
     await writeOutput(`${canonicalString(result)}\n`); return 0;
   } finally {
     externalSignal?.removeEventListener('abort', abort); process.removeListener('SIGINT', onSigint); process.removeListener('SIGTERM', onSigterm);
@@ -415,7 +446,8 @@ export async function runBridgeCli(argv = process.argv.slice(2), injectedDriver?
   const plan = flags.plan === undefined ? undefined : planFrom(await readCanonical(flags.plan));
   const event = eventFrom(await readCanonical(flags.event));
   const beads = await beadsOptions(flags);
-  const options: BridgeOptions = { runDir: flags.runDir, runId: flags.runId, mode: 'runtime', ...(plan === undefined ? {} : { plan }), ...(flags.state ? { statePath: flags.state } : {}), ...(flags.steps ? { stepsPath: flags.steps } : {}), ...(beads === undefined ? {} : { beads }) };
+  const managedContext = await managedContextFrom(flags);
+  const options: BridgeOptions = { runDir: flags.runDir, runId: flags.runId, mode: 'runtime', ...(plan === undefined ? {} : { plan }), ...(flags.state ? { statePath: flags.state } : {}), ...(flags.steps ? { stepsPath: flags.steps } : {}), ...(beads === undefined ? {} : { beads }), ...(managedContext === undefined ? {} : { managedContext }) };
   const transitionInput: BridgeTransition = { event, eventId: flags.eventId, ...(flags.phaseId ? { phaseId: flags.phaseId } : {}), ...(flags.stepId ? { stepId: flags.stepId } : {}), ...(flags.expectedRevision === undefined ? {} : { expectedRevision: flags.expectedRevision }), ...(flags.attemptEpoch === undefined ? {} : { attemptEpoch: flags.attemptEpoch }), ...(flags.authorityEpoch === undefined ? {} : { authorityEpoch: flags.authorityEpoch }), ...(flags.barrierEpoch === undefined ? {} : { barrierEpoch: flags.barrierEpoch }), ...(flags.launchToken ? { launchToken: flags.launchToken } : {}) };
   const { transition } = await import('./bridge.js');
   const result = await transition(options, transitionInput);
@@ -427,10 +459,11 @@ export async function runBridgeCli(argv = process.argv.slice(2), injectedDriver?
  * canonical closed host policy document. */
 async function runDriveCli(argv: string[], injectedDriver?: TerminalEffectDriver, externalSignal?: AbortSignal): Promise<number> {
   const flags = parseDriveArgs(argv);
-  if (flags.help) { await writeOutput('Usage: lunacy-bridge drive --run-dir RUN --run-id ID --mode runtime --plan PLAN.json --policy POLICY.json [--max-transitions N]\n'); return 0; }
+  if (flags.help) { await writeOutput('Usage: lunacy-bridge drive --run-dir RUN --run-id ID --mode runtime --plan PLAN.json --policy POLICY.json [--max-transitions N] [--managed-capability CAPABILITY.json --managed-rollout ROLLOUT.json --managed-deliberation-policy ASSET.json --managed-host-policy HOST.json]\n'); return 0; }
   if (!flags.modeProvided || flags.mode !== 'runtime') throw new Error('--mode runtime is required for drive');
   if (!flags.runDir || !flags.runId || !flags.plan) throw new Error('--run-dir, --run-id, and --plan are required for drive');
   const plan = planFrom(await readCanonical(flags.plan));
+  const managedContext = await managedContextFrom(flags);
   let driver = injectedDriver;
   if (!driver) {
     if (!flags.policy) throw new Error('--policy is required when no managed driver is injected');
@@ -450,7 +483,7 @@ async function runDriveCli(argv: string[], injectedDriver?: TerminalEffectDriver
   process.once('SIGTERM', onSigterm);
   if (externalSignal?.aborted) abort();
   try {
-    const result = await drive({ runDir: flags.runDir, runId: flags.runId, plan, driver, signal: controller.signal, ...(flags.maxTransitions === undefined ? {} : { maxTransitions: flags.maxTransitions }) });
+    const result = await drive({ runDir: flags.runDir, runId: flags.runId, plan, driver, signal: controller.signal, ...(managedContext === undefined ? {} : { managedContext }), ...(flags.maxTransitions === undefined ? {} : { maxTransitions: flags.maxTransitions }) });
     await writeOutput(`${canonicalString(result)}\n`); return 0;
   } finally {
     externalSignal?.removeEventListener('abort', abort);
@@ -545,7 +578,7 @@ async function runInboxCli(argv: string[]): Promise<number> {
   await writeOutput(`${canonicalString(capsule)}\n`); return 0;
 }
 
-type SubmitFlags = { inbox?: string; plan?: string; runRoot?: string; runId?: string; token?: string; value?: string; eventId?: string; policy?: string; help: boolean };
+type SubmitFlags = { inbox?: string; plan?: string; runRoot?: string; runId?: string; token?: string; value?: string; eventId?: string; policy?: string; help: boolean } & ManagedContextFlags;
 function parseSubmitArgs(argv: string[]): SubmitFlags {
   const flags: SubmitFlags = { help: false };
   for (let index = 0; index < argv.length; index += 1) {
@@ -553,20 +586,21 @@ function parseSubmitArgs(argv: string[]): SubmitFlags {
     if (arg === '--help' || arg === '-h') { flags.help = true; continue; }
     if (!arg.startsWith('--')) throw new Error(`unknown submit argument ${arg}`);
     const value = argv[++index]; if (value === undefined || value.startsWith('--')) throw new Error(`${arg} requires a value`);
-    if (arg === '--inbox') flags.inbox = value; else if (arg === '--plan') flags.plan = value; else if (arg === '--run-root') flags.runRoot = value; else if (arg === '--run-id') flags.runId = value; else if (arg === '--token') flags.token = value; else if (arg === '--value') flags.value = value; else if (arg === '--event-id') flags.eventId = value; else if (arg === '--policy') flags.policy = value; else throw new Error(`unknown submit option ${arg}`);
+    if (arg === '--inbox') flags.inbox = value; else if (arg === '--plan') flags.plan = value; else if (arg === '--run-root') flags.runRoot = value; else if (arg === '--run-id') flags.runId = value; else if (arg === '--token') flags.token = value; else if (arg === '--value') flags.value = value; else if (arg === '--event-id') flags.eventId = value; else if (arg === '--policy') flags.policy = value; else if (arg === '--managed-capability') flags.managedCapability = value; else if (arg === '--managed-rollout') flags.managedRollout = value; else if (arg === '--managed-deliberation-policy') flags.managedDeliberationPolicy = value; else if (arg === '--managed-host-policy') flags.managedHostPolicy = value; else throw new Error(`unknown submit option ${arg}`);
   }
   return flags;
 }
 async function runSubmitDecisionCli(argv: string[]): Promise<number> {
   const flags = parseSubmitArgs(argv);
-  if (flags.help) { await writeOutput('Usage: lunacy-bridge submit-decision --inbox INBOX.json --plan PLAN.json --run-root RUN --run-id ID --token TOKEN --value PASS|FINDINGS|ADOPT_JSON\n'); return 0; }
+  if (flags.help) { await writeOutput('Usage: lunacy-bridge submit-decision --inbox INBOX.json --plan PLAN.json --run-root RUN --run-id ID --token TOKEN --value PASS|FINDINGS|ADOPT_JSON [--policy POLICY.json] [--managed-capability CAPABILITY.json --managed-rollout ROLLOUT.json --managed-deliberation-policy ASSET.json --managed-host-policy HOST.json]\n'); return 0; }
   if (!flags.inbox || !flags.plan || !flags.runRoot || !flags.runId || !flags.token || !flags.value) throw new Error('--inbox, --plan, --run-root, --run-id, --token, and --value are required');
   const { submitParentDecision } = await import('./decision-inbox.js');
   const inbox = await readCanonical(flags.inbox) as any; const plan = await readCanonical(flags.plan) as Plan; let policy: unknown;
   if (flags.policy) policy = await readCanonical(flags.policy);
+  const managedContext = await managedContextFrom(flags);
   let value: unknown = flags.value;
   if (flags.value.startsWith('{')) value = parseCanonical(flags.value);
-  const result = await submitParentDecision({ selection: { runRoot: flags.runRoot, runId: flags.runId, token: flags.token }, inbox, plan, value, ...(flags.eventId === undefined ? {} : { eventId: flags.eventId }), ...(policy === undefined ? {} : { policy: policy as any }) });
+  const result = await submitParentDecision({ selection: { runRoot: flags.runRoot, runId: flags.runId, token: flags.token }, inbox, plan, value, ...(flags.eventId === undefined ? {} : { eventId: flags.eventId }), ...(policy === undefined ? {} : { policy: policy as any }), ...(managedContext === undefined ? {} : { managedContext }) });
   await writeOutput(`${canonicalString(result)}\n`); return 0;
 }
 

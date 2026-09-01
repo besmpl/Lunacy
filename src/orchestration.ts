@@ -1,16 +1,18 @@
-import { canonicalString, digest } from './canonical.js';
+import { canonicalString, digest, parseCanonical } from './canonical.js';
 import { resolve } from 'node:path';
 import { canonicalizeDeclaration, transition, type BridgeOptions, type BridgeProjection, type BridgeResult, type BridgeTransition } from './bridge.js';
 import { FileArtifactStore, isFileArtifactStoreAbort } from './store.js';
 import { inspectTrustedPath } from './filesystem.js';
 import type { EffectDriver } from './driver.js';
-import type { Event, MachineState, OutboxCommand, Plan, Yield } from './model.js';
+import type { Event, MachineState, OutboxCommand, Plan, Ref, Yield } from './model.js';
 import { validateTerminalRecord, type TerminalRecord } from './codex-effect-records.js';
 import { validateCodexHostPolicy, type CodexHostPolicy } from './codex-host-policy.js';
 import { makeCodexExecDriver } from './codex-exec-driver.js';
 import type { DispatcherOptions } from './public.js';
 import { assertReleaseAdmissionOpen } from './release-admission.js';
 import { selectCurrentTokenCommand, selectEligibleCommand } from './dispatch-coordinator.js';
+import { commandExecutionOwner } from './execution-plane.js';
+import type { ManagedBridgeContext } from './managed-bridge-context.js';
 
 /** Optional evidence waiter implemented by managed effect drivers.  It is
  * deliberately outside EffectDriver: the kernel only needs dispatch and
@@ -31,6 +33,7 @@ export type BridgeDriveOptions = Omit<BridgeOptions, 'mode' | 'driver' | 'dispat
   dispatcher?: BridgeOptions['dispatcher'];
   /** Mechanical safety bound only; it is not a durable queue/cursor. */
   maxTransitions?: number;
+  managedContext?: ManagedBridgeContext;
 };
 
 export type BridgeDriveStop =
@@ -93,6 +96,7 @@ export class BridgeDrivePump {
   private readonly managedPolicy?: CodexHostPolicy;
   private transitions = 0;
   private last?: BridgeResult;
+  private activeOrdinaryCommand?: OutboxCommand;
   /**
    * Dispatch outcomes can arrive after the transition that started an effect
    * returns. Keep one pump-owned channel instead of replacing an
@@ -130,6 +134,10 @@ export class BridgeDrivePump {
       try { return await this.runLoop(); }
       catch (error) {
         if (isFileArtifactStoreAbort(error) && aborted(this.signal)) {
+          // START has no launch token in its caller identity, but the kernel
+          // may already have committed and claimed one before an abort stops
+          // projection. Rebind to CURRENT and cancel that exact owned effect.
+          await this.cancelCurrentEffect();
           return this.last ? this.finish('cancelled', this.last) : this.emptyResult('cancelled');
         }
         // A competing pump may win the bridge lock and advance the same exact
@@ -164,6 +172,12 @@ export class BridgeDrivePump {
     } else {
       const initialCommand = currentCommand(loaded.state);
       result = await this.resume(loaded.state, initialCommand);
+      if (initialCommand && result.yield?.kind === 'WAITING' && (initialCommand.state === 'PENDING' || initialCommand.state === 'CLAIMED')) {
+        const latest = await this.load();
+        const claimed = selectCurrentTokenCommand(latest.state, ['CLAIMED'], initialCommand)?.command
+          ?? Object.values(latest.state?.outbox ?? {}).find((candidate) => candidate.commandId === initialCommand.commandId && candidate.state === 'CLAIMED');
+        if (claimed) result = { ...result, yield: await this.waitNotification(initialCommand.launchToken) };
+      }
     }
     this.last = result;
 
@@ -203,7 +217,13 @@ export class BridgeDrivePump {
         this.last = result;
         if (result.yield?.kind === 'WAITING' && (command.state === 'PENDING' || command.state === 'CLAIMED')) {
           const latest = await this.load();
-          const current = selectCurrentTokenCommand(latest.state, ['PENDING', 'CLAIMED', 'UNKNOWN', 'ACKED'], command)?.command;
+          // Managed prepare seals role input and may replace the provisional
+          // launch token/digest in the claim CAS. Rebind by the stable command
+          // identity when that exact preparation happened; otherwise the pump
+          // could issue a second bridge transition while the first provider's
+          // receipt CAS is still in flight.
+          const current = selectCurrentTokenCommand(latest.state, ['PENDING', 'CLAIMED', 'UNKNOWN', 'ACKED'], command)?.command
+            ?? Object.values(latest.state?.outbox ?? {}).find((candidate) => candidate.commandId === command.commandId && candidate.state === 'CLAIMED');
           // A synchronous receipt may have ACKED before this load. Only wait
           // while the exact command is still CLAIMED; PENDING means the
           // kernel's claim/dispatch transition has not published its wake yet.
@@ -222,6 +242,19 @@ export class BridgeDrivePump {
             throw error;
           }
         }
+        continue;
+      }
+
+      if (command.state === 'ACKED' && commandExecutionOwner(state, command) === 'DELIBERATION') {
+        let report: Ref | undefined;
+        try {
+          const envelope = parseCanonical<{ launchToken?: unknown; commandDigest?: unknown; receipt?: Ref }>(command.receipt?.bytes ?? '');
+          if (envelope.launchToken === command.launchToken && envelope.commandDigest === command.commandDigest && envelope.receipt && typeof envelope.receipt === 'object') report = envelope.receipt;
+        } catch { /* malformed durable receipt remains a parent boundary */ }
+        if (!report) return this.finish('terminal-invalid', result);
+        const event: Event = { kind: 'WORKER_ENVELOPE', ref: report };
+        result = await this.invoke(transitionInput(this.options.runId, state, `drive-managed-report:${command.launchToken}`, event, command.launchToken));
+        this.last = result;
         continue;
       }
 
@@ -296,7 +329,7 @@ export class BridgeDrivePump {
     const options: BridgeOptions = {
         ...this.options,
         mode: 'runtime',
-        driver: driverOverride,
+        driver: this.captureOrdinaryDispatch(driverOverride),
         dispatcher: { ...prior, signal: this.signal ?? prior?.signal, onYield },
     };
     let result: BridgeResult;
@@ -385,10 +418,34 @@ export class BridgeDrivePump {
 
   private async cancelCurrentEffect(state?: MachineState): Promise<void> {
     try {
+      // The transition wrapper records an ordinary command synchronously at
+      // exact provider entry. Cancellation can therefore address that token
+      // without waiting behind the provider's still-held writer admission.
+      if (this.activeOrdinaryCommand) {
+        await this.cancel(this.activeOrdinaryCommand.launchToken);
+        return;
+      }
+      // Without a local provider entry there may be nothing this process can
+      // cancel. A supplied state can still name an ordinary owned token; an
+      // aborted fallback load exits promptly rather than waiting on a peer.
       const currentState = state ?? (await this.load()).state;
       const command = currentCommand(currentState);
-      if (command) await this.cancel(command.launchToken);
+      if (command && commandExecutionOwner(currentState!, command) !== 'DELIBERATION') await this.cancel(command.launchToken);
     } catch { /* the durable claimed/unknown token remains the successor fence */ }
+  }
+
+  private captureOrdinaryDispatch(driver: TerminalEffectDriver): EffectDriver {
+    return {
+      ...(driver.available === undefined ? {} : { available: driver.available.bind(driver) }),
+      ...(driver.prepare === undefined ? {} : { prepare: driver.prepare.bind(driver) }),
+      dispatch: (command, launchToken, signal) => {
+        this.activeOrdinaryCommand = command;
+        return Reflect.apply(driver.dispatch, driver, [command, launchToken, signal]);
+      },
+      ...(driver.observe === undefined ? {} : { observe: driver.observe.bind(driver) }),
+      ...(driver.observeTeardown === undefined ? {} : { observeTeardown: driver.observeTeardown.bind(driver) }),
+      ...(driver.observeProviderIntent === undefined ? {} : { observeProviderIntent: driver.observeProviderIntent.bind(driver) }),
+    };
   }
 
   private async waitTerminal(command: OutboxCommand): Promise<unknown> {
@@ -465,6 +522,8 @@ export type LifecycleOptions = Readonly<{
   driver?: TerminalEffectDriver;
   /** Closed managed host policy. A driver and policy are mutually exclusive. */
   policy?: CodexHostPolicy;
+  /** Exact existing-schema inputs required only for a retained managed run. */
+  managedContext?: ManagedBridgeContext;
   dispatcher?: DispatcherOptions;
   signal?: AbortSignal;
   maxTransitions?: number;
@@ -565,6 +624,7 @@ function bridgeOptions(options: LifecycleOptions, plan: Plan, driver?: TerminalE
     ...(options.statePath === undefined ? {} : { statePath: options.statePath }),
     ...(options.stepsPath === undefined ? {} : { stepsPath: options.stepsPath }),
     ...(driver === undefined ? {} : { driver }),
+    ...(options.managedContext === undefined ? {} : { managedContext: options.managedContext }),
     ...(options.dispatcher === undefined ? {} : { dispatcher: options.dispatcher }),
   };
 }

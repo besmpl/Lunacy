@@ -44,7 +44,7 @@ test('R2 complete-tree publication removes owned stale files but preserves unrel
     const report = JSON.parse(result.stdout);
     // The generated release owns its exact runtime payload; the complete verified tree
     // also contains the one explicitly preserved operator sentinel above.
-    assert.equal(report.managedFiles, 217);
+    assert.equal(report.managedFiles, 221);
     assert.match(report.managedAggregate, /^[0-9a-f]{64}$/);
   } finally {
     await rm(repo, { recursive: true, force: true });
