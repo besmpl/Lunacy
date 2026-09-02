@@ -41,9 +41,13 @@ authors/adopts a complete Plan through the same RunKernel and store.
 
 The package/runtime has no ambient rollout and remains fail-safe disabled when
 managed host composition is omitted or nonconforming. The installed operator
-profile may select reviewed D3 `automatic-focus` only as one generation-1,
-effect-denied Focus Wave before the acceptance pointer/Plan is sealed and
-before the first implementation spawn. Automatic Focus never WIDENs or
+profile defaults plain `$lunacy` Plan authorship to exactly one canonical typed
+`AUTO` request; explicit `DIRECT` and explicit `EXPLORE` remain authoritative
+overrides, and AUTO never selects Explore. A complete Plan takes the zero-call
+Direct branch; an eligible unresolved named discriminator selects reviewed D3
+`automatic-focus` only as one generation-1, effect-denied Focus Wave before the
+acceptance pointer/Plan is sealed and before the first implementation spawn.
+Automatic Focus never WIDENs or
 re-enters from a gate, repair, worker completion, resume, rollout, or an
 existing rollout-bearing run. An unsettled Wave returns exactly one parent
 decision boundary. Direct is still zero-fan-out, user-explicit ADHD/Explore is
@@ -254,8 +258,14 @@ implicit provider, token, or native-host calls. See the [installation](docs/INST
 [API](docs/API.md), [durability](docs/DURABILITY.md), [migration](docs/MIGRATION.md),
 and [benchmark](docs/BENCHMARK.md) contracts.
 Package install and managed runtime deployment do not create an ambient
-adaptive rollout. The installed operator profile's private D3 composition,
-eligibility, validation, kill, and recovery procedure is the
+adaptive rollout. In the installed operator profile, plain `$lunacy` Plan
+authorship defaults to exactly one canonical typed `AUTO` request; explicit
+`DIRECT` and explicit `EXPLORE` remain authoritative overrides. AUTO never
+selects Explore, and a complete Plan takes the physically isolated zero-call
+Direct branch. An eligible unresolved named discriminator uses
+`createManagedRolloutPolicy({ generation: 1, mode: 'automatic-focus' })` for
+the one-shot D3 Focus Wave. Its eligibility, validation, kill, and recovery
+procedure is the
 [adaptive operator contract](orchestrator/DELIBERATION.md).
 
 Accepted-run payload retention is private and admission-controlled. New runs

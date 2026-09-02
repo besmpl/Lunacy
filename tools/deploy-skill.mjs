@@ -1624,6 +1624,13 @@ and exact policy files only; it never parses free-form user text. Direct has no
 managed inputs, while Focus/Explore validate and enter managed START in that
 same verified bridge process. Explore authority is invocation-local and is not
 written to the runtime tree or run state.
+This runtime deployment supplies no ambient rollout policy and does not choose
+a mode. The separately installed operator profile defaults plain $lunacy Plan
+authorship to exactly one canonical typed AUTO request; explicit DIRECT and
+explicit EXPLORE remain authoritative overrides. AUTO never selects Explore. A
+complete Plan takes the physically isolated zero-call Direct branch, while an
+eligible unresolved named discriminator may compose one generation-1
+automatic-focus policy before Plan sealing and implementation.
 Use "$NODE" runtime/bridge.mjs workfront --help for a read-only dependency capsule.
 Use "$NODE" runtime/bridge.mjs inbox --help for explicitly selected,
 digest-bound decision entries; submit-decision and promote-phase remain

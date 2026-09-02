@@ -42,6 +42,13 @@ test('R2 complete-tree publication removes owned stale files but preserves unrel
     result = runDeploy(repo, target, '--check');
     assert.equal(result.status, 0, result.stderr);
     const report = JSON.parse(result.stdout);
+    const deployedGuide = (await readFile(join(target, 'runtime', 'README.md'), 'utf8')).replace(/\s+/g, ' ');
+    assert.match(deployedGuide, /runtime deployment supplies no ambient rollout policy and does not choose a mode/i);
+    assert.match(deployedGuide, /installed operator profile defaults plain \$lunacy Plan authorship to exactly one canonical typed AUTO request/i);
+    assert.match(deployedGuide, /explicit DIRECT and explicit EXPLORE remain authoritative overrides/i);
+    assert.match(deployedGuide, /AUTO never selects Explore/i);
+    assert.match(deployedGuide, /complete Plan[^.]*zero-call Direct/i);
+    assert.match(deployedGuide, /one generation-1 automatic-focus policy before Plan sealing and implementation/i);
     // The generated release owns its exact runtime payload; the complete verified tree
     // also contains the one explicitly preserved operator sentinel above.
     assert.equal(report.managedFiles, 221);

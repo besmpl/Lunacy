@@ -108,8 +108,13 @@ decision and adopts a complete Plan.
 
 The package/runtime has no ambient rollout policy: when the host supplies no
 managed composition inputs, the ordinary path remains the fail-safe default.
-The installed operator profile separately composes D3
-`automatic-focus` with `createManagedRolloutPolicy` only for one generation-1,
+Plain `$lunacy` Plan authorship defaults to exactly one canonical typed `AUTO`
+request in the separately installed operator profile; explicit `DIRECT` and
+explicit `EXPLORE` remain authoritative overrides. AUTO never selects Explore,
+and a complete Plan takes the physically isolated zero-call Direct branch. An
+eligible unresolved named discriminator separately composes D3 with
+`createManagedRolloutPolicy({ generation: 1, mode: 'automatic-focus' })` only
+for one generation-1,
 effect-denied Wave before the acceptance pointer/Plan is sealed and before the
 first implementation spawn. It never automatically WIDENs or re-enters from a
 gate, repair, worker completion, resume, rollout, or an existing

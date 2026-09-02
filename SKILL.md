@@ -74,8 +74,14 @@ deliberation capability inside Plan authorship. It automatically preserves
 zero-fan-out Direct for settled decisions, keeps Reports authority-free, and
 leaves settlement, complete Plan authorship/adoption, and gates with the
 parent. The package/runtime remains rollout-disabled when the host omits or
-cannot conformingly bind managed composition. The installed operator profile
-may select D3 `automatic-focus` through `createManagedRolloutPolicy` only once:
+cannot conformingly bind managed composition. Plain `$lunacy` Plan authorship
+defaults to exactly one canonical typed `AUTO` request at the installed
+`resolve-plan` seam; explicit `DIRECT` and explicit `EXPLORE` remain
+authoritative overrides. AUTO never selects Explore. A complete Plan takes the
+physically isolated zero-call Direct branch. For an eligible unresolved named
+discriminator, the installed operator profile selects D3 with
+`createManagedRolloutPolicy({ generation: 1, mode: 'automatic-focus' })` only
+once:
 one generation-1, effect-denied Focus Wave before the acceptance pointer/Plan
 is sealed and before the first implementation spawn. It never automatically
 WIDENs or re-enters from a gate, repair, worker completion, resume, rollout, or

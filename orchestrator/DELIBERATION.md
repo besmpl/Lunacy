@@ -5,8 +5,12 @@ automatically chooses a cognitive gear while the parent authors a Plan; it is
 not a user-selected worker mode, a second scheduler, or a second authority
 path. **The package/runtime rollout is disabled by default.** Building or deploying
 the managed runtime does not create an ambient cohort. The installed Lunacy
-operator profile may select the reviewed D3 `automatic-focus` policy once at
-the eligible pre-Plan host-composition boundary; omission or nonconformance
+operator profile defaults plain `$lunacy` Plan authorship to exactly one
+canonical typed `AUTO` request. Explicit `DIRECT` and explicit `EXPLORE` remain
+authoritative overrides. AUTO never selects Explore, and a complete Plan takes
+the physically isolated zero-call Direct branch. At an eligible unresolved
+named discriminator, AUTO selects the reviewed D3 `automatic-focus` policy
+once at the pre-Plan host-composition boundary; omission or nonconformance
 still leaves the managed path disabled/refused.
 
 ## One decision, three deterministic gears
@@ -92,8 +96,12 @@ not substitutes.
 ## Installed D3 host profile
 
 D3 is an operator-owned host-composition choice, not a runtime default, global
-flag, deployment-manifest field, or second control plane. The installed profile
-may compose automatic Focus at most once for a new eligible managed run: only
+flag, deployment-manifest field, or second control plane. Plain `$lunacy` Plan
+authorship defaults to exactly one canonical typed `AUTO` request; explicit
+`DIRECT` and explicit `EXPLORE` remain authoritative overrides. AUTO never
+selects Explore, and a complete Plan takes the physically isolated zero-call
+Direct branch. The installed profile composes automatic Focus at most once for
+a new eligible managed run: only
 before the acceptance pointer/Plan is sealed, before the first implementation
 spawn, and when no automatic Focus Wave or accepted rollout projection already
 exists. That one pre-Plan composition passes:

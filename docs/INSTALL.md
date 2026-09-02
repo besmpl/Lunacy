@@ -29,8 +29,13 @@ immutable generations, and the append-only journal.
 
 Adaptive deliberation is private host composition. Package install and managed
 runtime deployment create no ambient rollout, so omission remains fail-safe
-disabled. The separately installed operator profile composes reviewed D3
-`automatic-focus` with `createManagedRolloutPolicy` only as one generation-1,
+disabled. Plain `$lunacy` Plan authorship defaults to exactly one canonical
+typed `AUTO` request in the separately installed operator profile; explicit
+`DIRECT` and explicit `EXPLORE` remain authoritative overrides. AUTO never
+selects Explore, and a complete Plan takes the physically isolated zero-call
+Direct branch. An eligible unresolved named discriminator composes reviewed D3
+with `createManagedRolloutPolicy({ generation: 1, mode: 'automatic-focus' })`
+only as one generation-1,
 effect-denied Focus Wave before the acceptance pointer/Plan is sealed and
 before the first implementation spawn. It never automatically WIDENs or
 re-enters from gates, repair, worker completion, resume, rollout, or an

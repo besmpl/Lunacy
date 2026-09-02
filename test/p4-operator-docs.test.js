@@ -48,6 +48,22 @@ test('adaptive operator contract limits installed D3 to one pre-Plan Focus wave'
   assert.doesNotMatch(guide, /generation:\s*previous\.generation \+ 1,\s*\n\s*mode:\s*'automatic-focus'/);
 });
 
+test('plain Lunacy Plan authorship persistently defaults to typed AUTO at the operator seam', async () => {
+  const [readme, skill, guide, api, install] = await Promise.all([
+    source('README.md'), source('SKILL.md'), source('orchestrator/DELIBERATION.md'),
+    source('docs/API.md'), source('docs/INSTALL.md'),
+  ]);
+  for (const markdown of [readme, skill, guide, api, install]) {
+    const compact = markdown.replace(/\s+/g, ' ');
+    assert.match(compact, /plain `\$lunacy` Plan authorship defaults to exactly one canonical typed `AUTO` request/i);
+    assert.match(compact, /explicit `DIRECT` and explicit `EXPLORE` remain authoritative overrides/i);
+    assert.match(compact, /AUTO never selects Explore/i);
+    assert.match(compact, /complete Plan[^.]*zero-call Direct/i);
+    assert.match(compact, /createManagedRolloutPolicy\(\{\s*generation: 1,\s*mode: 'automatic-focus'/);
+    assert.doesNotMatch(compact, /installed operator profile[^.]{0,160}may select[^.]*automatic-focus/i);
+  }
+});
+
 test('product docs link one packaged private guide without widening the public API', async () => {
   const [readme, skill, api, install, recovery, packageBytes] = await Promise.all([
     source('README.md'), source('SKILL.md'), source('docs/API.md'), source('docs/INSTALL.md'),
