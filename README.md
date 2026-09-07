@@ -13,8 +13,9 @@ path and does not automatically invoke strategy consultations.
 ## Release status
 
 Version `0.2.0-rc.1` is a native-guidance release candidate. The package has
-offline structural and observer tests only. It has no claim of proven live
-reliability, route availability, model obedience, speed, cost, or savings.
+offline structural, documented shell-recipe, and observer tests only. It has no
+claim of proven live reliability, route availability, model obedience, speed,
+cost, or savings.
 
 ## Native routes
 
@@ -141,8 +142,13 @@ The observer uses only the Python standard library.
 
 ```sh
 python3 -B ~/.codex/skills/.system/skill-creator/scripts/quick_validate.py .
+python3 -B -m unittest discover -s tests -p 'test_install_recipes.py' -v
 python3 -B -m unittest discover -s tests -v
 ```
+
+The focused recipe tests extract the commands above from this README and use
+disposable local stubs and directories; they do not install a plugin, contact a
+model or the network, or validate live routing.
 
 The optional observer is documented in
 [OPERATOR.md](OPERATOR.md#optional-evidence-index-helper). It reads an already
@@ -160,7 +166,8 @@ captured, authorized JSONL file and never launches models or changes evidence.
 - [OPERATOR.md](OPERATOR.md) — large-output recipe and observer reference.
 - [`scripts/evidence_index.py`](scripts/evidence_index.py) — bounded read-only
   evidence projection.
-- [`tests/`](tests/) — standalone observer CLI regression suite.
+- [`tests/`](tests/) — offline documented-recipe and observer CLI regression
+  suite.
 
 ## Legacy change
 
