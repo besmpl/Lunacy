@@ -1,0 +1,4 @@
+interface:
+  display_name: "Lunacy Golden"
+  short_description: "Astra-led work with conditional ADHD and Web Pro"
+  default_prompt: "Use $lunacy-native:golden for this task: "

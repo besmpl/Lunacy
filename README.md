@@ -10,6 +10,12 @@ slow strategy loop around fast, acceptance-first delivery for user-authorized
 ongoing plugin improvement. Ordinary engineering keeps the existing low-overhead
 path and does not automatically invoke strategy consultations.
 
+In the installed plugin, invoke **`$lunacy-native:golden <your task>`** for the
+golden workflow: parent-led planning, conditional ADHD/Web Pro, worker delivery,
+and independent acceptance. This is a distinct shortcut in the same plugin,
+not another installed version. Finite tasks stay finite; ongoing improvement
+requires your request. Ordinary `lunacy-native:lunacy` behavior is unchanged.
+
 ## Release status
 
 Version `0.2.0-rc.1` is a native-guidance release candidate. The package has
@@ -35,7 +41,7 @@ normalization, fallback, or mid-attempt route change.
 Use either the existing plugin channel or the standalone skill channel, not
 both. They expose different invocation names:
 
-- an installed plugin exposes `lunacy-native:lunacy`;
+- one installed plugin exposes `lunacy-native:lunacy` and the `lunacy-native:golden` shortcut;
 - the optional standalone copy below exposes `$lunacy-native`;
 - an installed legacy skill remains `$lunacy`.
 
@@ -44,6 +50,34 @@ Its files and disabled state remain intact for recovery under the authority of
 its existing work. If duplicate entries are already visible, disable the
 unintended entry through the supported Codex Plugins or Skills UI rather than
 removing or moving its directory.
+
+### Build the plugin from this release
+
+The root remains the standalone Lunacy skill. The `packaging/` directory holds
+Golden and the plugin manifest; it is a build input, not a complete plugin.
+Build a self-contained plugin outside this checkout at a **new** destination:
+
+```sh
+python3 -B packaging/build_plugin.py /path/to/staging/lunacy-native
+```
+
+The builder copies the root skill and Golden into sibling `skills/lunacy` and
+`skills/golden` directories, so shared references resolve without symlinks or
+duplicating maintained source. It refuses existing destinations (including
+symlinks) and destinations inside the checkout. On a copy failure, the new
+partial output is retained for inspection; it is not an installable success.
+It does not register, install, enable, or migrate anything. For an existing
+plugin, compare the output with the confirmed marketplace source, apply only
+the intended release files there, preserve its local version suffix until the
+cachebuster step, and use the update flow below. For a first plugin install,
+use the installed `plugin-creator` skill to register this built package in your
+chosen marketplace. Do not also enable a standalone native copy.
+
+Maintainers can verify packaging without installing or contacting a model:
+
+```sh
+python3 -B -m unittest discover -s packaging -p 'test_*.py' -v
+```
 
 ### Update an existing plugin (preferred for plugin users)
 

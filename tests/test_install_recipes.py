@@ -172,7 +172,7 @@ exit 0
     def test_missing_ambiguous_or_unterminated_target_fence_refuses_extraction(self):
         heading = "### Update an existing plugin (preferred for plugin users)\n"
         cases = (
-            self.markdown.replace("```sh\n", "```text\n", 1),
+            self.markdown.replace("```sh\n" + self.recipe, "```text\n" + self.recipe, 1),
             self.markdown.replace(heading, heading + heading, 1),
             self.markdown.replace(
                 self.recipe + "```", self.recipe + "```\n\n```sh\ntrue\n```", 1
