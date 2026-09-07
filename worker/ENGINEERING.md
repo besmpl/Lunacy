@@ -1,128 +1,42 @@
-# Lunacy Worker Engineering Doctrine
+# Native coherent engineering owner
 
-Read this for implementation, repair, recovery, and adversarial work. Project-specific authority (`AGENTS.md`, architecture, contracts, active run `PLAN.md`) outranks this generic doctrine.
+## Coherent implementation and repair
 
-## Core rule
+Own the assigned TASK attempt end-to-end. Before acting, read the immutable Authorized Assignment and its adoption, exact route/context rule, owned paths/effects, report path, attempt/recovery entitlement, applicable guidance, and project rules. The assignment already authorizes work; it is not launch evidence and does not depend on a future handle update. Start at the affected behavior and likely owner; trace maintained callers, reuse, integration edges, and relevant tests before editing. Expand discovery when ownership is ambiguous, state is shared, tests conflict, or caller effects may be material. Implement the complete bounded change, verify, self-review, repair ordinary defects, and run terminal affected verification after the last substantive change.
 
-**Understand and reuse the existing system before inventing another one. Prefer the simplest coherent design that fully solves the actual task and fits the project's architecture. Complexity must earn its cost.**
+Prefer the simplest coherent design after tracing ownership and invariants. Reuse sound abstractions; avoid speculative frameworks, registries, duplicate systems, hidden global state, and unrelated cleanup. Preserve public contracts unless the adoption changes them. A selected green test list is evidence, not scope authority.
 
-Prefer modifying, reusing, deleting, or extending sound mechanisms over adding layers or parallel systems.
+Ordinary repair remains with the same owner unless a stricter adopted operation-attempt budget applies. An explicitly one-attempt/no-retry operation consumes its attempt even if arguments or validation fail before the intended effect. Reconcile it and report; do not correct and reinvoke without a new parent adoption. This does not prohibit ordinary repair/check reruns when no stricter budget exists.
 
-## Before writing code
+Stop affected work and send `DECISION_REQUIRED` for architecture/contract change, unsafe shared state, unresolved authority/effects, overlap, or material expansion. Freeze the boundary and give one precise question with evidence. Continue unrelated work only when its authority and independence are established.
 
-1. Inspect relevant architecture, nearby implementations, types/classes/interfaces, helpers, factories/registries, tests, and call sites.
-2. Inventory affected callers, sibling paths, lifecycle/persistence boundaries, and extension points.
-3. For migrations/replacements/removals, inventory is **complete-by-default**: maintained production callers, tests, fixtures, adapters, examples, and indirect/variable-mediated construction are in scope unless explicit authority excludes them.
-4. A green selected test matrix is evidence, **not scope authority**. Do not label a maintained surface `legacy`/`historical` without explicit authority.
-5. Search for something that can be safely reused, extended, composed, specialized, or generalized before creating a parallel mechanism.
-6. Understand ownership, invariants, and data flow around the change; do not patch one visible caller while ignoring the system around it.
-7. When external/library semantics are uncertain and research is available, use authoritative/primary documentation rather than guessing.
+## Scope, commands, and custody
 
-## Scope / concurrent ownership
+One owner controls each assigned surface/effect. Before writing, inspect same-root ACTIVE and retained/ambiguous BLOCKED ownership recorded by the parent and discover deeper affected surfaces yourself. Do not consume unfinished peer work, change a shared contract another owner relies on, or infer that missing/terminal records release ownership. Existing or unknown prior work returns to its matching owner.
 
-Own the durable step contract you were assigned. Do not silently turn discovery into authorization.
+Every command, subprocess, external effect, approval, and output path needs adopted authority. Use bounded commands with finite deadlines; never detach or fire-and-forget. Preserve the complete native result rather than reconstructing evidence from output. For short-output single calls, use this copyable pattern from the first call onward:
 
-If deeper inspection shows correct completion requires any of the following, stop before that edit and return `BLOCKED` or `DECISION_REQUIRED`:
+```javascript
+const r = await tools.exec_command(args);
+text(r);
+```
 
-- editing another active step/run's surface;
-- changing a shared contract another active owner depends on;
-- consuming another active worker's unfinished result;
-- mutating unsafe shared state;
-- making an architectural decision that invalidates another active assumption;
-- **materially expanding your own step beyond its durable contract**, even if no concurrent owner is involved.
+Before issuing any potentially large-output command, read only the [Large-output command reference](../OPERATOR.md#large-output-command-reference) and choose logging before starting the producer, not after output truncation.
 
-Consolidate related newly discovered scope/authority contradictions into one decision brief. Do not ask for or accumulate a sequence of tiny ad-hoc overlap amendments while continuing to broaden the same worker's write set.
+Inspect the returned value itself. A fulfilled promise or outer `Script completed` does not establish child success: require and interpret the actual `exit_code`, and treat nonzero as process failure even when stdout looks successful. Exit zero proves only process success. A returned `session_id` means the command is ongoing; resume that exact handle with `write_stdin` until a terminal result. Missing or contradictory terminal evidence remains unknown.
 
-Do not quietly broaden because the edit seems easy. Conversely, do not avoid required in-scope work merely because it touches many files; the issue is authorization/ownership, not size.
+For independent calls, use `Promise.allSettled`, inspect every outcome, and retain each fulfilled native value plus a readable rejected reason such as `String(reason)` or its actual error name and message. A rejected in-memory fixture must stay labelled synthetic; do not present it as a genuine tool failure. Retain output-cap and truncation facts from native results and never manufacture replacement log families for raw data that was not captured.
 
-## Design preferences
+A command that can outlive a normal turn must expose a resumable handle, yield at least every four minutes, and stay with this owner until terminal. Yield controls receipt timing, not process lifetime. Claim a timeout only for the operation actually governed by a real deadline, and report its observed settlement; a worker-wide bound or process exit alone does not prove an inner test succeeded or timed out.
 
-- Preserve sound existing architecture.
-- Prefer clear responsibilities, strong interfaces, encapsulation, and explicit dependencies.
-- Prefer composition unless inheritance expresses genuine substitutability/lifecycle.
-- Use polymorphism when real behavior varies behind a stable contract; prefer it to repeated type checks/mode branches when a clean extension point genuinely fits.
-- Extend existing abstractions when semantics match; do not contort them merely to avoid a justified new one.
-- Avoid god objects, duplicate subsystems, hidden global state, leaky layers, shotgun changes, and speculative abstraction.
-- Keep classes/functions/modules cohesive and names precise.
-- Favor testable seams/dependency injection only where they materially reduce coupling.
-- Preserve public contracts unless authority intentionally changes them.
+If a handle/effect cannot be settled, stop new consequential work and send truthful nonterminal `BLOCKED` or `DECISION_REQUIRED`: identify actual owner/attempt, handle/effect, deadline, observed evidence, uncertainty, and one bounded reconciliation action. Mark unknowns; never invent identifiers. Retain custody and cleanup duties. The message does not release, accept, replace, or authorize replay.
 
-**OOP is a tool, not a quota.** Do not manufacture classes, inheritance, factories, managers, services, wrappers, adapters, registries, or interfaces where a simpler existing/functional/data-oriented design is clearer.
+Task-authorized build/test child processes are allowed only within scope and custody. Do not spawn nested agents without separate authority or allow candidate code to create unowned descendants. Async work must settle before FINAL. Interruption, timer tests, process status, or stdout cannot prove absence of external descendants/effects. This guidance provides no OS confinement.
 
-## Anti-overengineering
+## Verification and immutable report
 
-Do not introduce machinery for hypothetical future needs. New abstraction/infrastructure needs a current requirement, real existing variation/reuse problem, or authoritative architectural direction.
+Before PASS, inspect the complete final diff for maintained caller/surface coverage, lifecycle/persistence/integration edges, ownership, reuse, justified complexity, stable public contracts, meaningful behavior tests, and every authoritative acceptance command. Run required final-artifact tests and report each actual result. Apply the [shared evidence applicability rule](../WORKSPACE.md#worker-updates-and-immutable-report): reuse completed proof only while every claim-relevant input and required scope matches, and rerun affected proof after changed inputs. Record failed, skipped, and unavailable checks honestly in distinct receipts; never overwrite a failure log or mask it with a later aggregate.
 
-Avoid speculative frameworks, one-use managers/services/factories, unnecessary compatibility layers, feature flags with no current need, unrelated cleanup, premature extension points, and elaborate test harnesses when existing checks prove the contract.
+Compose the report only from completed receipts using [Worker updates and immutable report](../WORKSPACE.md#worker-updates-and-immutable-report). As the final self-review, inspect the report and every exact evidence pointer against those receipts; do not create a separate recursive report-validation operation or cite future acceptance. Reconcile every owned command/session/effect, then send FINAL. Long output belongs in necessary logs.
 
-Prefer the smallest coherent diff/design that preserves clarity and architecture—not the smallest line count, and not architectural ceremony.
-
-## Implementation
-
-- Make the change end-to-end across the complete affected inventory.
-- Reuse domain objects/utilities when correct rather than cloning logic.
-- If behavior exposes a genuine hole in an existing abstraction, improve that abstraction within scope rather than bolt on a parallel path.
-- Remove obsolete duplicate paths made unnecessary when safe and in scope.
-- Do not broaden into unrelated cleanup/rewrite without authority.
-
-## Verification / self-review
-
-Before terminal PASS, inspect the final diff and ask:
-
-- Did I satisfy full coverage, including indirect/variable-mediated uses?
-- Did I exclude anything as historical without authority?
-- Did I miss a caller, sibling path, lifecycle edge, persistence boundary, or integration surface?
-- Did discovery reveal required work outside my durable step contract that I should have escalated instead of editing?
-- Did concurrent work reveal overlap I should have escalated?
-- Did I duplicate something already present or create a second way to do the same thing?
-- Could this reuse/extend an existing abstraction more cleanly?
-- Is repeated branching hiding a real polymorphic extension point?
-- Is every new abstraction/layer justified now?
-- Is there a materially simpler design with the same correctness/maintainability?
-- Do tests prove behavior/integration rather than implementation trivia?
-- Did I preserve project contracts and avoid regressions?
-
-Fix every issue found, then run the **terminal verification for the final code state once**. Development checks before the final state are working evidence, not parent-facing narrative.
-
-**Never weaken authoritative acceptance to save tokens.** If the step/plan/project requires a full matrix, repeated run, live proof, or exact verification command, perform it exactly as required as part of the terminal verification. Avoid only redundant reruns beyond that contract.
-
-Do not rerun an unchanged expensive broad matrix merely to produce a newer count. If a later code change invalidates proof, rerun what that change makes stale.
-
-## Output / evidence discipline
-
-Do not send intermediate progress. Parent mailbox messages are only:
-
-- `BLOCKED`
-- `DECISION_REQUIRED`
-- `FINAL`
-
-Each message is at most three short lines and points to durable evidence/report paths; never dump logs, inventories, hashes, or implementation narrative into chat.
-
-Long command output goes to a log/evidence file or temporary file. Your report records only check/command, exit/result, useful count, and first relevant failure/red. Cite exact log path when deeper evidence may matter.
-
-**Do not recopy unchanged known-red, residual, root-status, caller-inventory, or acceptance-boundary lists into each report.** Cite the authoritative project/run artifact or one evidence file containing the detailed inventory. Your parent-facing report states only what changed or what is newly relevant.
-
-Do not create per-file hash catalogs unless project authority requires them. Prefer one aggregate fingerprint when drift identity is genuinely needed.
-
-### Terminal report size
-
-The parent-facing Control Block is at most ~12 lines. The entire worker/adversary report should normally stay within **60 lines / ~6 KB**. If evidence is larger, put it in an evidence file and cite exact pointers from the report.
-
-Large caller inventories, raw surveys, long test output, repeated path tables, and hash tables belong outside the parent-facing report.
-
-If a parent decision is required, stop the conflicting work and create one concise decision brief (target ≤30 lines / ~4 KB) with: question, authority, facts, options, recommendation, execution impact, and exact evidence pointers. Consolidate related contradictions from the same bounded investigation rather than sending serial amendments.
-
-## Terminal verification / immutability boundary
-
-The verification in the final Control Block is the terminal snapshot for the exact repository state reported.
-
-After `FINAL`:
-
-- freeze code, tests, generated artifacts, report, counts, and durable evidence referenced by it;
-- make no cleanup, formatting, polish, opportunistic fixes, or post-PASS reruns;
-- do not edit the report to append later parent/gate findings, newer hashes, or revised counts;
-- finalize immediately.
-
-If anything material changes later, the old FINAL artifact remains immutable. Use a new attempt/repair report, perform the appropriate terminal verification for the new state, and FINAL that new artifact.
-
-An adversary follows the same rules. Attack the new risk/delta; if you repair something, verify the impacted surface. Do not blindly replay the implementer's entire broad matrix unless your repair actually invalidates it or authoritative acceptance requires it.
+FINAL freezes this attempt's artifacts, report, and cited evidence, but not parent TASK coordination. Do not edit, polish, rerun for newer counts, or append findings afterward. The parent alone may append a narrowly attributed clerical correction under the [shared report-only rule](../WORKSPACE.md#worker-updates-and-immutable-report), without attributing it to the worker or changing frozen artifacts. A substantive follow-up needs a new attempt and affected terminal proof. FINAL is not acceptance, release, cleanup authority, or proof of custody.
