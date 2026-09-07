@@ -5,6 +5,11 @@ Astra owns planning and acceptance; a bounded native worker owns its assigned
 implementation, verification, report, and logs. This release candidate keeps
 the repository's root-level Codex skill layout and workflow contract `0.1.29`.
 
+An optional [continuous-improvement mode](orchestrator/IMPROVEMENT.md) adds a
+slow strategy loop around fast, acceptance-first delivery for user-authorized
+ongoing plugin improvement. Ordinary engineering keeps the existing low-overhead
+path and does not automatically invoke strategy consultations.
+
 ## Release status
 
 Version `0.2.0-rc.1` is a native-guidance release candidate. The package has
@@ -24,11 +29,63 @@ authority may instead authorize another exact native pair for a specific worker
 purpose. Unsupported or conflicting pairs are refused; there is no probing,
 normalization, fallback, or mid-attempt route change.
 
-## Safe coexistence install
+## Install or update: choose one native delivery channel
 
-The canonical source package remains named `lunacy`. Do not overwrite, move,
-or edit an installed legacy `$lunacy`; it remains the recovery route for its
-existing work. First clone the release outside skill discovery:
+Use either the existing plugin channel or the standalone skill channel, not
+both. They expose different invocation names:
+
+- an installed plugin exposes `lunacy-native:lunacy`;
+- the optional standalone copy below exposes `$lunacy-native`;
+- an installed legacy skill remains `$lunacy`.
+
+Do not overwrite, move, edit, or automatically re-enable a legacy `$lunacy`.
+Its files and disabled state remain intact for recovery under the authority of
+its existing work. If duplicate entries are already visible, disable the
+unintended entry through the supported Codex Plugins or Skills UI rather than
+removing or moving its directory.
+
+### Update an existing plugin (preferred for plugin users)
+
+If `lunacy-native` is already installed as a plugin, keep that delivery channel.
+Do **not** copy this skill into standalone discovery as an update.
+
+First use `codex plugin list` and the installed `plugin-creator` guidance to
+confirm the enabled `lunacy-native@<marketplace>` identity, that its marketplace
+is local, and that its entry points at the plugin source you intend to edit.
+Do not assume the marketplace is named `personal`. From the installed
+`plugin-creator` skill root, validate that source, read the name from its actual
+marketplace file, replace the manifest cachebuster, and reinstall the same
+identity:
+
+```sh
+python3 scripts/validate_plugin.py /path/to/existing/lunacy-native-plugin || exit
+python3 scripts/read_marketplace_name.py \
+  --marketplace-path /path/to/actual/marketplace.json || exit
+python3 scripts/update_plugin_cachebuster.py \
+  /path/to/existing/lunacy-native-plugin || exit
+codex plugin add 'lunacy-native@<validated-marketplace-name>'
+```
+
+For the default personal marketplace file, follow `plugin-creator` and omit
+`--marketplace-path`; it is discovered implicitly and must not be added again.
+For a different marketplace, follow its documented configured-local-marketplace
+checks. Stop if the selected entry is remote or points at another source; this
+update flow does not rewrite marketplace or Codex configuration. Start a new
+task after reinstall so Codex loads the updated plugin, then invoke
+`lunacy-native:lunacy`.
+
+To roll back a plugin update, restore the previously accepted plugin source and
+repeat the same validated cachebuster/reinstall flow for the same identity.
+That does not authorize enabling, deleting, moving, or migrating any standalone
+or legacy installation.
+
+### Install a standalone skill instead
+
+Use this alternative only when no native plugin is enabled and standalone
+installation is the selected delivery channel. The canonical source skill
+remains named `lunacy`. Clone the release outside skill discovery; this public
+root-level skill checkout is copy source, not a directly installable plugin
+package:
 
 ```sh
 git clone --branch release/native-0.2.0-rc.1 --single-branch \
@@ -36,8 +93,10 @@ git clone --branch release/native-0.2.0-rc.1 --single-branch \
   /path/to/lunacy-native-source
 ```
 
-For coexistence, refuse an existing destination, copy this public skill tree to
-`${CODEX_HOME:-$HOME/.codex}/skills/lunacy-native`, and change exactly the
+The shell guard below checks only whether its filesystem destination already
+exists; it does not inspect enabled skills or plugins. It refuses an existing
+destination, copies this public skill tree to
+`${CODEX_HOME:-$HOME/.codex}/skills/lunacy-native`, and changes exactly the
 frontmatter `name: lunacy` line in the copied `SKILL.md` to
 `name: lunacy-native`. Do not change the source checkout's canonical name or
 mix files from the legacy installation. No installer or automatic cutover is
@@ -67,12 +126,14 @@ path.write_text(text.replace(old, "name: lunacy-native\n"), encoding="utf-8")
 PY
 ```
 
-Invoke `$lunacy-native` only for genuinely new work whose current project/user
-authority explicitly adopts workflow contract `0.1.29`. Existing work remains
+Start a new task after copying, and invoke `$lunacy-native` only for genuinely
+new work whose current project/user authority explicitly adopts workflow
+contract `0.1.29`. Existing work remains
 on `$lunacy` and its original contract, route, history, effects, and recovery
-owner; installation never migrates it. Roll back the native candidate by
-removing only its separate inactive directory after establishing that no
-active or uncertain owner depends on it. The legacy directory stays intact.
+owner; installation never migrates it. Roll back this standalone mode only by
+removing its separate inactive `lunacy-native` directory after establishing
+that no active or uncertain owner depends on it. This does not authorize any
+plugin change. Legacy files and their disabled state stay intact.
 
 ## Validate
 
@@ -93,6 +154,8 @@ captured, authorized JSONL file and never launches models or changes evidence.
 - [WORKSPACE.md](WORKSPACE.md) — authority, ownership, records, and acceptance.
 - [orchestrator/PLANNING.md](orchestrator/PLANNING.md) — Astra planning,
   dispatch, deadline, and recovery rules.
+- [orchestrator/IMPROVEMENT.md](orchestrator/IMPROVEMENT.md) — optional
+  execution-first continuous-improvement mode.
 - [worker/ENGINEERING.md](worker/ENGINEERING.md) — worker execution contract.
 - [OPERATOR.md](OPERATOR.md) — large-output recipe and observer reference.
 - [`scripts/evidence_index.py`](scripts/evidence_index.py) — bounded read-only

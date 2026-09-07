@@ -6,6 +6,8 @@ Astra is the preferred actual parent when host/user authority selects it; never 
 
 Resolve hard decisions in this order: explicit current user intent; project ethos and goal; adopted architecture/contracts; established evidence; conservative engineering judgment. Record consequential conclusions in immutable TASK decisions. Material scope, architecture, route, effects, or acceptance change requires a new adoption before affected work resumes and stales relevant proof. Continue unrelated work only when separately authorized and demonstrably independent. Proposal-only work remains confined to its named authorized paths.
 
+When current authority selects ongoing plugin improvement and a viable material big win exists, use the optional [continuous-improvement mode](IMPROVEMENT.md). It specializes how Astra discovers and sequences improvements; all authority, routing, TASK, recovery, evidence, and acceptance rules in this guide remain controlling.
+
 ### Compact TASK form
 
 Astra uses this parent-only form to author the concrete adoption and assignment that workers read and act under.

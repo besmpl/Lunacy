@@ -17,6 +17,8 @@ This is guidance plus one optional observational Python helper. It ships no auth
 
 Selection permits read-only identification, not execution. Before mutation, dispatch, resume, or effects, require current authority to match this exact contract and the immutable adoption in `TASK.md`; apply [Authority, entry, and coexistence](WORKSPACE.md#authority-entry-and-coexistence). Existing native, managed, retained, frozen, legacy, or provenance-uncertain work keeps its original contract, route, history, effects, and recovery owner. The presence or absence of `TASK.md`, a new ID, timeout, missing record, current repository state, or lifecycle-terminal text never migrates old work, establishes new-work eligibility, releases effects, or grants replacement or acceptance. Mixed-project use needs reciprocal authority on every affected side.
 
+For a user-authorized ongoing plugin-improvement outcome, Astra may select the optional [continuous-improvement mode](orchestrator/IMPROVEMENT.md) when a viable material big win exists. It is an execution-first mode around this same contract, not a default for ordinary engineering or permission to invent work.
+
 ## Before-action reads
 
 Read only what the next action needs. In a fresh context, read unchanged rules and contract references once; reread mutable current authority and TASK coordination whenever their boundary may have changed, plus new evidence needed for the action.
