@@ -21,8 +21,8 @@ An invocation such as `choose workers; <outcome>` requests the launch selector.
 An explicit `Workers: bulk = MODEL / EFFORT; judgment = MODEL / EFFORT` supplies
 selections directly. Ordinary invocations preserve both defaults without a
 mandatory question or catalog call. Changing only one role preserves the other.
-Worker settings do not change the actual parent, ADHD agents, or exact Web Pro
-consultation route; those need their own explicit authority.
+Worker settings do not change the actual parent, ADHD agents, or separately
+selected consultation route; those need their own explicit authority.
 
 ## Conversational selector backed by the live catalog
 
@@ -85,8 +85,12 @@ refuse; finite rounding and underflow retain Python JSON behavior. Offline
 `resolve` retains its text-stream output and does not acquire an output-size cap.
 It does not start a model turn, install anything, or change model settings.
 Use `--codex /absolute/path/to/codex` when the default executable is not the
-intended host. Local stdio catalog collection requires a supported platform;
-an exported complete native catalog can instead feed offline `resolve`.
+intended host. Local stdio catalog collection requires a supported platform. An
+exported complete native catalog can instead feed offline `resolve`, but it does
+not bypass the offline reader's filesystem prerequisites: the reader still
+needs the supported nonblocking capability (`os.O_NONBLOCK`). If that capability
+is absent, refuse before acquisition rather than replacing it with blocking I/O;
+this wording does not promise Windows support or a portable transport.
 
 After the user selects exact pairs, validate the snapshot without starting any
 process or model:

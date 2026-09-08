@@ -119,27 +119,43 @@ def _validate_catalog(value: Any) -> tuple[list[dict[str, Any]], dict[str, dict[
 
 def _read_catalog(path_text: str) -> Any:
     path = Path(path_text)
-    flags = os.O_RDONLY | os.O_NONBLOCK
+    nonblocking = getattr(os, "O_NONBLOCK", None)
+    if nonblocking is None:
+        raise WorkerModelError("nonblocking file acquisition is unavailable on this platform")
+    flags = os.O_RDONLY | nonblocking
     if hasattr(os, "O_CLOEXEC"):
         flags |= os.O_CLOEXEC
     try:
         descriptor = os.open(path, flags)
     except OSError as exc:
         raise WorkerModelError(f"catalog is unreadable: {exc.strerror}") from exc
+    primary: BaseException | None = None
     try:
-        info = os.fstat(descriptor)
-        if not stat.S_ISREG(info.st_mode):
-            raise WorkerModelError("catalog must be a regular file")
-        if info.st_size > CATALOG_CAP:
-            raise WorkerModelError(f"catalog exceeds {CATALOG_CAP}-byte limit")
-        with os.fdopen(descriptor, "rb") as source:
-            descriptor = -1
-            data = source.read(CATALOG_CAP + 1)
-    except OSError as exc:
-        raise WorkerModelError(f"catalog is unreadable: {exc.strerror}") from exc
+        try:
+            info = os.fstat(descriptor)
+            if not stat.S_ISREG(info.st_mode):
+                raise WorkerModelError("catalog must be a regular file")
+            if info.st_size > CATALOG_CAP:
+                raise WorkerModelError(f"catalog exceeds {CATALOG_CAP}-byte limit")
+            with os.fdopen(descriptor, "rb") as source:
+                descriptor = -1
+                data = source.read(CATALOG_CAP + 1)
+        except OSError as exc:
+            raise WorkerModelError(f"catalog is unreadable: {exc.strerror}") from exc
+    except BaseException as exc:
+        primary = exc
+        raise
     finally:
         if descriptor >= 0:
-            os.close(descriptor)
+            try:
+                os.close(descriptor)
+            except OSError as exc:
+                if primary is None:
+                    detail = exc.strerror or str(exc) or type(exc).__name__
+                    raise WorkerModelError(f"catalog descriptor close failed: {detail}") from exc
+                primary._cleanup_errors = getattr(primary, "_cleanup_errors", []) + [("catalog-close", exc)]
+                if not isinstance(primary, WorkerModelError) and hasattr(primary, "add_note"):
+                    primary.add_note(f"catalog cleanup incomplete (catalog-close:{type(exc).__name__})")
     if len(data) > CATALOG_CAP:
         raise WorkerModelError(f"catalog exceeds {CATALOG_CAP}-byte limit")
     return _decode(data, "catalog")
@@ -168,12 +184,14 @@ def resolve_roles(catalog: Any, args: argparse.Namespace) -> dict[str, Any]:
         custom_model = getattr(args, f"{role}_model")
         custom_effort = getattr(args, f"{role}_effort")
         default_model, default_effort, alias = ROLE_DEFAULTS[role]
-        query = custom_model if custom_model is not None else default_model
-        dispatch_model, item = _find_model(query, by_model)
         if custom_model is None:
+            if default_model not in by_model:
+                raise WorkerModelError(f"canonical default model is unavailable: {default_model}")
+            dispatch_model, item = default_model, by_model[default_model]
             effort = custom_effort if custom_effort is not None else default_effort
             selection = "explicit" if custom_effort is not None else "named-default"
         else:
+            dispatch_model, item = _find_model(custom_model, by_model)
             if custom_effort is not None:
                 effort = custom_effort
             elif args.use_catalog_default_effort:
@@ -437,9 +455,10 @@ def main(argv: list[str] | None = None) -> int:
             stages = ",".join(f"{stage}:{type(error).__name__}" for stage, error in cleanup)
             context = f"failure; cleanup incomplete ({stages}): "
         message = f"worker-models: {context}{exc}".replace("\n", "\\n").replace("\r", "\\r")
-        encoded = (message + "\n").encode("utf-8", "replace")[:DIAGNOSTIC_CAP]
-        if not encoded.endswith(b"\n"):
-            encoded = encoded[:-1] + b"\n"
+        body = message.encode("utf-8", "replace")
+        if len(body) > DIAGNOSTIC_CAP - 1:
+            body = body[:DIAGNOSTIC_CAP - 1].decode("utf-8", "ignore").encode("utf-8")
+        encoded = body + b"\n"
         sys.stderr.buffer.write(encoded)
         return 2
 

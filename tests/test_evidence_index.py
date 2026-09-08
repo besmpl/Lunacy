@@ -1,4 +1,6 @@
 import hashlib
+import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -6,11 +8,21 @@ import stat
 import subprocess
 import sys
 import tempfile
+import types
 import unittest
+from unittest.mock import Mock, patch
 
 
 REPOSITORY = Path(__file__).resolve().parents[1]
 SCRIPT = REPOSITORY / "scripts/evidence_index.py"
+
+
+def load_evidence_index():
+    spec = importlib.util.spec_from_file_location("evidence_index_under_test", SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
 
 
 def event(method, thread="thread", turn="turn", item="item", *, status=None, exit_code=None, output=None):
@@ -27,9 +39,22 @@ class EvidenceIndexTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.base = Path(self.temp.name)
+        self.open_descriptors = []
+        self.real_close = os.close
 
     def tearDown(self):
+        for descriptor in self.open_descriptors:
+            try:
+                self.real_close(descriptor)
+            except OSError:
+                pass
         self.temp.cleanup()
+
+    def fail_close(self, error):
+        def fail(descriptor):
+            self.open_descriptors.append(descriptor)
+            raise error
+        return fail
 
     def write(self, records, name="events.jsonl"):
         path = self.base / name
@@ -166,6 +191,158 @@ class EvidenceIndexTests(unittest.TestCase):
         result = self.invoke(fifo)
         self.assertEqual(result.returncode, 2)
         self.assertIn("regular file", result.stderr)
+
+    def test_missing_nonblocking_capability_refuses_before_open(self):
+        module = load_evidence_index()
+        source = self.write([])
+        attempted_open = Mock(side_effect=AssertionError("open must not run"))
+        values = {
+            "O_RDONLY": module.os.O_RDONLY,
+            "open": attempted_open,
+            "fstat": module.os.fstat,
+            "read": module.os.read,
+            "close": module.os.close,
+            "fspath": module.os.fspath,
+        }
+        if hasattr(module.os, "O_CLOEXEC"):
+            values["O_CLOEXEC"] = module.os.O_CLOEXEC
+        replacement = types.SimpleNamespace(**values)
+        output = io.TextIOWrapper(io.BytesIO(), encoding="utf-8")
+        error = io.TextIOWrapper(io.BytesIO(), encoding="utf-8")
+        argv = [os.fspath(SCRIPT), os.fspath(source), "--thread-id", "thread", "--turn-id", "turn"]
+        with patch.object(module, "os", replacement), patch.object(module.sys, "argv", argv), patch.object(
+            module.sys, "stdout", output
+        ), patch.object(module.sys, "stderr", error):
+            status = module.main()
+        self.assertEqual(status, 2)
+        self.assertEqual(output.buffer.getvalue(), b"")
+        self.assertIn(b"nonblocking file acquisition is unavailable", error.buffer.getvalue())
+        attempted_open.assert_not_called()
+
+    def test_snapshot_close_failure_after_read_is_normalized_once(self):
+        module = load_evidence_index()
+        source = self.write([])
+        close_error = OSError("close failed")
+        with patch.object(module.os, "close", side_effect=self.fail_close(close_error)) as close:
+            with self.assertRaises(module.EvidenceError) as caught:
+                module.read_snapshot(str(source))
+        close.assert_called_once()
+        self.assertIs(caught.exception.__cause__, close_error)
+        self.assertIn("source descriptor close failed", str(caught.exception))
+
+        module = load_evidence_index()
+        output = io.TextIOWrapper(io.BytesIO(), encoding="utf-8")
+        error = io.TextIOWrapper(io.BytesIO(), encoding="utf-8")
+        argv = [os.fspath(SCRIPT), os.fspath(source), "--thread-id", "thread", "--turn-id", "turn"]
+        with patch.object(module.os, "close", side_effect=self.fail_close(OSError("é" * 1000))), patch.object(
+            module.sys, "argv", argv
+        ), patch.object(module.sys, "stdout", output), patch.object(module.sys, "stderr", error):
+            self.assertEqual(module.main(), 2)
+        self.assertEqual(output.buffer.getvalue(), b"")
+        diagnostic = error.buffer.getvalue()
+        self.assertIn(b"source descriptor close failed", diagnostic)
+        self.assertIn("é".encode(), diagnostic)
+        self.assertLessEqual(len(diagnostic), 512)
+        self.assertTrue(diagnostic.endswith(b"\n"))
+        diagnostic.decode("utf-8", "strict")
+
+    def test_snapshot_primary_failure_survives_secondary_close_failure(self):
+        module = load_evidence_index()
+        source = self.write([])
+        read_error = OSError("read failed")
+        close_error = OSError("close failed")
+        with patch.object(module.os, "read", side_effect=read_error), patch.object(
+            module.os, "close", side_effect=self.fail_close(close_error)
+        ) as close:
+            with self.assertRaises(module.EvidenceError) as caught:
+                module.read_snapshot(str(source))
+        close.assert_called_once()
+        self.assertIs(caught.exception.__cause__, read_error)
+        self.assertIs(caught.exception._cleanup_errors[0][1], close_error)
+        self.assertIn("source-close:OSError", str(caught.exception))
+
+    def test_long_multibyte_primary_keeps_cleanup_stage_within_each_diagnostic_cap(self):
+        source = self.write([])
+        for cap in (256, 512):
+            with self.subTest(cap=cap):
+                module = load_evidence_index()
+                read_error = OSError(5, "😀" * 120)
+                close_error = OSError("close failed")
+                with patch.object(module.os, "read", side_effect=read_error), patch.object(
+                    module.os, "close", side_effect=self.fail_close(close_error)
+                ) as close:
+                    with self.assertRaises(module.EvidenceError) as caught:
+                        module.read_snapshot(str(source))
+                close.assert_called_once()
+                self.assertIs(caught.exception.__cause__, read_error)
+                self.assertIs(caught.exception._cleanup_errors[0][1], close_error)
+
+                module = load_evidence_index()
+                output = io.TextIOWrapper(io.BytesIO(), encoding="utf-8")
+                error = io.TextIOWrapper(io.BytesIO(), encoding="utf-8")
+                argv = [
+                    os.fspath(SCRIPT), os.fspath(source), "--thread-id", "thread",
+                    "--turn-id", "turn", "--output-cap", str(cap),
+                ]
+                with patch.object(module.os, "read", side_effect=OSError(5, "😀" * 120)), patch.object(
+                    module.os, "close", side_effect=self.fail_close(OSError("close failed"))
+                ) as close, patch.object(module.sys, "argv", argv), patch.object(
+                    module.sys, "stdout", output
+                ), patch.object(module.sys, "stderr", error):
+                    self.assertEqual(module.main(), 2)
+                close.assert_called_once()
+                self.assertEqual(output.buffer.getvalue(), b"")
+                diagnostic = error.buffer.getvalue()
+                self.assertIn(b"source is unreadable", diagnostic)
+                self.assertIn(b"source-close:OSError", diagnostic)
+                self.assertLessEqual(len(diagnostic), cap)
+                self.assertEqual(diagnostic.count(b"\n"), 1)
+                self.assertTrue(diagnostic.endswith(b"\n"))
+                diagnostic.decode("utf-8", "strict")
+
+    def test_snapshot_opened_fstat_and_type_failures_retain_close_context(self):
+        source = self.write([])
+        for stage in ("fstat", "invalid-type"):
+            with self.subTest(stage=stage):
+                module = load_evidence_index()
+                close_error = OSError("close failed")
+                fstat_effect = OSError("fstat failed") if stage == "fstat" else self.base.stat()
+                with patch.object(module.os, "fstat", side_effect=fstat_effect if isinstance(fstat_effect, OSError) else None,
+                                  return_value=None if isinstance(fstat_effect, OSError) else fstat_effect), patch.object(
+                    module.os, "close", side_effect=self.fail_close(close_error)
+                ) as close:
+                    with self.assertRaises(module.EvidenceError) as caught:
+                        module.read_snapshot(str(source))
+                close.assert_called_once()
+                self.assertIs(caught.exception._cleanup_errors[0][1], close_error)
+                self.assertIn("source-close:OSError", str(caught.exception))
+
+    def test_snapshot_interruption_identity_survives_secondary_close_failure(self):
+        source = self.write([])
+        for primary in (KeyboardInterrupt(), SystemExit(9), RuntimeError("unexpected")):
+            with self.subTest(primary=type(primary).__name__):
+                module = load_evidence_index()
+                close_error = OSError("close failed")
+                with patch.object(module.os, "read", side_effect=primary), patch.object(
+                    module.os, "close", side_effect=self.fail_close(close_error)
+                ) as close:
+                    with self.assertRaises(type(primary)) as caught:
+                        module.read_snapshot(str(source))
+                close.assert_called_once()
+                self.assertIs(caught.exception, primary)
+                self.assertIs(caught.exception._cleanup_errors[0][1], close_error)
+                if isinstance(primary, RuntimeError):
+                    self.assertIn("source cleanup incomplete", primary.__notes__[0])
+
+    def test_snapshot_open_failure_does_not_attempt_close(self):
+        module = load_evidence_index()
+        source = self.write([])
+        with patch.object(module.os, "open", side_effect=OSError("open failed")), patch.object(
+            module.os, "close"
+        ) as close:
+            with self.assertRaises(module.EvidenceError):
+                module.read_snapshot(str(source))
+        close.assert_not_called()
 
     def test_invalid_utf8_directory_and_oversize_refuse(self):
         invalid = self.base / "invalid.jsonl"

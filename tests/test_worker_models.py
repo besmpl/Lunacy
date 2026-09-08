@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import types
 import unittest
 
 
@@ -169,6 +170,72 @@ class WorkerModelsTests(unittest.TestCase):
         self.assertEqual(output["roles"]["judgment"]["namedAlias"], "sol-medium")
         same = self.resolve("--bulk-effort", "max")
         self.assertEqual(same["roles"]["bulk"]["namedAlias"], "luna")
+
+    def test_implicit_defaults_require_canonical_catalog_rows(self):
+        for role in ("bulk", "judgment"):
+            missing = "gpt-5.6-luna" if role == "bulk" else "gpt-5.6-sol"
+            collision = "gpt-5.6-sol" if role == "bulk" else "gpt-5.6-luna"
+            for alias_field in ("id", "displayName"):
+                for effort_only in (False, True):
+                    with self.subTest(role=role, alias_field=alias_field, effort_only=effort_only):
+                        catalog = complete_catalog()
+                        catalog["data"] = [row for row in catalog["data"] if row["model"] != missing]
+                        row = next(row for row in catalog["data"] if row["model"] == collision)
+                        row[alias_field] = missing
+                        arguments = [f"--{role}-effort", "high"] if effort_only else []
+                        result = self.invoke(
+                            "resolve", "--catalog", self.write_catalog(
+                                catalog, f"missing-{role}-{alias_field}-{effort_only}.json"
+                            ), *arguments,
+                        )
+                        self.assertEqual(result.returncode, 2)
+                        self.assertEqual(result.stdout, "")
+                        self.assertIn("canonical default", result.stderr)
+                        self.assertIn(missing, result.stderr)
+                        self.assertNotIn("does not support reasoning effort", result.stderr)
+
+    def test_catalog_default_effort_switch_does_not_substitute_implicit_model(self):
+        for role, missing, collision in (
+            ("bulk", "gpt-5.6-luna", "gpt-5.6-sol"),
+            ("judgment", "gpt-5.6-sol", "gpt-5.6-luna"),
+        ):
+            for alias_field in ("id", "displayName"):
+                catalog = complete_catalog()
+                catalog["data"] = [row for row in catalog["data"] if row["model"] != missing]
+                next(row for row in catalog["data"] if row["model"] == collision)[alias_field] = missing
+                result = self.invoke(
+                    "resolve", "--catalog", self.write_catalog(catalog, f"switch-{role}-{alias_field}.json"),
+                    "--use-catalog-default-effort",
+                )
+                self.assertEqual(result.returncode, 2)
+                self.assertEqual(result.stdout, "")
+                self.assertIn("canonical default", result.stderr)
+
+    def test_present_implicit_canonical_default_wins_over_colliding_alias(self):
+        for alias_field in ("id", "displayName"):
+            catalog = complete_catalog()
+            catalog["data"][0]["id"] = "picker/luna"
+            catalog["data"][2][alias_field] = "gpt-5.6-luna"
+            result = self.resolve(catalog=catalog)
+            self.assertEqual(result["roles"]["bulk"]["model"], "gpt-5.6-luna")
+            self.assertEqual(result["roles"]["bulk"]["namedAlias"], "luna")
+
+    def test_explicit_alias_remains_available_when_spelling_matches_missing_default(self):
+        for role, missing, collision in (
+            ("bulk", "gpt-5.6-luna", "gpt-5.6-sol"),
+            ("judgment", "gpt-5.6-sol", "gpt-5.6-luna"),
+        ):
+            for alias_field in ("id", "displayName"):
+                catalog = complete_catalog()
+                catalog["data"] = [row for row in catalog["data"] if row["model"] != missing]
+                next(row for row in catalog["data"] if row["model"] == collision)[alias_field] = missing
+                result = self.resolve(
+                    f"--{role}-model", missing, f"--{role}-effort", "high", catalog=catalog
+                )
+                self.assertEqual(result["roles"][role]["model"], collision)
+                self.assertEqual(result["roles"][role]["effort"], "high")
+                self.assertEqual(result["roles"][role]["selection"], "explicit")
+                self.assertIsNone(result["roles"][role]["namedAlias"])
 
     def test_unsupported_pair_refuses(self):
         path = self.write_catalog()
@@ -573,6 +640,210 @@ class PublicationBoundaryTests(unittest.TestCase):
                 self.assertEqual(m.main(["catalog", "--codex", str(fake)]), 2)
             self.assertEqual(output.buffer.getvalue(), b"")
             self.assertIn(b"strict JSON", error.buffer.getvalue())
+
+
+class OfflineCatalogBoundaryTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.path = Path(self.temp.name) / "catalog.json"
+        self.path.write_text(json.dumps(complete_catalog()), encoding="utf-8")
+        self.open_descriptors = []
+        self.real_close = os.close
+
+    def tearDown(self):
+        for descriptor in self.open_descriptors:
+            try:
+                self.real_close(descriptor)
+            except OSError:
+                pass
+        self.temp.cleanup()
+
+    def fail_close(self, error):
+        def fail(descriptor):
+            self.open_descriptors.append(descriptor)
+            raise error
+        return fail
+
+    @staticmethod
+    def os_without_nonblock(module, open_mock):
+        values = {
+            "O_RDONLY": module.os.O_RDONLY,
+            "open": open_mock,
+            "fstat": module.os.fstat,
+            "fdopen": module.os.fdopen,
+            "close": module.os.close,
+        }
+        if hasattr(module.os, "O_CLOEXEC"):
+            values["O_CLOEXEC"] = module.os.O_CLOEXEC
+        return types.SimpleNamespace(**values)
+
+    def test_missing_nonblocking_capability_refuses_before_open(self):
+        m = load_worker_models()
+        attempted_open = Mock(side_effect=AssertionError("open must not run"))
+        output = io.TextIOWrapper(io.BytesIO(), encoding="utf-8")
+        error = io.TextIOWrapper(io.BytesIO(), encoding="utf-8")
+        replacement = self.os_without_nonblock(m, attempted_open)
+        with patch.object(m, "os", replacement), patch.object(m.sys, "stdout", output), patch.object(m.sys, "stderr", error):
+            status = m.main(["resolve", "--catalog", str(self.path)])
+        self.assertEqual(status, 2)
+        self.assertEqual(output.buffer.getvalue(), b"")
+        self.assertIn(b"nonblocking file acquisition is unavailable", error.buffer.getvalue())
+        attempted_open.assert_not_called()
+
+    def test_primary_catalog_failure_survives_secondary_close_failure(self):
+        m = load_worker_models()
+        read_error = OSError("fstat failed")
+        close_error = OSError("close failed")
+        with patch.object(m.os, "fstat", side_effect=read_error), patch.object(
+            m.os, "close", side_effect=self.fail_close(close_error)
+        ) as close:
+            with self.assertRaises(m.WorkerModelError) as caught:
+                m._read_catalog(str(self.path))
+        close.assert_called_once()
+        self.assertIs(caught.exception.__cause__, read_error)
+        self.assertIs(caught.exception._cleanup_errors[0][1], close_error)
+        self.assertEqual(caught.exception._cleanup_errors[0][0], "catalog-close")
+
+        output = io.TextIOWrapper(io.BytesIO(), encoding="utf-8")
+        error = io.TextIOWrapper(io.BytesIO(), encoding="utf-8")
+        m = load_worker_models()
+        with patch.object(m.os, "fstat", side_effect=OSError("fstat failed")), patch.object(
+            m.os, "close", side_effect=self.fail_close(OSError("close failed"))
+        ), patch.object(m.sys, "stdout", output), patch.object(m.sys, "stderr", error):
+            self.assertEqual(m.main(["resolve", "--catalog", str(self.path)]), 2)
+        self.assertEqual(output.buffer.getvalue(), b"")
+        diagnostic = error.buffer.getvalue()
+        self.assertIn(b"cleanup incomplete (catalog-close:OSError)", diagnostic)
+        self.assertLessEqual(len(diagnostic), 512)
+        diagnostic.decode("utf-8", "strict")
+
+    def test_raw_close_precedence_at_validation_and_fdopen_boundaries(self):
+        for stage in ("invalid-type", "oversize", "fdopen"):
+            with self.subTest(stage=stage):
+                m = load_worker_models()
+                close_error = OSError("close failed")
+                patches = [patch.object(m.os, "close", side_effect=self.fail_close(close_error))]
+                if stage == "invalid-type":
+                    patches.append(patch.object(m.os, "fstat", return_value=self.path.parent.stat()))
+                elif stage == "oversize":
+                    patches.append(patch.object(
+                        m.os, "fstat", return_value=types.SimpleNamespace(st_mode=self.path.stat().st_mode, st_size=m.CATALOG_CAP + 1)
+                    ))
+                else:
+                    patches.append(patch.object(m.os, "fdopen", side_effect=OSError("fdopen failed")))
+                with patches[0] as close, patches[1]:
+                    with self.assertRaises(m.WorkerModelError) as caught:
+                        m._read_catalog(str(self.path))
+                close.assert_called_once()
+                self.assertIs(caught.exception._cleanup_errors[0][1], close_error)
+                if stage == "fdopen":
+                    self.assertIsInstance(caught.exception.__cause__, OSError)
+
+    def test_catalog_interruption_identity_survives_secondary_close_failure(self):
+        for primary in (KeyboardInterrupt(), SystemExit(9), RuntimeError("unexpected")):
+            with self.subTest(primary=type(primary).__name__):
+                m = load_worker_models()
+                close_error = OSError("close failed")
+                with patch.object(m.os, "fstat", side_effect=primary), patch.object(
+                    m.os, "close", side_effect=self.fail_close(close_error)
+                ) as close:
+                    with self.assertRaises(type(primary)) as caught:
+                        m._read_catalog(str(self.path))
+                close.assert_called_once()
+                self.assertIs(caught.exception, primary)
+                self.assertIs(caught.exception._cleanup_errors[0][1], close_error)
+                if isinstance(primary, RuntimeError):
+                    self.assertIn("catalog cleanup incomplete", primary.__notes__[0])
+
+    def test_open_failure_does_not_close_and_stream_transfer_skips_raw_close(self):
+        m = load_worker_models()
+        with patch.object(m.os, "open", side_effect=OSError("open failed")), patch.object(m.os, "close") as close:
+            with self.assertRaises(m.WorkerModelError):
+                m._read_catalog(str(self.path))
+        close.assert_not_called()
+        m = load_worker_models()
+        with patch.object(m.os, "close") as close:
+            self.assertEqual(m._read_catalog(str(self.path)), complete_catalog())
+        close.assert_not_called()
+
+
+class WorkerDiagnosticUtf8Tests(unittest.TestCase):
+    PREFIX = "worker-models: "
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def fixture(self, key, name):
+        quoted = json.dumps(key, ensure_ascii=True)
+        path = self.root / name
+        path.write_text(f"{{{quoted}:1,{quoted}:2}}", encoding="utf-8")
+        return path
+
+    @classmethod
+    def expected(cls, key, cap=512):
+        body = (cls.PREFIX + f"duplicate JSON object key: {key}").replace("\n", "\\n").replace("\r", "\\r")
+        retained = bytearray()
+        for character in body:
+            encoded = character.encode("utf-8", "replace")
+            if len(retained) + len(encoded) > cap - 1:
+                break
+            retained.extend(encoded)
+        return bytes(retained) + b"\n"
+
+    def invoke(self, path):
+        return subprocess.run(
+            [sys.executable, "-B", os.fspath(SCRIPT), "resolve", "--catalog", os.fspath(path)],
+            capture_output=True, timeout=5, check=False,
+        )
+
+    def assert_diagnostic(self, key, name):
+        result = self.invoke(self.fixture(key, name))
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(result.stdout, b"")
+        self.assertEqual(result.stderr, self.expected(key))
+        self.assertLessEqual(len(result.stderr), 512)
+        self.assertEqual(result.stderr.count(b"\n"), 1)
+        result.stderr.decode("utf-8", "strict")
+
+    def boundary_key(self, character, offset):
+        marker = f"{self.PREFIX}duplicate JSON object key: "
+        for padding in range(16):
+            key = "p" * padding + character * 300
+            if (511 - len((marker + "p" * padding).encode())) % len(character.encode()) == offset:
+                self.assertGreater(len((marker + key).encode()), 512)
+                return key
+        self.fail("unable to align diagnostic boundary")
+
+    def test_all_six_interior_multibyte_boundaries(self):
+        for label, character, offset in (
+            ("two-1", "é", 1), ("three-1", "€", 1), ("three-2", "€", 2),
+            ("four-1", "😀", 1), ("four-2", "😀", 2), ("four-3", "😀", 3),
+        ):
+            with self.subTest(case=label):
+                self.assert_diagnostic(self.boundary_key(character, offset), label + ".json")
+
+    def test_exact_fit_one_over_ascii_unicode_and_replacement_controls(self):
+        prefix_bytes = len((self.PREFIX + "duplicate JSON object key: ").encode())
+        exact = "x" * (511 - prefix_bytes)
+        self.assertEqual(len(self.expected(exact)), 512)
+        self.assert_diagnostic(exact, "exact.json")
+        self.assert_diagnostic(exact + "x", "one-over.json")
+        for label, key in (
+            ("ascii", "x" * 900),
+            ("unicode", "café-项目-😀"),
+            ("aligned-two", "é" * 300),
+            ("aligned-three", "€" * 300),
+            ("aligned-four", "😀" * 300),
+            ("replacement", "�" * 300),
+            ("surrogate", "\ud800" * 300),
+            ("escaped-lines", "a\nb\rc" * 150),
+        ):
+            with self.subTest(case=label):
+                self.assert_diagnostic(key, label + ".json")
 
 
 if __name__ == "__main__":

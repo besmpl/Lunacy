@@ -27,6 +27,11 @@ SESSION_NON_CLAIMS = [
     "The count covers selected captured CommandExecution completions, not all commands, tools, effects, or capture completeness.",
     "Source-associated context does not establish route or backend truth, deadline correctness, custody, report correctness, semantic acceptance, or work completeness.",
 ]
+DIRECT_EXEC_NON_CLAIMS = [
+    "Commands are grouped only by literal item ID; observations are not paired, deduplicated, or interpreted as a lifecycle.",
+    "Counts describe selected observations in this finite snapshot only, not producer or capture completeness.",
+    "This projection does not establish acceptance, route or model identity, custody, effects, retry safety, semantic success, or work completeness.",
+]
 
 
 class EvidenceError(Exception):
@@ -76,32 +81,50 @@ def read_snapshot(path_text: str) -> tuple[Path, bytes, str]:
         raise EvidenceError("source must be a regular file")
     if before.st_size > INPUT_CAP:
         raise EvidenceError(f"source exceeds {INPUT_CAP}-byte input cap")
-    flags = os.O_RDONLY | os.O_NONBLOCK
+    nonblocking = getattr(os, "O_NONBLOCK", None)
+    if nonblocking is None:
+        raise EvidenceError("nonblocking file acquisition is unavailable on this platform")
+    flags = os.O_RDONLY | nonblocking
     if hasattr(os, "O_CLOEXEC"):
         flags |= os.O_CLOEXEC
     descriptor = None
+    primary: BaseException | None = None
     try:
-        descriptor = os.open(path, flags)
-        opened = os.fstat(descriptor)
-        if not stat.S_ISREG(opened.st_mode):
-            raise EvidenceError("source must be a regular file")
-        chunks = []
-        remaining = INPUT_CAP + 1
-        while remaining:
-            chunk = os.read(descriptor, min(1024 * 1024, remaining))
-            if not chunk:
-                break
-            chunks.append(chunk)
-            remaining -= len(chunk)
-        data = b"".join(chunks)
-        after = os.fstat(descriptor)
-    except EvidenceError:
+        try:
+            descriptor = os.open(path, flags)
+            opened = os.fstat(descriptor)
+            if not stat.S_ISREG(opened.st_mode):
+                raise EvidenceError("source must be a regular file")
+            chunks = []
+            remaining = INPUT_CAP + 1
+            while remaining:
+                chunk = os.read(descriptor, min(1024 * 1024, remaining))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                remaining -= len(chunk)
+            data = b"".join(chunks)
+            after = os.fstat(descriptor)
+        except EvidenceError:
+            raise
+        except OSError as exc:
+            raise EvidenceError(f"source is unreadable: {short(exc.strerror or type(exc).__name__)}") from exc
+    except BaseException as exc:
+        primary = exc
         raise
-    except OSError as exc:
-        raise EvidenceError(f"source is unreadable: {short(exc.strerror or type(exc).__name__)}") from exc
     finally:
         if descriptor is not None:
-            os.close(descriptor)
+            try:
+                os.close(descriptor)
+            except OSError as exc:
+                if primary is None:
+                    detail = short(exc.strerror or str(exc) or type(exc).__name__)
+                    raise EvidenceError(f"source descriptor close failed: {detail}") from exc
+                primary._cleanup_errors = getattr(primary, "_cleanup_errors", []) + [("source-close", exc)]
+                if isinstance(primary, EvidenceError):
+                    primary.args = (f"cleanup incomplete (source-close:{type(exc).__name__}); {primary}",)
+                elif hasattr(primary, "add_note"):
+                    primary.add_note(f"source cleanup incomplete (source-close:{type(exc).__name__})")
     if len(data) > INPUT_CAP:
         raise EvidenceError(f"source exceeds {INPUT_CAP}-byte input cap")
     identity = lambda value: (value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns)
@@ -125,13 +148,19 @@ def decode_lines(data: bytes) -> list[str]:
     return text.split("\n")[:-1] if text else []
 
 
-def load_line(text: str, line_number: int, *, _parse_float: Any = float) -> dict[str, Any]:
+def load_line(
+    text: str,
+    line_number: int,
+    *,
+    _parse_float: Any = float,
+    _parse_int: Any = int,
+) -> dict[str, Any]:
     if not text.strip():
         raise EvidenceError(f"line {line_number}: blank JSONL record")
     try:
         value = json.loads(
             text, object_pairs_hook=no_duplicate_keys, parse_constant=reject_constant,
-            parse_float=_parse_float,
+            parse_float=_parse_float, parse_int=_parse_int,
         )
     except EvidenceError as exc:
         raise EvidenceError(f"line {line_number}: {exc}") from exc
@@ -437,6 +466,169 @@ def project_session_receipt(
     }
 
 
+def load_direct_exec_line(text: str, line_number: int) -> dict[str, Any]:
+    """Decode a direct-exec record without echoing excluded JSON content."""
+    def bounded_integer(value: str) -> int:
+        if len(value.removeprefix("-")) > TEXT_CAP:
+            raise EvidenceError("direct-exec JSON integer is too large")
+        return int(value)
+
+    try:
+        record = load_line(text, line_number, _parse_int=bounded_integer)
+        # Keep only iterators for currently active containers. Enqueuing every
+        # child would add breadth-proportional tuple storage for wide JSON.
+        stack = [(iter((record,)), 0)]
+        while stack:
+            children, depth = stack[-1]
+            try:
+                value = next(children)
+            except StopIteration:
+                stack.pop()
+                continue
+            if depth > 512:
+                raise EvidenceError("direct-exec JSON nesting is too deep")
+            if isinstance(value, dict):
+                stack.append((iter(value.values()), depth + 1))
+            elif isinstance(value, list):
+                stack.append((iter(value), depth + 1))
+        return record
+    except (EvidenceError, RecursionError, MemoryError) as exc:
+        raise EvidenceError(f"line {line_number}: invalid direct-exec JSON record") from exc
+
+
+def project_direct_exec(
+    data: bytes,
+    source: Path,
+    digest: str,
+    thread_id: str,
+    selected: set[str] | None,
+) -> dict[str, Any]:
+    supported_events = {
+        "thread.started", "turn.started", "turn.completed", "turn.failed",
+        "item.started", "item.updated", "item.completed", "error",
+    }
+    command_groups: dict[str, list[dict[str, Any]]] = {}
+    header_line: int | None = None
+    turn_start_line: int | None = None
+    turn_end_line: int | None = None
+    turn_end_event: str | None = None
+    ignored_noncommand = 0
+
+    lines = decode_lines(data)
+    for line_number, text in enumerate(lines, 1):
+        record = load_direct_exec_line(text, line_number)
+        event = record.get("type")
+        if not isinstance(event, str) or not event:
+            raise EvidenceError(f"line {line_number}: malformed direct-exec event kind")
+        if event not in supported_events:
+            raise EvidenceError(f"line {line_number}: unsupported direct-exec event kind")
+        if "turn_id" in record:
+            raise EvidenceError(f"line {line_number}: top-level turn_id is unsupported")
+
+        if event == "thread.started":
+            if line_number != 1 or header_line is not None:
+                raise EvidenceError(f"line {line_number}: multiple or misplaced thread headers")
+            header_thread = record.get("thread_id")
+            if not isinstance(header_thread, str) or not header_thread:
+                raise EvidenceError(f"line {line_number}: thread header ID must be a nonempty string")
+            if header_thread != thread_id:
+                raise EvidenceError(f"line {line_number}: thread header does not match requested thread ID")
+            header_line = line_number
+            continue
+
+        if line_number == 1:
+            raise EvidenceError("line 1: first direct-exec record must be thread.started")
+        if "thread_id" in record and record["thread_id"] != thread_id:
+            raise EvidenceError(f"line {line_number}: conflicting top-level thread identity")
+
+        if event == "turn.started":
+            if turn_start_line is not None or turn_end_line is not None:
+                raise EvidenceError(f"line {line_number}: multiple or misplaced turn starts")
+            turn_start_line = line_number
+            continue
+        if event in ("turn.completed", "turn.failed"):
+            if turn_start_line is None:
+                raise EvidenceError(f"line {line_number}: turn end precedes turn start")
+            if turn_end_line is not None:
+                raise EvidenceError(f"line {line_number}: repeated or competing turn end")
+            turn_end_line = line_number
+            turn_end_event = event
+            continue
+        if event == "error":
+            ignored_noncommand += 1
+            continue
+
+        # Every known item envelope is structurally checked, even when its item
+        # kind is intentionally outside this narrow projection.
+        item = record.get("item")
+        if not isinstance(item, dict):
+            raise EvidenceError(f"line {line_number}: item envelope must contain an object")
+        item_type = item.get("type")
+        if not isinstance(item_type, str) or not item_type:
+            raise EvidenceError(f"line {line_number}: item.type must be a nonempty string")
+        if item_type != "command_execution":
+            ignored_noncommand += 1
+            continue
+        if turn_start_line is None or turn_end_line is not None:
+            raise EvidenceError(f"line {line_number}: command observation is outside the observed turn scope")
+
+        item_id = item.get("id")
+        if not isinstance(item_id, str) or not item_id:
+            raise EvidenceError(f"line {line_number}: command item.id must be a nonempty string")
+        if len(item_id) > TEXT_CAP:
+            raise EvidenceError(f"line {line_number}: command item.id exceeds {TEXT_CAP} characters")
+        status_value = item.get("status")
+        if not isinstance(status_value, str) or not status_value:
+            raise EvidenceError(f"line {line_number}: command item.status must be a nonempty string")
+        if len(status_value) > TEXT_CAP:
+            raise EvidenceError(f"line {line_number}: command item.status exceeds {TEXT_CAP} characters")
+        exit_present = "exit_code" in item
+        exit_code = item.get("exit_code")
+        if exit_present and (isinstance(exit_code, bool) or (exit_code is not None and not isinstance(exit_code, int))):
+            raise EvidenceError(f"line {line_number}: command item.exit_code must be an integer or null")
+        command_groups.setdefault(item_id, []).append({
+            "line": line_number,
+            "event": event,
+            "native_status": status_value,
+            "exit_code_present": exit_present,
+            "exit_code": exit_code,
+        })
+
+    if header_line is None:
+        raise EvidenceError("source has no direct-exec thread header")
+    if turn_start_line is None:
+        raise EvidenceError("source has no direct-exec turn start")
+    if selected is not None:
+        missing = sorted(selected - command_groups.keys())
+        if missing:
+            raise EvidenceError(f"requested item IDs not found in scope ({len(missing)}): {short(', '.join(missing))}")
+
+    included = command_groups if selected is None else {
+        item_id: observations for item_id, observations in command_groups.items()
+        if item_id in selected
+    }
+    commands = [
+        {"item_id": item_id, "observations": observations}
+        for item_id, observations in sorted(included.items(), key=lambda entry: entry[1][0]["line"])
+    ]
+    return {
+        "schema": "lunacy-native-direct-exec-index-v1",
+        "source": {"path": str(source), "sha256": digest},
+        "scope": {
+            "thread_id": thread_id,
+            "selected_item_ids": sorted(selected) if selected is not None else None,
+        },
+        "thread_header_line": header_line,
+        "turn": {"start_line": turn_start_line, "end_line": turn_end_line, "end_event": turn_end_event},
+        "observed_command_count": len(commands),
+        "observed_command_record_count": sum(len(command["observations"]) for command in commands),
+        "ignored_noncommand_record_count": ignored_noncommand,
+        "commands": commands,
+        "projection_only": True,
+        "non_claims": DIRECT_EXEC_NON_CLAIMS,
+    }
+
+
 def emit(value: dict[str, Any], cap: int, *, ensure_ascii: bool = False) -> int:
     encoded = (json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=ensure_ascii) + "\n").encode("utf-8", "backslashreplace")
     if len(encoded) <= cap:
@@ -470,10 +662,10 @@ def emit_error(exc: Exception, cap: int) -> int:
 def parse_args() -> argparse.Namespace:
     parser = EvidenceArgumentParser(description=__doc__)
     parser.add_argument("source", help="caller-authorized absolute path to a regular JSONL capture")
-    parser.add_argument("--source-format", choices=("app-server", "session-receipt"), default="app-server")
+    parser.add_argument("--source-format", choices=("app-server", "session-receipt", "direct-exec"), default="app-server")
     parser.add_argument("--thread-id", required=True)
     parser.add_argument("--session-id")
-    parser.add_argument("--turn-id", required=True)
+    parser.add_argument("--turn-id")
     parser.add_argument("--item-id", action="append", dest="item_ids")
     parser.add_argument("--expected-sha256")
     parser.add_argument("--output-cap", type=int, default=DEFAULT_OUTPUT_CAP)
@@ -484,6 +676,13 @@ def parse_args() -> argparse.Namespace:
         parser.error("--expected-sha256 must be 64 lowercase hexadecimal characters")
     if args.item_ids is not None and len(set(args.item_ids)) != len(args.item_ids):
         parser.error("--item-id values must be unique")
+    if args.source_format == "direct-exec":
+        if args.turn_id is not None:
+            parser.error("--turn-id is forbidden for --source-format direct-exec")
+        if args.session_id is not None:
+            parser.error("--session-id is forbidden for --source-format direct-exec")
+    elif args.turn_id is None or not args.turn_id:
+        parser.error("--turn-id is required and must be nonempty for app-server and session-receipt")
     if args.session_id is not None:
         if args.source_format != "session-receipt":
             parser.error("--session-id requires --source-format session-receipt")
@@ -507,14 +706,16 @@ def main() -> int:
         if selected is not None and any(len(item) > TEXT_CAP for item in selected):
             raise EvidenceError(f"requested item ID exceeds {TEXT_CAP} characters")
         thread_id = require_text(args.thread_id, "thread ID")
-        turn_id = require_text(args.turn_id, "turn ID")
-        projector = project_app_server if args.source_format == "app-server" else project_session_receipt
         if args.source_format == "app-server":
+            turn_id = require_text(args.turn_id, "turn ID")
             result = project_app_server(data, source, digest, thread_id, turn_id, selected)
-        else:
+        elif args.source_format == "session-receipt":
+            turn_id = require_text(args.turn_id, "turn ID")
             result = project_session_receipt(
                 data, source, digest, thread_id, turn_id, selected, args.session_id
             )
+        else:
+            result = project_direct_exec(data, source, digest, thread_id, selected)
         return emit(result, args.output_cap, ensure_ascii=args.source_format == "session-receipt")
     except (EvidenceError, RecursionError, MemoryError) as exc:
         return emit_error(exc, args.output_cap)

@@ -11,10 +11,56 @@ ongoing plugin improvement. Ordinary engineering keeps the existing low-overhead
 path and does not automatically invoke strategy consultations.
 
 In the installed plugin, invoke **`$lunacy-native:golden <your task>`** for the
-golden workflow: parent-led planning, conditional ADHD/Web Pro, worker delivery,
-and independent acceptance. This is a distinct shortcut in the same plugin,
-not another installed version. Finite tasks stay finite; ongoing improvement
-requires your request. Ordinary `lunacy-native:lunacy` behavior is unchanged.
+golden workflow: parent-led planning, conditional ADHD and task-selected advice
+(Pro by default), worker delivery, and independent acceptance. This is a
+distinct shortcut in the same plugin, not another installed version. Finite
+tasks stay finite; ongoing improvement requires your request. Ordinary
+`lunacy-native:lunacy` behavior is unchanged.
+
+Lunacy can handle a newly authorized, scoped task in an existing repository when
+current authority and ownership/effect checks permit it; “new” describes the
+work, not the repository's age. A new Codex task, filename, or installation does
+not turn an existing or uncertain run into new work or migrate its contract,
+owner, or effects. Separate new work proceeds only when its actual independence
+is established.
+
+Lunacy is guidance for the current parent and its workers, not an autonomous
+model runner. The parent plans and accepts; Astra/high is the recommended parent
+preset, but Golden neither selects nor verifies it. If the actual parent setting
+is unconfirmed, say so rather than claiming Astra is running. Golden adds ADHD
+for a genuine design fork and consultation only for a consequential unresolved
+decision; neither is mandatory for routine work. Worker choices are task-local
+and do not change the parent or consultation route. Architecture-only work stays
+architecture-only, and the optional evidence/catalog helpers do not launch
+workers or establish correctness.
+
+For a design-only roadmap through the existing Golden route, use:
+
+```text
+$lunacy-native:golden Design a roadmap for <outcome>. Architecture only; do not implement.
+```
+
+The output is a prioritized design and a detailed proposal for the next coherent
+slice—not implementation, tests, builds, probes, environment changes, or
+publication. “Continue” remains design-only in that task. A later explicit
+implementation request still requires review of the current source and
+constraints plus new adoption and assignments under the canonical
+[authority contract](WORKSPACE.md#authority-entry-and-coexistence). This example
+adds no new mode and does not change ordinary finite engineering.
+
+### Optional consultation choice
+
+Golden also accepts a separate task-local consultation choice. With no override,
+or `Consultation: pro`, Pro remains the default exact route when advice is
+needed. `Consultation: astra-high` selects a fresh `gpt-6-astra` / `high` adviser
+without first trying Pro. `Consultation: auto` prefers Pro and permits
+Astra/high only when Pro is known unavailable before binding and dispatch; stale
+or generic quota text is not enough, and unknown availability does not justify a
+probe. Keep consultation packets small under the [bounded advice
+policy](orchestrator/IMPROVEMENT.md#direct-exact-web-pro-advice). Automatic
+failover after a started or uncertain Pro attempt is not enabled: preserve the
+attempt and do not replay it. These choices do not change workers, the parent,
+global settings, or parent acceptance.
 
 ## Release status
 
@@ -50,7 +96,7 @@ The selector asks in the conversation, using catalog names and reasoning
 options; it does not add controls to Codex's native picker or change global
 settings. No customization request means the existing defaults. Unspecified
 roles keep their defaults; custom roles do not rename the fixed aliases or
-change the parent, ADHD, or Web Pro. Selecting a custom model never inherits
+change the parent, ADHD, or the consultation choice. Selecting a custom model never inherits
 Luna's `max` effort: choose a supported effort or explicitly its catalog default.
 See [Worker model selection](orchestrator/WORKER-MODELS.md) for catalog/helper
 commands, launch transport selection, and capability limits. Availability in a
@@ -88,8 +134,12 @@ python3 -B packaging/build_plugin.py /path/to/staging/lunacy-native
 The builder copies the root skill and Golden into sibling `skills/lunacy` and
 `skills/golden` directories, so shared references resolve without symlinks or
 duplicating maintained source. It refuses existing destinations (including
-symlinks) and destinations inside the checkout. On a copy failure, the new
-partial output is retained for inspection; it is not an installable success.
+symlinks) and destinations inside the checkout. Selected build inputs must be
+regular files and real directories: source symlinks and special filesystem
+nodes are refused before the output is created. Build from a quiescent ordinary
+checkout; this metadata preflight is not an atomic snapshot and does not protect
+against hostile concurrent replacement. On a later copy failure, the new partial
+output is retained for inspection; it is not an installable success.
 It does not register, install, enable, or migrate anything. For an existing
 plugin, compare the output with the confirmed marketplace source, apply only
 the intended release files there, preserve its local version suffix until the

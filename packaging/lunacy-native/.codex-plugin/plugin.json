@@ -13,6 +13,6 @@
     "developerName": "Local developer",
     "category": "Productivity",
     "capabilities": [],
-    "defaultPrompt": "Use the Lunacy native skill for a genuinely new engineering task; plan before dispatch and preserve exact worker routing."
+    "defaultPrompt": "Use $lunacy-native:lunacy for a genuinely new engineering task; plan before dispatch and preserve exact worker routing."
   }
 }
