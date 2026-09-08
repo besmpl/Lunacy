@@ -19,6 +19,8 @@ All [authority and record rules](../WORKSPACE.md#authority-entry-and-coexistence
 
 ### ADHD for a real design fork
 
+When Golden is invoked, check the skills currently advertised or available to the task. If ADHD is unavailable, suggest once for the task that the user install or enable it. Describe it as known uninstalled only when current evidence proves that state; otherwise call it unavailable and distinguish disabled or not-loaded possibilities from a known missing installation. Do not repeat the suggestion, auto-install, guess a source, URL, command, or plugin ID, or delay otherwise-ready work. If the user requests installation, use a supported installation flow only after the actual source is known. If ADHD is available, make no installation suggestion. This notice does not make ADHD mandatory, change the required-ideation boundary, or turn a missing exact route for an available ADHD skill into an installation problem.
+
 When ADHD is selected, read and follow the available ADHD skill's actual procedure; this summary does not implement or replace that skill. The recommended default is five fresh isolated `gpt-5.6-sol`/`medium` generators producing six ideas each, followed by Astra scoring, clustering, and trap removal, then three fresh isolated Sol/medium deepeners for the leading distinct options. These proposal-only agents do not edit code or `TASK.md`; the implementation-owner limit does not apply to them. This is a conditional starting policy, not mandatory attendance or proof of superiority. If the ADHD capability or its exact authorized route is unavailable, do not silently replace it; use already sufficient independent evidence or pause the affected unresolved choice.
 
 <a id="direct-exact-web-pro-advice"></a>
