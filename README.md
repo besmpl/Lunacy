@@ -19,8 +19,8 @@ requires your request. Ordinary `lunacy-native:lunacy` behavior is unchanged.
 ## Release status
 
 Version `0.2.0-rc.1` is a native-guidance release candidate. The package has
-offline structural, documented shell-recipe, and observer tests only. It has no
-claim of proven live reliability, route availability, model obedience, speed,
+offline structural, documented shell-recipe, catalog/selection, and observer
+tests. It has no claim of proven live reliability, route availability, model obedience, speed,
 cost, or savings.
 
 ## Native routes
@@ -31,10 +31,34 @@ cost, or savings.
 | `sol-medium` | `gpt-5.6-sol` | `medium` | default named worker route |
 | `sol-high` | `gpt-5.6-sol` | `high` | explicit selection only |
 
-The parent must seal the literal model/effort pair before dispatch. Current
-authority may instead authorize another exact native pair for a specific worker
-purpose. Unsupported or conflicting pairs are refused; there is no probing,
-normalization, fallback, or mid-attempt route change.
+These are defaults, not a restriction to these models. At launch you can choose
+separate **bulk** and **judgment** worker models from the current Codex catalog:
+
+```text
+$lunacy-native:golden choose workers; build <your feature>
+```
+
+Or supply both pairs directly (examples must still exist in your live catalog):
+
+```text
+$lunacy-native:golden build <your feature>.
+Workers: bulk = opencode-go/muse-spark-1.3-contributor / low;
+judgment = gpt-6-astra / low.
+```
+
+The selector asks in the conversation, using catalog names and reasoning
+options; it does not add controls to Codex's native picker or change global
+settings. No customization request means the existing defaults. Unspecified
+roles keep their defaults; custom roles do not rename the fixed aliases or
+change the parent, ADHD, or Web Pro. Selecting a custom model never inherits
+Luna's `max` effort: choose a supported effort or explicitly its catalog default.
+See [Worker model selection](orchestrator/WORKER-MODELS.md) for catalog/helper
+commands, launch transport selection, and capability limits. Availability in a
+catalog is not proof that a particular worker tool supports that model.
+
+The parent seals each literal model/effort pair and chosen transport before
+dispatch. Unsupported or conflicting pairs are refused; there is no probing,
+silent fallback, or mid-attempt route change.
 
 ## Install or update: choose one native delivery channel
 
@@ -177,6 +201,7 @@ The observer uses only the Python standard library.
 ```sh
 python3 -B ~/.codex/skills/.system/skill-creator/scripts/quick_validate.py .
 python3 -B -m unittest discover -s tests -p 'test_install_recipes.py' -v
+python3 -B -m unittest discover -s tests -p 'test_worker_models.py' -v
 python3 -B -m unittest discover -s tests -v
 ```
 
@@ -196,12 +221,16 @@ captured, authorized JSONL file and never launches models or changes evidence.
   dispatch, deadline, and recovery rules.
 - [orchestrator/IMPROVEMENT.md](orchestrator/IMPROVEMENT.md) — optional
   execution-first continuous-improvement mode.
+- [orchestrator/WORKER-MODELS.md](orchestrator/WORKER-MODELS.md) — task-scoped
+  model choices from the live Codex catalog; no global configuration changes.
+- [`scripts/worker_models.py`](scripts/worker_models.py) — read-only catalog and
+  offline role resolver; never launches a worker.
 - [worker/ENGINEERING.md](worker/ENGINEERING.md) — worker execution contract.
 - [OPERATOR.md](OPERATOR.md) — large-output recipe and observer reference.
 - [`scripts/evidence_index.py`](scripts/evidence_index.py) — bounded read-only
   evidence projection.
-- [`tests/`](tests/) — offline documented-recipe and observer CLI regression
-  suite.
+- [`tests/`](tests/) — offline documented-recipe, worker-selection, and observer
+  CLI regression suite.
 
 ## Legacy change
 

@@ -3,7 +3,8 @@
 ## Release status
 
 This repository is Lunacy native `0.2.0-rc.1`, using workflow contract `0.1.29`.
-It is a guidance release candidate with an optional read-only observer. Offline
+It is a guidance release candidate with optional read-only evidence and
+[worker-model selection](orchestrator/WORKER-MODELS.md) helpers. Offline
 validation does not prove installation, route availability, model behavior,
 live reliability, speed, cost, or savings.
 
