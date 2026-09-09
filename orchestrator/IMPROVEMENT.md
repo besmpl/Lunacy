@@ -42,15 +42,18 @@ Explicit Golden selection opts into the available ADHD skill's actual procedure 
 ### Consultation selection and bounded advice
 
 Every Golden cycle consults once before ADHD. On same-cycle resume, reuse the
-applicable completed response rather than calling again. A task-local adviser
-override continues for that task; a future task without one defaults to Pro.
+applicable completed response rather than calling again. Preserve an existing
+consultation binding for its task; this default does not migrate it. A task-local
+adviser override continues for that task. For a new unbound cycle, honor an
+explicit `pro` or `auto` choice; without an override, default to `astra-high`.
 Task-local choices are:
 
-- `pro` (default): exact `chatgpt-web/pro` / `ultra` through direct
+- `astra-high` (default): exact `gpt-6-astra` / `high` through a fresh native
+  agent whose supplied schema supports both literals; never override a fixed
+  role.
+- Explicit `pro`: exact `chatgpt-web/pro` / `ultra` through direct
   `codex exec -m chatgpt-web/pro -c 'model_reasoning_effort="ultra"'`, not Oracle
   or browser control.
-- `astra-high`: exact `gpt-6-astra` / `high` through a fresh native agent whose
-  supplied schema supports both literals; never override a fixed role.
 - Explicit `auto`: prefer Pro; select Astra/high only if Pro is already known
   unavailable **before binding and dispatch**, citing current route-specific
   evidence. Generic quota buckets, missing controls and error text do not
@@ -156,4 +159,4 @@ fresh cold-complete packet rather than reusing the old answer.
 | No supported exact worker route | Refuse dispatch; create a new authorized assignment only when an exact route is authorized and available. |
 | No authorized next outcome; or ongoing improvement has no viable big win | Idle. |
 
-Keep feedback small: existing reports may note time to accepted output, first-pass acceptance, defects caught, repair burden, and whether consultation resolved its question. Do not create a dashboard, measurement service, cache, ledger, launcher, or dynamic router for this mode. Cost claims require trustworthy billing evidence.
+Keep feedback small: existing reports may note time to accepted output, first-pass acceptance, defects caught, repair burden, and whether consultation resolved its question. When useful, they may use concrete evidence such as the failed criterion or protected boundary to distinguish instruction ambiguity from an execution mistake. Improve an existing ambiguous instruction instead of adding one new rule for every correction. Do not create a dashboard, measurement service, cache, ledger, launcher, or dynamic router for this mode. Cost claims require trustworthy billing evidence.

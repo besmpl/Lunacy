@@ -11,7 +11,7 @@ ongoing plugin improvement. Ordinary engineering keeps the existing low-overhead
 path and does not automatically invoke strategy consultations.
 
 In the installed plugin, invoke **`$lunacy-native:golden <your task>`** for the
-golden workflow: a task-selected consultation (Pro by default), actual ADHD,
+golden workflow: a task-selected consultation (Astra/high by default), actual ADHD,
 adopted planning, Lunacy worker delivery, and independent acceptance. This is a
 distinct shortcut in the same plugin, not another installed version. Finite
 tasks stay finite; ongoing improvement requires your request. Ordinary
@@ -52,17 +52,19 @@ adds no new mode and does not change ordinary finite engineering.
 ### Consultation choice
 
 Golden also accepts a separate task-local consultation choice. With no override,
-or `Consultation: pro`, Pro remains the default exact route for each new Golden
-cycle. `Consultation: astra-high` selects a fresh `gpt-6-astra` / `high` adviser
-without first trying Pro. `Consultation: auto` prefers Pro and permits
+or `Consultation: astra-high`, each new unbound Golden cycle selects a fresh
+native `gpt-6-astra` / `high` adviser without first trying Pro. Explicit
+`Consultation: pro` selects direct `chatgpt-web/pro` / `ultra`.
+`Consultation: auto` prefers Pro and permits
 Astra/high only when Pro is known unavailable before binding and dispatch; stale
 or generic quota text is not enough, and unknown availability does not justify a
 probe. Keep consultation packets small under the [bounded advice
 policy](orchestrator/IMPROVEMENT.md#direct-exact-web-pro-advice). Automatic
-failover after a started or uncertain Pro attempt is not enabled: preserve the
+failover after a started or uncertain consultation attempt is not enabled: preserve the
 attempt and do not replay it. These choices do not change workers, the parent,
 global settings, or parent acceptance. An override continues within its task;
-a future task without an override returns to Pro.
+a future task without an override returns to Astra/high. Existing task bindings
+are not migrated, and applicable same-cycle advice is reused.
 
 The policy targets a small, cold-complete parent packet and keeps its short
 leading rubric stable where practical. That is cache-friendly, not evidence that
