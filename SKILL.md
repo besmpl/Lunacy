@@ -17,7 +17,7 @@ This is guidance plus optional read-only evidence and worker-model-selection hel
 
 Selection permits read-only identification, not execution. Before mutation, dispatch, resume, or effects, require current authority to match this exact contract and the immutable adoption in `TASK.md`; apply [Authority, entry, and coexistence](WORKSPACE.md#authority-entry-and-coexistence). Existing native, managed, retained, frozen, legacy, or provenance-uncertain work keeps its original contract, route, history, effects, and recovery owner. The presence or absence of `TASK.md`, a new ID, timeout, missing record, current repository state, or lifecycle-terminal text never migrates old work, establishes new-work eligibility, releases effects, or grants replacement or acceptance. Mixed-project use needs reciprocal authority on every affected side.
 
-For a user-authorized ongoing plugin-improvement outcome, Astra may select the optional [continuous-improvement mode](orchestrator/IMPROVEMENT.md) when a viable material big win exists. It is an execution-first mode around this same contract, not a default for ordinary engineering or permission to invent work.
+When the user explicitly selects Golden, use the optional [Golden-cycle and continuous-improvement guidance](orchestrator/IMPROVEMENT.md): each meaningful outcome requires consultation, actual ADHD, adopted Lunacy delivery, and parent acceptance. Ordinary Lunacy remains the direct low-overhead path. Ongoing improvement additionally requires current user authority and a viable material big win; neither mode permits invented work.
 
 ## Before-action reads
 

@@ -11,8 +11,8 @@ ongoing plugin improvement. Ordinary engineering keeps the existing low-overhead
 path and does not automatically invoke strategy consultations.
 
 In the installed plugin, invoke **`$lunacy-native:golden <your task>`** for the
-golden workflow: parent-led planning, conditional ADHD and task-selected advice
-(Pro by default), worker delivery, and independent acceptance. This is a
+golden workflow: a task-selected consultation (Pro by default), actual ADHD,
+adopted planning, Lunacy worker delivery, and independent acceptance. This is a
 distinct shortcut in the same plugin, not another installed version. Finite
 tasks stay finite; ongoing improvement requires your request. Ordinary
 `lunacy-native:lunacy` behavior is unchanged.
@@ -27,9 +27,10 @@ is established.
 Lunacy is guidance for the current parent and its workers, not an autonomous
 model runner. The parent plans and accepts; Astra/high is the recommended parent
 preset, but Golden neither selects nor verifies it. If the actual parent setting
-is unconfirmed, say so rather than claiming Astra is running. Golden adds ADHD
-for a genuine design fork and consultation only for a consequential unresolved
-decision; neither is mandatory for routine work. Worker choices are task-local
+is unconfirmed, say so rather than claiming Astra is running. Every meaningful
+Golden outcome uses a real consultation followed by actual ADHD, even for routine
+work; this extra strategy cost is why ordinary Lunacy remains the lighter path.
+Worker choices are task-local
 and do not change the parent or consultation route. Architecture-only work stays
 architecture-only, and the optional evidence/catalog helpers do not launch
 workers or establish correctness.
@@ -48,11 +49,11 @@ constraints plus new adoption and assignments under the canonical
 [authority contract](WORKSPACE.md#authority-entry-and-coexistence). This example
 adds no new mode and does not change ordinary finite engineering.
 
-### Optional consultation choice
+### Consultation choice
 
 Golden also accepts a separate task-local consultation choice. With no override,
-or `Consultation: pro`, Pro remains the default exact route when advice is
-needed. `Consultation: astra-high` selects a fresh `gpt-6-astra` / `high` adviser
+or `Consultation: pro`, Pro remains the default exact route for each new Golden
+cycle. `Consultation: astra-high` selects a fresh `gpt-6-astra` / `high` adviser
 without first trying Pro. `Consultation: auto` prefers Pro and permits
 Astra/high only when Pro is known unavailable before binding and dispatch; stale
 or generic quota text is not enough, and unknown availability does not justify a
@@ -60,14 +61,31 @@ probe. Keep consultation packets small under the [bounded advice
 policy](orchestrator/IMPROVEMENT.md#direct-exact-web-pro-advice). Automatic
 failover after a started or uncertain Pro attempt is not enabled: preserve the
 attempt and do not replay it. These choices do not change workers, the parent,
-global settings, or parent acceptance.
+global settings, or parent acceptance. An override continues within its task;
+a future task without an override returns to Pro.
+
+The policy targets a small, cold-complete parent packet and keeps its short
+leading rubric stable where practical. That is cache-friendly, not evidence that
+native or ChatGPT-web consultation is cache-heavy: parent UTF-8 bytes exclude
+host-injected context, and route cache-counter semantics and billing remain
+unverified. Count the final wrappers and attachments, preserve raw usage fields
+when available, and make no savings claim from a missing or zero cache count.
+
+Golden records its compact current cycle/stage, real output references, existing
+assignment/handle references, and next action in the one parent-owned `TASK.md`.
+On resume it reconciles those facts instead of redispatching completed stages.
+Missing required consultation or ADHD pauses dependent progression; it is never
+silently replaced. Coherent delivery slices and same-owner repair remain in the
+same cycle. A materially distinct later outcome starts a fresh consultation and
+ADHD cycle, while an accepted finite task remains complete on stale continuation.
+Architecture-only or source-only authority still produces only those artifacts.
 
 ## Release status
 
 Version `0.2.0-rc.1` is a native-guidance release candidate. The package has
 offline structural, documented shell-recipe, catalog/selection, and observer
 tests. It has no claim of proven live reliability, route availability, model obedience, speed,
-cost, or savings.
+cost, cache behavior, or savings.
 
 ## Native routes
 
