@@ -11,9 +11,14 @@ ongoing plugin improvement. Ordinary engineering keeps the existing low-overhead
 path and does not automatically invoke strategy consultations.
 
 In the installed plugin, invoke **`$lunacy-native:golden <your task>`** for the
-golden workflow: a task-selected consultation (Astra/high by default), actual ADHD,
-adopted planning, Lunacy worker delivery, and independent acceptance. This is a
-distinct shortcut in the same plugin, not another installed version. Finite
+golden workflow: a task-selected consultation (Astra/high by default), actual ADHD
+using one task-local model/effort pair (`gpt-5.6-luna / high` by default), Luna/high
+substantive design and solution authorship, adopted planning, Lunacy worker
+delivery, and independent acceptance. Selected ADHD workers generate, deepen, and
+repair proposals and author the final provocation; Astra in its parent role exercises
+judgment to evaluate, select, and adopt, while its adviser role provides bounded
+evidence-only advice, not replacement idea or solution authorship.
+This is a distinct shortcut in the same plugin, not another installed version. Finite
 tasks stay finite; ongoing improvement requires your request. Ordinary
 `lunacy-native:lunacy` behavior is unchanged.
 
@@ -30,8 +35,12 @@ preset, but Golden neither selects nor verifies it. If the actual parent setting
 is unconfirmed, say so rather than claiming Astra is running. Every meaningful
 Golden outcome uses a real consultation followed by actual ADHD, even for routine
 work; this extra strategy cost is why ordinary Lunacy remains the lighter path.
-Worker choices are task-local
-and do not change the parent or consultation route. Architecture-only work stays
+Coding worker choices are task-local and do not change the parent, consultation,
+or ADHD route. Golden's distinct ADHD selector is also task-local: use
+`choose ADHD workers`, or supply `ADHD workers: gpt-6-astra / low`; one exact pair
+then applies to every ADHD generator and deepener only. Omission keeps
+`gpt-5.6-luna / high`. See [ADHD worker selection](orchestrator/IMPROVEMENT.md#adhd-worker-selection-route-and-sealing)
+for catalog validation, sealing, and boundary rules. Architecture-only work stays
 architecture-only, and the optional evidence/catalog helpers do not launch
 workers or establish correctness.
 
@@ -97,8 +106,9 @@ cost, cache behavior, or savings.
 | `sol-medium` | `gpt-5.6-sol` | `medium` | default named worker route |
 | `sol-high` | `gpt-5.6-sol` | `high` | explicit selection only |
 
-These are defaults, not a restriction to these models. At launch you can choose
-separate **bulk** and **judgment** worker models from the current Codex catalog:
+These coding routes are defaults, not a restriction to these models. At launch
+you can choose separate **bulk** and **judgment** worker models from the current
+Codex catalog; this `choose workers` selector does not select ADHD workers:
 
 ```text
 $lunacy-native:golden choose workers; build <your feature>

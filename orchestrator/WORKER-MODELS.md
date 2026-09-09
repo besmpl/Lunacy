@@ -1,9 +1,11 @@
-# Choose worker models at launch
+# Choose coding worker models at launch
 
-Read this when the user requests worker customization or supplies a custom
-model/effort pair. It applies to Golden and explicitly adopted ordinary Lunacy.
-It changes task-local selections, not Codex's native picker, global defaults,
-installed agent definitions, or an already running worker.
+Read this when the user requests coding-worker customization or supplies a custom
+model/effort pair. It applies to the coding `bulk` and `judgment` roles in Golden
+and explicitly adopted ordinary Lunacy. It does not resolve Golden ADHD workers;
+that distinct selector is defined in `orchestrator/IMPROVEMENT.md`. It changes
+task-local selections, not Codex's native picker, global defaults, installed
+agent definitions, or an already running worker.
 
 ## Two roles, unchanged defaults
 
@@ -17,12 +19,16 @@ catalog. These purpose labels are not provider aliases or measured capability
 ratings. Picking a weaker model does not relax acceptance. The immutable named
 routes `luna`, `sol-medium`, and `sol-high` keep their original meanings.
 
-An invocation such as `choose workers; <outcome>` requests the launch selector.
-An explicit `Workers: bulk = MODEL / EFFORT; judgment = MODEL / EFFORT` supplies
-selections directly. Ordinary invocations preserve both defaults without a
-mandatory question or catalog call. Changing only one role preserves the other.
-Worker settings do not change the actual parent, ADHD agents, or separately
-selected consultation route; those need their own explicit authority.
+An invocation such as `choose workers; <outcome>` requests the coding-role
+launch selector. An explicit `Workers: bulk = MODEL / EFFORT; judgment = MODEL /
+EFFORT` supplies coding selections directly. `choose ADHD workers` and
+`ADHD workers: MODEL / EFFORT` belong to the separate Golden ADHD selector and
+are not resolved here. Ordinary invocations preserve both coding defaults without
+a mandatory question or catalog call. Changing only one coding role preserves the
+other.
+Coding-worker settings do not change the actual parent, Golden ADHD worker
+selection, or separately selected consultation route; those have their own
+explicit task-local authority.
 
 ## Conversational selector backed by the live catalog
 
@@ -92,8 +98,9 @@ needs the supported nonblocking capability (`os.O_NONBLOCK`). If that capability
 is absent, refuse before acquisition rather than replacing it with blocking I/O;
 this wording does not promise Windows support or a portable transport.
 
-After the user selects exact pairs, validate the snapshot without starting any
-process or model:
+After the user selects exact coding-role pairs, validate the snapshot without
+starting any process or model. This offline resolver remains limited to `bulk`
+and `judgment`; it never resolves the separate Golden ADHD worker pair:
 
 ```sh
 python3 -B scripts/worker_models.py resolve --catalog /path/to/task/catalog.json \

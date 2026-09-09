@@ -1,18 +1,79 @@
 # Golden workflow and optional continuous improvement
 
-Use this workflow when the user explicitly selects Lunacy Golden for a genuinely new engineering outcome, or when current user/project authority expressly includes ongoing plugin improvement. Golden wraps each meaningful authorized outcome in a substantive consultation -> ADHD -> Lunacy delivery -> parent acceptance cycle, including routine Golden work. A finite task needs a clear authorized outcome and ends when every authorized outcome is accepted. Ongoing improvement additionally requires current authority and a viable material big win; if none exists, idle. This is an operating policy, not a new contract, scheduler, automatic router, performance claim, or permission to continue forever. Ordinary Lunacy remains the lower-cost direct delivery path, including known-root-cause fixes, unless the user explicitly selected Golden.
+Use this workflow when the user explicitly selects Lunacy Golden for a genuinely new engineering outcome, or when current user/project authority expressly includes ongoing plugin improvement. Golden wraps each meaningful authorized outcome in a substantive consultation -> ADHD -> Luna-authored design -> Astra adoption -> Lunacy delivery -> parent acceptance cycle, including routine Golden work. A finite task needs a clear authorized outcome and ends when every authorized outcome is accepted. Ongoing improvement additionally requires current authority and a viable material big win; if none exists, idle. This is an operating policy, not a new contract, scheduler, automatic router, performance claim, or permission to continue forever. Ordinary Lunacy remains the lower-cost direct delivery path, including known-root-cause fixes, unless the user explicitly selected Golden.
 
-GPT-6 Astra/high is the recommended parent setting for this mode, but guidance cannot select or attest the host model and the recommendation is neither enforced nor proven best. Current host/user authority must select the actual parent.
+GPT-6 Astra/high is the recommended parent setting for this mode, but guidance cannot select or attest the host model and the recommendation is neither enforced nor proven best. Current host/user authority must select the actual parent; disclose when the actual parent model or effort is unconfirmed rather than treating this guidance as selecting or verifying it.
 
 All [authority and record rules](../WORKSPACE.md#authority-entry-and-coexistence), [exact native routing](PLANNING.md#exact-native-routing), recovery, evidence, and parent-only acceptance remain controlling. A roadmap organizes authorized work; it grants no implementation, external effect, publication, deployment, or release authority. Source-ready is not permission to ship.
+
+### Authorship and judgment boundary
+
+Selected ADHD workers author candidate proposals, deepening material, output
+repair, and final provocation. Luna/high owns substantive evidence
+reconciliation, solution revision, design, and roadmap prose after ADHD. The
+parent owns workflow judgment, adoption, and acceptance: when Astra serves as
+parent, it may frame criteria, evaluate and classify evidence, score, rank,
+cluster, select, reject, commission a changed search obligation, adopt `TASK.md`,
+and accept, but does not author substantive Golden or ADHD-worker output. An
+adviser supplies bounded framing and evidence-only advice and has no authority to
+select, reject, adopt, or accept. An Astra-routed ADHD worker is the
+selected-worker exception and may author only the assigned ADHD material. The
+parent coordinates the workflow and acceptance but does not become a substantive
+Golden author.
+
+### ADHD worker selection, route, and sealing
+
+ADHD worker selection is task-local and must be resolved before divergence. Use
+the canonical [Worker model selection](WORKER-MODELS.md#conversational-selector-backed-by-the-live-catalog)
+acquisition and display rules, including its optional model-free catalog
+collector; the collector is usable for ADHD selection, but coding `bulk` and
+`judgment` resolution flags are not ADHD choices. Bind exactly one literal
+`model / effort` pair for every ADHD generator and deepener, their output repair,
+and final provocation in the entire round. A new unbound task defaults to
+`gpt-5.6-luna / high`; an explicit pair must be verified in the current catalog
+with supported transport and effort. An unchanged default needs no new catalog
+call.
+
+`choose ADHD workers` is the distinct conversational selector; `choose workers`
+continues to select coding `bulk` and `judgment` roles only. A discoverable exact
+form is `ADHD workers: gpt-6-astra / low`. Ask only for missing or ambiguous
+choices. Reuse an exact prior user clarification that maps a nickname to a
+literal pair unless the mapping is missing, ambiguous, or relevant facts changed.
+A previously clarified nickname is exempt from mandatory clarification; only an
+unclarified “Astra light”, a model-only answer, a missing or malformed pair,
+conflicting per-role choices, an unavailable model, or unsupported transport or
+effort requires targeted clarification or a visible block before affected
+dispatch.
+Catalog default effort is usable only when the user expressly requests that
+catalog default. Never guess, probe, substitute, or silently fall back.
+
+Seal the literal pair, supported transport, and relevant context before divergence
+in the existing `TASK.md` adoption/current-stage entry and Authorized Assignment
+records, using existing route fields only. Reuse the seal for the entire round
+and for later fresh ADHD assignments while applicable catalog and transport facts
+remain valid. A mid-round change must never mix earlier generators with newly
+selected deepeners; after settlement, a changed pair is allowed only for a newly
+authorized full ADHD round. Authorized repair after settlement may reuse the
+sealed pair. The selector or dropdown itself grants no authority.
+
+This binding affects only ADHD generators, deepeners, output repair, and final
+provocation. It does not affect later Luna/high evidence reconciliation, solution
+revision, design, or roadmap prose; coding `bulk` or `judgment`; ordinary Lunacy;
+parent judgment, adoption, or acceptance; adviser advice; global model settings;
+or persistent preferences. Coding routes default to `gpt-5.6-luna / max` for
+`bulk` and `gpt-5.6-sol / medium` for `judgment`; explicit task-local selections
+for those roles remain binding and are preserved. If an ADHD worker uses an
+Astra model, it may propose assigned ADHD material but cannot thereby become the
+parent, adviser, adopter, judge, or acceptor. There are no cost aliases, global
+changes, or new runtime controls.
 
 ## Golden cycle
 
 1. **Frame the outcome.** Astra states the user-visible outcome, constraints and non-goals, preserved behavior, allowed effects, decisive acceptance evidence, and separate release authority. For ongoing improvement, require a substantial expected gain tied to a real bottleneck, defect, or simplification, and state how acceptance evidence will verify that gain. Compare the gain with the added total complexity; prefer deleting obsolete machinery or reusing existing code and platform capabilities over adding a new mechanism. Prefer actual defects, user feedback, failed contracts, or changed constraints over speculative novelty.
-2. **Consult.** Obtain one real response from the task-selected adviser using the bounded route below. Consultation precedes ADHD so it can expose constraints and questions, but do not present its preference or ranking to proposal generators as the selected answer. Advice supplies evidence, not authority.
-3. **Run actual ADHD.** Read and execute the available ADHD skill, including isolated divergence, parent scoring/clustering/trap removal, and fresh focus/convergence. A summary, cached answer, nominal stage, or ordinary brainstorming is not ADHD completion. Only actual completed predecessor output permits advancement.
-4. **Adopt an executable roadmap.** After consultation and ADHD complete, Astra records the chosen design and coherent ready slices in the existing parent-owned `TASK.md` using the [Compact TASK form](PLANNING.md#compact-task-form). Each slice identifies concrete implementation steps, observable completion, preserved behavior, design/interfaces, ownership and dependencies, literal model/effort and context, checks and acceptance evidence, stop/recovery limits, permitted effects, and any separately authorized release actor/action. Fully specify every included implementation slice when adopting its outcome. Genuinely unselected future options outside that adopted outcome may retain only the detail needed to expose dependencies and revisit conditions, unless the user requests more; selecting such an option or materially changing an adopted design requires a new immutable adoption before affected execution.
-5. **Deliver through Lunacy.** Normally one worker owns inspection, implementation, tests, self-review, ordinary repair, and its immutable report. Multiple coherent slices may implement one outcome; do not create a cycle per file, check, or same-owner repair. Use up to four implementation owners only for non-overlapping writes and independently safe effects with explicit dependencies and integration order. Use the task-selected `bulk` role for bounded, decisively checkable work and `judgment` role for difficult implementation, diagnosis, or discriminating test design. Their defaults remain Luna/max and Sol/medium; [launch-time worker selections](WORKER-MODELS.md) may replace either role for this task. Sol/high remains explicit-only. Worker-role overrides do not change the parent, ADHD agents, or separately selected consultation route. Refuse an unsupported or conflicting pair before dispatch; never substitute, infer, probe, or fall back. Source-only or design-only authority delivers only its authorized artifacts, never implementation by implication.
+2. **Consult.** Obtain one real response from the task-selected adviser using the bounded route below. Consultation precedes ADHD so it can expose constraints, objections, and evidence questions, but it must not become candidate authorship; do not present its preference or ranking to proposal generators as the selected answer. Advice supplies evidence, not authority.
+3. **Run actual ADHD.** Read and execute the available ADHD skill, including its isolated divergence, scoring/clustering/trap removal, and fresh focus/convergence. Bind the single task-local pair under [ADHD worker selection, route, and sealing](#adhd-worker-selection-route-and-sealing) before dispatch; it governs every generator and deepener only, while Luna/high retains later design and roadmap authorship. This Golden guidance does not duplicate or replace the ADHD procedure. A summary, cached answer, malformed or partial output, nominal stage, or ordinary brainstorming is not completion; all required outputs must be accessible before advancement.
+4. **Adopt an executable roadmap.** After consultation and ADHD complete, Luna supplies the substantive design package and roadmap, while Astra evaluates/selects it and records the adoption in the existing parent-owned `TASK.md` using the [Compact TASK form](PLANNING.md#compact-task-form). Each slice identifies concrete implementation steps, observable completion, preserved behavior, design/interfaces, ownership and dependencies, literal model/effort and context, checks and acceptance evidence, stop/recovery limits, permitted effects, and any separately authorized release actor/action. Fully specify every included implementation slice when adopting its outcome. Genuinely unselected future options outside that adopted outcome may retain only the detail needed to expose dependencies and revisit conditions, unless the user requests more; selecting such an option or materially changing an adopted design requires a new immutable adoption before affected execution.
+5. **Deliver through Lunacy.** Normally one worker owns inspection, implementation, tests, self-review, ordinary repair, and its immutable report. Multiple coherent slices may implement one outcome; do not create a cycle per file, check, or same-owner repair. Use up to four implementation owners only for non-overlapping writes and independently safe effects with explicit dependencies and integration order. Use the task-selected coding `bulk` role for bounded, decisively checkable work and `judgment` role for difficult implementation, diagnosis, or discriminating test design. Their defaults remain Luna/max and Sol/medium; [launch-time worker selections](WORKER-MODELS.md) may replace either role for this task. Sol/high remains explicit-only. These coding-role overrides do not change the parent, the separately selected consultation route, or the distinct ADHD pair sealed under [ADHD worker selection, route, and sealing](#adhd-worker-selection-route-and-sealing). Refuse an unsupported or conflicting pair before dispatch; never substitute, infer, probe, or fall back. Source-only or design-only authority delivers only its authorized artifacts, never implementation by implication.
 6. **Accept before advancing.** A worker's green report is self-review, not acceptance. Astra independently inspects the actual result, diff, integration, and applicable evidence under [Acceptance and barrier](PLANNING.md#acceptance-and-barrier). Reuse completed proof only while its artifact, dependencies, configuration, environment, scope, and requirement assumptions remain unchanged.
 7. **Continue or finish.** Further ready slices for the same adopted outcome remain in delivery. A materially distinct authorized outcome after acceptance begins a fresh consultation and actual ADHD cycle. Material contradictory facts require a new adoption reopening affected strategy; reconcile live or unknown effects before action and never blindly replay them. Stop when all finite authorized outcomes are accepted. Continuous means successive authorized material improvements, not endless research or implementation.
 
@@ -36,7 +97,61 @@ On continuation, read this entry and reconcile the cited reports and actual assi
 
 When Golden is invoked, check the skills currently advertised or available to the task. If ADHD is unavailable, suggest once for the task that the user install or enable it. Describe it as known uninstalled only when current evidence proves that state; otherwise call it unavailable and distinguish disabled or not-loaded possibilities from a known missing installation. Do not repeat the suggestion, auto-install, guess a source, URL, command, or plugin ID. If the user requests installation, use a supported installation flow only after the actual source is known. If ADHD is available, make no installation suggestion. Missing ADHD or its required exact route pauses dependent Golden progression; it does not authorize substitution. Independent already-authorized work may continue only without entering a dependent later stage. The user may explicitly leave Golden or change scope; the parent may not silently skip the stage.
 
-Explicit Golden selection opts into the available ADHD skill's actual procedure despite any routine-work skip heuristic; this summary does not implement or replace that skill. The recommended default is five fresh isolated `gpt-5.6-sol`/`medium` generators producing six ideas each, followed by Astra scoring, clustering, and trap removal, then three fresh isolated Sol/medium deepeners for the leading distinct options. These proposal-only agents do not edit code or `TASK.md`; the implementation-owner limit does not apply to them. Preserve the ADHD skill's isolation and no-ranking rules: generators may receive relevant facts and questions surfaced by consultation, but not the adviser's preference as an answer.
+Explicit Golden selection opts into the available ADHD skill's actual procedure despite any routine-work skip heuristic; this summary does not implement or replace that skill. Its proposal-only agents do not edit code or `TASK.md`; the implementation-owner limit does not apply to them. Preserve the ADHD skill's isolation and no-ranking rules: generators may receive relevant facts and questions surfaced by consultation, but not the adviser's preference as an answer.
+
+The ADHD generator/deepener default and explicit task-local selector are defined
+under [ADHD worker selection, route, and sealing](#adhd-worker-selection-route-and-sealing).
+Luna/high remains the author of substantive design and roadmap drafting. The
+available ADHD skill remains the required procedure and source of its stage
+rules; this entry does not simulate it. A round is incomplete when any required
+generator or deepener output is missing or malformed, and format defects are not
+negative idea evidence. After scoring and trap removal, fewer than three viable,
+distinct survivors is a valid observation, not permission to pad the set with a
+trap, duplicate, or unverified idea. Do not call the skill's three-deepener focus
+or a full round complete on that basis; record the short survivor set and leave
+the focus stage incomplete. A bounded additional search may be authorized under
+the existing authority only for a named obligation and fresh basis, not as a
+blind repeat. No survivor becomes a winner merely because it is the last one.
+The final ADHD provocation is authored by the selected ADHD worker; the parent
+and Astra in parent or adviser roles may assess it but may not author, invent, or
+rewrite it.
+
+When Astra rejects a candidate, it records the failed criterion and evidence.
+Luna may make a bounded same-candidate repair for a local defect. If the causal
+mechanism or load-bearing assumption fails, the parent authorizes a new full ADHD
+round on a materially new vector; Astra states the failed obligation but does not
+invent the replacement. The stable criteria are fixed from the authorized brief
+before judgment. A relaunch brief must name the rejected mechanism or assumption,
+the changed mechanism or assumption, and the evidence or constraint that makes
+the change causal; a renamed proposal, cosmetic edit, or summary is not proof of
+a new vector. No partial replacement branch, arbitrary retry count, or guaranteed
+success substitutes for that round.
+
+Every rejection handoff is cold-complete without becoming a mandatory form or template: it states the failed criterion and the actual observed evidence. Luna may challenge whether the defect is local or causal/load-bearing; Luna owns substantive bounded repair and its focused checks when it is local. When the causal mechanism or load-bearing assumption fails, the parent owns authorization and dispatch of a new full ADHD round on a materially new vector. Luna may group shared defects when one mechanism explains them, but must preserve every underlying objection. Focused reruns never replace independent acceptance against all relevant evidence. Astra supplies judgment and failed-obligation evidence, not a repair mechanism. Malformed or partial output is an output defect, not negative idea evidence. Unknown-effect work is not replayed or cleaned up.
+
+Use truthful finite dispositions rather than retrying until a winner appears:
+`no-worthy-opportunity` is terminal only when accessible raw evidence settles the
+remaining candidates against the stable criteria and no admissible changed vector
+remains; it is not proof that every possible idea was searched. Use
+`unresolved-evidence` when a material claim remains missing, contradictory, or
+undecidable, and `review-deferred` when the parent lacks capacity to inspect the
+next complete round. Neither is acceptance, a poor-result judgment, or permission
+for automatic retries; review-deferred is governance state, not evidence of low
+value. The existing authority permits the parent to authorize bounded rerounds
+within scope, one complete round and decision surface at a time, when a named
+obligation and genuinely changed vector or fresh search basis remain; do not add
+an ask-user gate for that routine decision or promise an endless search. A short
+survivor set alone is not a reason to repeat the same vector.
+
+Decision summaries may point to evidence but never replace the complete raw ADHD
+outputs, deepener material, or relevant underlying records. If raw evidence is
+inaccessible or conflicts with its summary, keep the custody/evidence state open
+and use unresolved-evidence rather than accepting, rejecting, or declaring
+no-worthy-opportunity.
+
+Any operation with an unsettled return remains unknown-execution with its barrier
+open. Do not replay, resume, clean up, replace, or accept dependent work until
+actual settlement evidence closes custody.
 
 <a id="direct-exact-web-pro-advice"></a>
 ### Consultation selection and bounded advice
@@ -78,8 +193,9 @@ baseline and constraints, alternatives, and the minimum supporting and contrary
 facts and unknowns. Put volatile task facts, identifiers and timestamps last and
 only when they affect the answer. Keep unchanged wording and order stable when
 practical, but do not pad a packet or omit material facts to manufacture a common
-prefix. Request 250–300 words covering recommendation, rationale, strongest
-failure mode, decisive check and reversal evidence.
+prefix. Request 250–300 words covering load-bearing constraints, objections to the
+supplied options, evidence gaps, a decisive check, and reversal evidence. Do not
+ask the adviser to invent ideas, mechanisms, repairs, or roadmap content.
 
 Supply one self-contained, unranked packet for one coherent decision. Exclude
 parent preferences, rankings and authorship. Reuse verified worker excerpts;
@@ -127,13 +243,14 @@ calls or live benchmarks solely to measure caching.
 Illustrative shape (labels are optional, not a mandatory schema):
 
 ```text
-Act as an independent technical adviser. Return 250–300 words: recommendation,
-rationale, strongest failure mode, decisive check, and reversal evidence.
+Act as an independent evaluator. Return 250–300 words: load-bearing constraints,
+strongest objection to the supplied options, evidence gap, decisive check, and
+reversal evidence.
 Response only; no tools or follow-up. All necessary facts follow.
 
 Decision: <one neutral question or outcome>
 Baseline and constraints: <only facts required to reason from a cold start>
-Alternatives: <two or three real options>
+Supplied options: <two or three real options; do not add a replacement>
 Evidence and unknowns: <minimal supporting and contrary facts; what is unverified>
 Task-specific details: <only answer-relevant volatile facts>
 ```
