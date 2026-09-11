@@ -12,7 +12,8 @@ path and does not automatically invoke strategy consultations.
 
 In the installed plugin, invoke **`$lunacy-native:golden <your task>`** for the
 golden workflow: a task-selected consultation (Astra/high by default), actual ADHD
-using one task-local model/effort pair (`gpt-5.6-luna / high` by default), Luna/high
+using a task-local uniform or opt-in staged model/effort binding (`gpt-5.6-luna / max`
+uniformly by default), Luna/high
 substantive design and solution authorship, adopted planning, Lunacy worker
 delivery, and independent acceptance. Selected ADHD workers generate, deepen, and
 repair proposals and author the final provocation; Astra in its parent role exercises
@@ -37,9 +38,11 @@ Golden outcome uses a real consultation followed by actual ADHD, even for routin
 work; this extra strategy cost is why ordinary Lunacy remains the lighter path.
 Coding worker choices are task-local and do not change the parent, consultation,
 or ADHD route. Golden's distinct ADHD selector is also task-local: use
-`choose ADHD workers`, or supply `ADHD workers: gpt-6-astra / low`; one exact pair
-then applies to every ADHD generator and deepener only. Omission keeps
-`gpt-5.6-luna / high`. See [ADHD worker selection](orchestrator/IMPROVEMENT.md#adhd-worker-selection-route-and-sealing)
+`choose ADHD workers`, or supply `ADHD workers: gpt-6-astra / low`, for one exact
+uniform pair. To opt into stage-specific routing, use
+`ADHD stages: breadth gpt-5.6-luna / high; focus gpt-6-astra / low`. Omission keeps
+uniform `gpt-5.6-luna / max`; both explicit pairs are verified and sealed before
+any generator, without silent substitution. See [ADHD worker selection](orchestrator/IMPROVEMENT.md#adhd-worker-selection-route-and-sealing)
 for catalog validation, sealing, and boundary rules. Architecture-only work stays
 architecture-only, and the optional evidence/catalog helpers do not launch
 workers or establish correctness.
@@ -293,6 +296,10 @@ The optional observer is documented in
 [OPERATOR.md](OPERATOR.md#optional-evidence-index-helper). It reads an already
 captured, authorized JSONL file and never launches models or changes evidence.
 
+For an explicitly requested, offline token and API-equivalent cost summary of
+selected receipts, see [optional usage metrics](orchestrator/USAGE-METRICS.md).
+The helper is not an automatic collector, billing meter, or global scan.
+
 ## Files
 
 - [SKILL.md](SKILL.md) — entry, scope, routing, and required reads.
@@ -309,6 +316,9 @@ captured, authorized JSONL file and never launches models or changes evidence.
 - [OPERATOR.md](OPERATOR.md) — large-output recipe and observer reference.
 - [`scripts/evidence_index.py`](scripts/evidence_index.py) — bounded read-only
   evidence projection.
+- [orchestrator/USAGE-METRICS.md](orchestrator/USAGE-METRICS.md) and
+  [`scripts/usage_report.py`](scripts/usage_report.py) — optional offline token
+  and dated API-equivalent cost reporting for caller-selected receipts.
 - [`tests/`](tests/) — offline documented-recipe, worker-selection, and observer
   CLI regression suite.
 

@@ -27,12 +27,22 @@ ADHD worker selection is task-local and must be resolved before divergence. Use
 the canonical [Worker model selection](WORKER-MODELS.md#conversational-selector-backed-by-the-live-catalog)
 acquisition and display rules, including its optional model-free catalog
 collector; the collector is usable for ADHD selection, but coding `bulk` and
-`judgment` resolution flags are not ADHD choices. Bind exactly one literal
-`model / effort` pair for every ADHD generator and deepener, their output repair,
-and final provocation in the entire round. A new unbound task defaults to
-`gpt-5.6-luna / high`; an explicit pair must be verified in the current catalog
-with supported transport and effort. An unchanged default needs no new catalog
-call.
+`judgment` resolution flags are not ADHD choices. A new unbound task defaults to
+one `gpt-5.6-luna / max` pair for the entire round. The existing uniform
+selector also continues to bind one literal pair to every ADHD operation.
+
+An explicit opt-in staged selector may instead bind two literal pairs:
+
+```text
+ADHD stages: breadth gpt-5.6-luna / high; focus gpt-6-astra / low
+```
+
+`breadth` covers generators and repair of their output. `focus` covers
+deepeners, repair of their output, and the final provocation. The displayed
+pairs are examples, not aliases or hard-coded routes; any explicit stage pair
+must pass the same catalog, transport, effort, source-identity, and context
+checks as a uniform choice. Resolve and verify **both** stage pairs before the
+first generator. An unchanged default needs no new catalog call.
 
 `choose ADHD workers` is the distinct conversational selector; `choose workers`
 continues to select coding `bulk` and `judgment` roles only. A discoverable exact
@@ -47,16 +57,27 @@ dispatch.
 Catalog default effort is usable only when the user expressly requests that
 catalog default. Never guess, probe, substitute, or silently fall back.
 
-Seal the literal pair, supported transport, and relevant context before divergence
+Selector precedence is deliberately narrow. With no ADHD selector, use the
+unchanged default. A uniform selector alone applies its pair to both stages; a
+staged selector alone applies its two exact stage pairs. If both forms appear,
+accept them as redundant only when the uniform pair exactly equals both staged
+pairs; otherwise they conflict and require clarification before any generator.
+An incomplete stage mapping, duplicate or unknown stage, malformed or unavailable
+literal, unsupported transport or effort, or unresolved source/context identity
+also blocks before divergence. Do not infer one stage from the other.
+
+Seal each resolved stage's literal pair, supported transport, and relevant context before divergence
 in the existing `TASK.md` adoption/current-stage entry and Authorized Assignment
-records, using existing route fields only. Reuse the seal for the entire round
+records, using existing route fields only. Reuse the applicable seal for the entire round
 and for later fresh ADHD assignments while applicable catalog and transport facts
 remain valid. A mid-round change must never mix earlier generators with newly
-selected deepeners; after settlement, a changed pair is allowed only for a newly
-authorized full ADHD round. Authorized repair after settlement may reuse the
-sealed pair. The selector or dropdown itself grants no authority.
+selected focus workers; after settlement, changed stage bindings are allowed only
+for a newly authorized full ADHD round. Do not relabel or combine old breadth
+with a new focus route. Authorized output repair reuses the seal for the stage
+whose output it repairs, and final provocation reuses the focus seal. The selector
+or dropdown itself grants no authority.
 
-This binding affects only ADHD generators, deepeners, output repair, and final
+These bindings affect only ADHD generators, deepeners, output repair, and final
 provocation. It does not affect later Luna/high evidence reconciliation, solution
 revision, design, or roadmap prose; coding `bulk` or `judgment`; ordinary Lunacy;
 parent judgment, adoption, or acceptance; adviser advice; global model settings;
@@ -71,8 +92,8 @@ changes, or new runtime controls.
 
 1. **Frame the outcome.** Astra states the user-visible outcome, constraints and non-goals, preserved behavior, allowed effects, decisive acceptance evidence, and separate release authority. For ongoing improvement, require a substantial expected gain tied to a real bottleneck, defect, or simplification, and state how acceptance evidence will verify that gain. Compare the gain with the added total complexity; prefer deleting obsolete machinery or reusing existing code and platform capabilities over adding a new mechanism. Prefer actual defects, user feedback, failed contracts, or changed constraints over speculative novelty.
 2. **Consult.** Obtain one real response from the task-selected adviser using the bounded route below. Consultation precedes ADHD so it can expose constraints, objections, and evidence questions, but it must not become candidate authorship; do not present its preference or ranking to proposal generators as the selected answer. Advice supplies evidence, not authority.
-3. **Run actual ADHD.** Read and execute the available ADHD skill, including its isolated divergence, scoring/clustering/trap removal, and fresh focus/convergence. Bind the single task-local pair under [ADHD worker selection, route, and sealing](#adhd-worker-selection-route-and-sealing) before dispatch; it governs every generator and deepener only, while Luna/high retains later design and roadmap authorship. This Golden guidance does not duplicate or replace the ADHD procedure. A summary, cached answer, malformed or partial output, nominal stage, or ordinary brainstorming is not completion; all required outputs must be accessible before advancement.
-4. **Adopt an executable roadmap.** After consultation and ADHD complete, Luna supplies the substantive design package and roadmap, while Astra evaluates/selects it and records the adoption in the existing parent-owned `TASK.md` using the [Compact TASK form](PLANNING.md#compact-task-form). Each slice identifies concrete implementation steps, observable completion, preserved behavior, design/interfaces, ownership and dependencies, literal model/effort and context, checks and acceptance evidence, stop/recovery limits, permitted effects, and any separately authorized release actor/action. Fully specify every included implementation slice when adopting its outcome. Genuinely unselected future options outside that adopted outcome may retain only the detail needed to expose dependencies and revisit conditions, unless the user requests more; selecting such an option or materially changing an adopted design requires a new immutable adoption before affected execution.
+3. **Run actual ADHD.** Read and execute the available ADHD skill, including its isolated divergence, scoring/clustering/trap removal, and fresh focus/convergence. Resolve the default, uniform, or staged task-local binding under [ADHD worker selection, route, and sealing](#adhd-worker-selection-route-and-sealing) before dispatch; it governs ADHD workers only, while Luna/high retains later design and roadmap authorship. Run five fresh parallel isolated breadth generators producing six ideas each without sibling outputs. Only after every breadth operation settles, score all 30 ideas, cluster them, remove traps, and select three distinct viable seeds. Dispatch three fresh focus workers; each receives the common brief and instructions, exactly its selected seed, and only necessary authorized context—never the full pool or scores. Authorized full source and evidence remain accessible with provenance, freshness, custody, and seal facts; this does not require copying the full material into each packet. This Golden guidance does not duplicate or replace the ADHD procedure. A summary, cached answer, malformed or partial output, nominal stage, or ordinary brainstorming is not completion; all required outputs must be accessible before advancement.
+4. **Adopt an executable roadmap.** After consultation and ADHD complete, Luna supplies the substantive design package and roadmap, while Astra evaluates/selects it and records the adoption in the existing parent-owned `TASK.md` using the [Compact TASK form](PLANNING.md#compact-task-form). Each slice identifies concrete implementation steps, observable completion, preserved behavior, design/interfaces, ownership and dependencies, literal model/effort and context, checks and acceptance evidence, stop/recovery limits, permitted effects, and any separately authorized release actor/action. Fully specify every included implementation slice when adopting its outcome. Before marking the package FINAL, Luna self-reviews each included slice’s source-dependent claims against applicable current source, interfaces, and evidence, correcting ordinary inconsistencies and stale references while preserving affected contracts. This is substantive design work, not a new artifact, gate, agent, ledger, or test checklist; no required check, including existing tests, is waived. Materially unresolved claims are surfaced under existing custody, decision, and recovery rules without a blanket stop on unrelated slices. Genuinely unselected future options outside that adopted outcome may retain only the detail needed to expose dependencies and revisit conditions, unless the user requests more; selecting such an option or materially changing an adopted design requires a new immutable adoption before affected execution.
 5. **Deliver through Lunacy.** After adoption, pass the exact adopted roadmap item and existing assignment/report anchors directly to one selected coherent worker. The parent must not restate the adopted item as old/new patches or overlapping edit drafts. On an authorized writable route, apply [Native coherent engineering owner](../worker/ENGINEERING.md) and the existing immutable report contract. The worker may make ordinary implementation decisions within adopted scope, but may not silently change the adopted outcome, invariants, interfaces, or non-goals; surface any material source/roadmap conflict for parent judgment and new adoption. On a response-only or unavailable-write route, deliver only its separately authorized response, design, proposal, user-required artifact, or blocker artifact; inability to write does not authorize a proposal, patch, or source edit by implication. It must not mutate source by implication, transfer custody, or be treated as source delivery. Do not replace this route with parent-authored old/new drafts; separately authorized user-requested patch artifacts and permitted mechanical transport remain allowed. After FINAL, any bounded repair under the same adoption requires a NEW assignment and a NEW report; it is not an automatic retry. Parent acceptance follows [Ownership, barrier, and acceptance](../WORKSPACE.md#ownership-barrier-and-acceptance); a worker report is not acceptance. Multiple coherent slices may implement one outcome; do not create a cycle per file, check, or same-owner repair. Use up to four implementation owners only for non-overlapping writes and independently safe effects with explicit dependencies and integration order. Use the task-selected coding `bulk` role for bounded, decisively checkable work and `judgment` role for difficult implementation, diagnosis, or discriminating test design. Their defaults remain Luna/max and Sol/medium; [launch-time worker selections](WORKER-MODELS.md) may replace either role for this task. Sol/high remains explicit-only. These coding-role overrides do not change the parent, the separately selected consultation route, or the distinct ADHD pair sealed under [ADHD worker selection, route, and sealing](#adhd-worker-selection-route-and-sealing). Refuse an unsupported or conflicting pair before dispatch; never substitute, infer, probe, or fall back. Source-only or design-only authority delivers only its authorized artifacts, never implementation by implication.
 6. **Accept before advancing.** Advance only through [Ownership, barrier, and acceptance](PLANNING.md#acceptance-and-barrier).
 7. **Continue or finish.** Further ready slices for the same adopted outcome remain in delivery. A materially distinct authorized outcome after acceptance begins a fresh consultation and actual ADHD cycle. Material contradictory facts require a new adoption reopening affected strategy; reconcile live or unknown effects before action and never blindly replay them. Stop when all finite authorized outcomes are accepted. Continuous means successive authorized material improvements, not endless research or implementation.
@@ -99,7 +120,7 @@ When Golden is invoked, check the skills currently advertised or available to th
 
 Explicit Golden selection opts into the available ADHD skill's actual procedure despite any routine-work skip heuristic; this summary does not implement or replace that skill. Its proposal-only agents do not edit code or `TASK.md`; the implementation-owner limit does not apply to them. Preserve the ADHD skill's isolation and no-ranking rules: generators may receive relevant facts and questions surfaced by consultation, but not the adviser's preference as an answer.
 
-The ADHD generator/deepener default and explicit task-local selector are defined
+The ADHD default, uniform selector, and opt-in staged selector are defined
 under [ADHD worker selection, route, and sealing](#adhd-worker-selection-route-and-sealing).
 Luna/high remains the author of substantive design and roadmap drafting. The
 available ADHD skill remains the required procedure and source of its stage
@@ -152,6 +173,13 @@ no-worthy-opportunity.
 Any operation with an unsettled return remains unknown-execution with its barrier
 open. Do not replay, resume, clean up, replace, or accept dependent work until
 actual settlement evidence closes custody.
+
+Quota pressure, rate limits, or a cheaper available route do not alter a sealed
+stage binding. If the exact route cannot launch, or custody/freshness is uncertain,
+stop dependent advancement without fallback. Breadth must be completely settled
+before scoring and focus; fewer than three distinct viable survivors stops focus.
+Missing or partial output receives an existing truthful finite disposition rather
+than padding, substitution, or replay.
 
 <a id="direct-exact-web-pro-advice"></a>
 ### Consultation selection and bounded advice
