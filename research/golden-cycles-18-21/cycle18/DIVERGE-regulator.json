@@ -1,0 +1,26 @@
+[
+  {
+    "text": "Bind every final claim to a stable source span and a concrete falsifying check.",
+    "rationale": "Makes unsupported prose refusable without adding a separate report-validation pass."
+  },
+  {
+    "text": "Require each bespoke helper to declare the uncovered behavior and expected counterexample it targets.",
+    "rationale": "Separates guidance gaps from execution errors and exposes unchanged-surface tests."
+  },
+  {
+    "text": "Compare report pointers with the changed-surface set during acceptance, explaining every zero-delta mismatch.",
+    "rationale": "Proves final pointer inspection covered the actual design scope."
+  },
+  {
+    "text": "Treat exact wording, model strings, and JSONPath expressions as interface claims grounded in their owning schema.",
+    "rationale": "Prevents brittle assertions from masquerading as substantive verification."
+  },
+  {
+    "text": "Classify every helper failure against a cited rule and reproducible input before changing the guidance.",
+    "rationale": "Creates an auditable distinction between execution defects and guidance defects."
+  },
+  {
+    "text": "Map reused evidence to affected behaviors and identify the precise uncovered behavior before adding a new check.",
+    "rationale": "Preserves proof while curbing redundant packaging and prose checks."
+  }
+]

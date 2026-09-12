@@ -1,0 +1,25 @@
+{
+  "focus": "FOCUS-1",
+  "idea": "Qualified edge-case reruns as normal unittest methods",
+  "how_it_works": "The worker turns every discovered edge case into a regular unittest method with a stable fully qualified name, rather than a shell heredoc or bespoke diagnostic probe. The worker invokes the existing unittest runner with that name as its sole rerun selector and preserves the runner's raw exit status and output. The parent receives the selector together with the raw evidence, so routing and custody are explicit without a status parser, ledger, or global configuration. Independent acceptance reruns the same qualified method in a fresh finite process and checks the invariant directly, while the normal suite and packaging checks remain unchanged. This makes manifest-cap, UTF-8 truncation, and Git-status slicing failures independently reproducible and removes repeated probe syntax or assertion repair when the failure is localized.",
+  "load_bearing_risk": "A method can falsely look isolated if shared mutable fixture state, environment-dependent Git data, or an underspecified manifest fixture leaks across tests; then a qualified rerun gives misleading proof while appearing deterministic.",
+  "first_concrete_step": "Source-check the current unittest module and map each cycle20 edge case to an existing or missing fully qualified method, then run one candidate selector to compare raw exit and output before adopting any fixture edits.",
+  "subideas": [
+    {
+      "name": "Name-driven routing",
+      "description": "Use behavior-based, stable method names as the worker-to-parent routing and custody token, avoiding a second selector vocabulary or parser."
+    },
+    {
+      "name": "Minimal fixture per method",
+      "description": "Give each edge-case method a self-contained temporary fixture and cleanup boundary, especially for manifest size, UTF-8 bytes, and Git-status slicing."
+    },
+    {
+      "name": "Raw failure bundle",
+      "description": "Return the fully qualified selector, raw stdout, raw stderr, and exit code as one evidence bundle so the parent can repair without rerunning a diagnostic probe."
+    },
+    {
+      "name": "Acceptance replay",
+      "description": "Let independent acceptance replay exactly the worker's selector in a fresh finite process, combining precise proof with the existing suite rather than adding a mandatory stage."
+    }
+  ]
+}

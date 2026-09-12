@@ -1,0 +1,26 @@
+[
+  {
+    "text": "Treat each Golden run as a resumable transaction with a local checkpoint after every accepted seam.",
+    "rationale": "A 3am failure resumes from the last valid boundary instead of reconstructing or repeating completed work."
+  },
+  {
+    "text": "Require every stage handoff to carry a one-screen recovery envelope: failed seam, reusable evidence, next owner, next action, stop condition, and escalation boundary.",
+    "rationale": "The on-call engineer gets an executable diagnosis without inventing orchestration or changing worker authorship."
+  },
+  {
+    "text": "Ship an offline replay pack that reruns literal checks and source-custody validation from captured artifacts without reopening strategy stages.",
+    "rationale": "Most breakages become locally reproducible while preserving the original routing and evidence chain."
+  },
+  {
+    "text": "Quarantine malformed worker artifacts behind typed handoff boundaries so unaffected outputs remain consumable.",
+    "rationale": "A bad artifact triggers one bounded repair rather than paging the whole Golden pipeline."
+  },
+  {
+    "text": "Build a failure-to-recovery map during strategy selection, with one named repair path for each stage and seam.",
+    "rationale": "Recovery decisions are made before the incident, eliminating ad hoc 3am diagnosis."
+  },
+  {
+    "text": "Make acceptance emit a release-neutral delivery receipt containing implementation evidence, required-test results, unresolved defects, and the explicit release-authority handoff.",
+    "rationale": "A broken delivery is separated from a release decision, so on-call can close the engineering incident without assuming release authority."
+  }
+]

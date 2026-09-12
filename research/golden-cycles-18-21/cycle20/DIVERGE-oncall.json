@@ -1,0 +1,26 @@
+[
+  {
+    "text": "Install a parser fuse that rejects excessive nesting and integer digit bombs before semantic loading.",
+    "rationale": "Prevents RecursionError and huge-int failures at the JSON boundary."
+  },
+  {
+    "text": "Route diagnostics through an ASCII-safe incident envelope while preserving normal UTF-8 output.",
+    "rationale": "Stops surrogate-containing paths or messages from crashing error reporting."
+  },
+  {
+    "text": "Preflight byte ceilings and decode inputs incrementally into bounded buffers.",
+    "rationale": "Makes manifest and receipt caps enforceable before parser work begins."
+  },
+  {
+    "text": "Represent malformed inputs as typed quarantine records carrying only path, stage, and exception class.",
+    "rationale": "Keeps failures actionable without leaking receipt content."
+  },
+  {
+    "text": "Add a final non-throwing renderer for stdout and stderr that substitutes unencodable characters.",
+    "rationale": "Ensures reporting remains reliable when output encoding rejects data."
+  },
+  {
+    "text": "Separate lexical JSON safety checks from business aggregation so rejected files cannot perturb valid totals.",
+    "rationale": "Contains parser failures while preserving independent acceptance semantics."
+  }
+]

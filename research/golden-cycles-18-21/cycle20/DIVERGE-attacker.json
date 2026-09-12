@@ -1,0 +1,26 @@
+[
+  {
+    "text": "Inject lone-surrogate strings into valid JSON so ensure_ascii=False crashes at stdout, then sanitize or encode diagnostics at the final output seam.",
+    "rationale": "Turns a successful parse into a UnicodeEncodeError after business logic, exposing an overlooked output boundary."
+  },
+  {
+    "text": "Use exponentially nested arrays/objects to trigger RecursionError during stdlib decoding, then convert parser-depth exhaustion into the existing controlled UsageError path.",
+    "rationale": "Attacks recursion rather than ordinary malformed syntax while preserving the public error contract."
+  },
+  {
+    "text": "Feed an integer token beyond Python’s digit limit to provoke ValueError, with a guarded parse_int or preflight numeric-length check that emits a bounded diagnostic.",
+    "rationale": "Covers a parser failure that is neither JSONDecodeError nor UsageError."
+  },
+  {
+    "text": "Race a receipt replacement after size inspection, then bind the cap to the opened file descriptor and fstat/read result instead of trusting a prior path check.",
+    "rationale": "Defeats path-based size enforcement without adding dependencies or changing receipt semantics."
+  },
+  {
+    "text": "Hide pathological cost in megabytes of whitespace and escaped scalar text just under the byte cap, using one bounded read/decode path and avoiding content in diagnostics.",
+    "rationale": "Targets repair and allocation pressure that nominal manifest/receipt caps can still leave exposed."
+  },
+  {
+    "text": "Construct duplicate, deeply nested, and surrogate-bearing synthetic records together, asserting totals and identity accounting remain unchanged while only boundary failures become stable.",
+    "rationale": "Inverts sabotage into a compact adversarial regression matrix around the public CLI."
+  }
+]

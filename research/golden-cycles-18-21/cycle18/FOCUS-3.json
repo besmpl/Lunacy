@@ -1,0 +1,13 @@
+{
+  "idea": "First-broken-arrow triage in Golden guidance",
+  "sketch": "Add a source-checked, read-only “first broken arrow” triage recipe to Golden guidance, centered on the existing source → behavior → report evidence chain. When a required checker fails, the worker inspects the cited source, observed behavior, and generated report in that order and identifies which arrow first stops being supported. It repairs that layer and reruns the same required check, rather than inventing another prose checker or weakening the assertion; exact literal routes and explicit required tests remain mandatory. Wording/model-spacing or JSON Path/str failures become report-side or checker-execution defects when source and behavior evidence remain aligned, while substantive failures still travel through the full pipeline and independent acceptance. This closes the guidance gap around the next action after failure and exposes the execution mistake of launching nine bespoke scripts. The benefit is falsifiable by comparing bespoke checker launches, incidental failures, repair loops, and preserved substantive findings against the nine-script incident baseline.",
+  "load_bearing_risk": "Workers could misclassify real behavior failures as report defects, or turn triage into an unapproved gate or ledger. Keep it as an evidence pointer in the existing report, with independent acceptance still checking source, behavior, and report.",
+  "first_concrete_step": "Replay the six failed incident checks and annotate each with expected evidence, observed evidence, first broken arrow, and repair using the existing report format.",
+  "subideas": [
+    "Use a three-column failure card: expected evidence, observed evidence, first broken arrow.",
+    "Add exact-route replay guidance that preserves commands and literal paths while narrowing diagnostics.",
+    "Include examples distinguishing wording/model-spacing noise and JSON Path/str faults from substantive mismatches.",
+    "Require independent acceptance to confirm diagnostics did not suppress required checks."
+  ],
+  "wildcard": "What if checkers were allowed to emit only an evidence pointer to source, behavior, or report—not a retry recommendation—so every next action must remain tied to the actual broken arrow?"
+}

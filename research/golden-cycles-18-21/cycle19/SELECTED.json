@@ -1,0 +1,35 @@
+[
+  {
+    "id": "assumption-5",
+    "text": "Advice is not the first artifact; a concrete uncertainty or failure can summon targeted advice after local evidence exists.",
+    "rationale": "This makes advice answer a live question instead of ceremonially preceding one.",
+    "novelty": 7,
+    "viability": 7,
+    "fit": 9,
+    "weighted": 7.5,
+    "cluster": "strategy",
+    "trap": null
+  },
+  {
+    "id": "markets-6",
+    "text": "Use standing market orders for recurring low-risk task shapes, repricing only when a new failure signal moves their risk band.",
+    "rationale": "Buyers get a fast route for familiar work, sellers reuse stable tactics, and market-makers reopen scrutiny on changed conditions.",
+    "novelty": 7,
+    "viability": 7,
+    "fit": 8,
+    "weighted": 7.25,
+    "cluster": "strategy",
+    "trap": null
+  },
+  {
+    "id": "assumption-1",
+    "text": "Golden’s unit of work is not the whole request; uncertainty slices can travel through different stages while the final route remains exact.",
+    "rationale": "This makes orchestration proportional to decision boundaries instead of request size.",
+    "novelty": 7,
+    "viability": 6,
+    "fit": 8,
+    "weighted": 6.85,
+    "cluster": "strategy",
+    "trap": null
+  }
+]

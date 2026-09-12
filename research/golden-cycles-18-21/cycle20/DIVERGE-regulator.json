@@ -1,0 +1,26 @@
+[
+  {
+    "text": "Preflight JSON structure with a bounded scanner that emits a stable, phase-tagged refusal before recursion can occur.",
+    "rationale": "Makes depth failures predictable and auditable instead of interpreter-dependent."
+  },
+  {
+    "text": "Convert oversized-integer failures into a documented refusal keyed to field path and digit count, never a traceback.",
+    "rationale": "Makes Python’s integer-limit boundary explicit and traceable."
+  },
+  {
+    "text": "Detect unpaired surrogates before serialization and refuse atomically before any UTF-8 bytes are written.",
+    "rationale": "Prevents partial output and makes Unicode failure behavior provable."
+  },
+  {
+    "text": "Constrain stderr to a fixed redacted event grammar containing input kind, phase, reason, and offset only.",
+    "rationale": "Proves diagnostics cannot disclose receipt content."
+  },
+  {
+    "text": "Record each synthetic malformed fixture’s exit code, stdout byte count, and diagnostic code as acceptance evidence.",
+    "rationale": "Creates reproducible proof for every refusal path."
+  },
+  {
+    "text": "Capture runtime-sensitive parser limits in a startup capability record rather than relying on ambient interpreter defaults.",
+    "rationale": "Makes deployment-dependent boundaries inspectable and compliant."
+  }
+]

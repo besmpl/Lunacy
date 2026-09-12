@@ -1,0 +1,26 @@
+[
+  {
+    "text": "Make Golden’s strategy a fixed-layout control packet passed by reference, deleting prose restatements at every boundary.",
+    "rationale": "A shared bus carries one canonical owner-authored payload while exact routing and authorship remain intact."
+  },
+  {
+    "text": "Add dirty-bit invalidation to strategy fields so unchanged lanes retain downstream evidence and only altered lanes reopen work.",
+    "rationale": "Cache-coherence semantics remove repeated full passes without changing the required worker sequence for changed decisions."
+  },
+  {
+    "text": "Execute all 30 scores as a reduction tree, retaining a verdict bitmap and source offsets instead of thirty narrative copies.",
+    "rationale": "Packed datapath reduction preserves every scorer’s result and source custody while deleting transcript bulk."
+  },
+  {
+    "text": "Set one end-to-end timing fence that discards intermediate prose polishing once the substantive packet is closed.",
+    "rationale": "Timing closure prevents incidental text churn from creating repair cycles around already-valid work."
+  },
+  {
+    "text": "Publish parent adoption as a versioned immutable snapshot pointer, letting independent acceptance snoop the same bytes under a separate authority clock.",
+    "rationale": "Two authorities remain separate while duplicate context reconstruction disappears."
+  },
+  {
+    "text": "Encode Luna/high design as bounded microcode with explicit source addresses and test hooks, forbidding explanatory expansion after trace closure.",
+    "rationale": "Firmware-style traces preserve source checks and tests while removing non-executable design elaboration."
+  }
+]

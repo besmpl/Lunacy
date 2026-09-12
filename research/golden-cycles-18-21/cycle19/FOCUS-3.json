@@ -1,0 +1,25 @@
+{
+  "idea": "Decision-boundary packets",
+  "sketch": "At the advice boundary, split the request into minimal uncertainty slices, each with a decision question, owned files or contracts, evidence, and an acceptance condition; deterministic glue remains shared context. The exact Astra -> isolated ADHD -> all-30 scoring -> three-focus -> Luna source-check -> parent adoption -> implementation -> independent acceptance route still runs, with every required worker retaining authorship. Workers resolve slice-specific uncertainty and reference locked decisions instead of restating or rereading the whole request, while dependency edges force coupled slices to travel together. Parent adoption merges the slice decisions into one coherent design, and acceptance checks both slice criteria and explicit cross-slice invariants. Pilot this on one routine and one coupled task, comparing prose volume, repeated evidence reads, contradictions, rework, tests, and acceptance results against the current route. Keep the guidance only if duplication or rework falls without reducing decision quality or coverage.",
+  "load_bearing_risk": "Incorrect slicing can hide coupling and lock a locally plausible but globally inconsistent decision; if discovering dependencies requires whole-request rereading, the proposed savings disappear.",
+  "first_concrete_step": "Run a shadow comparison on representative routine and cross-cutting tasks by manually adding a slice manifest to the existing TASK, then record repeated context or evidence work, contradictions, rework, and acceptance coverage before changing the Markdown guidance.",
+  "sub_ideas": [
+    {
+      "name": "Connected-component routing",
+      "description": "Build slice boundaries from shared files, contracts, and evidence, merging slices whenever a dependency edge appears."
+    },
+    {
+      "name": "Evidence capsules",
+      "description": "Have the source custodian attach provenance-preserving, slice-scoped evidence once so downstream workers can reuse it without redundant reads."
+    },
+    {
+      "name": "Adversarial focus",
+      "description": "Use the three focus rounds on the highest-uncertainty slices plus one cross-slice contradiction probe instead of repeating broad whole-request critique."
+    },
+    {
+      "name": "Acceptance-first slicing",
+      "description": "Derive slice boundaries and cross-slice invariants from required tests and acceptance criteria, making any reduced deliberation directly auditable."
+    }
+  ],
+  "wildcard": "What if Golden's true unit is not an uncertainty slice but a predicted acceptance failure, with strategy organized around proving or disproving those failure modes before expanding into broader ideation?"
+}

@@ -1,0 +1,11 @@
+The baseline supports examining a recurring verification problem, but does not establish that a repository-owned entrypoint would reduce it. Passing 173 unit and 15 packaging tests establishes eventual correctness of that accepted revision, not efficiency or prevention of parent repair.
+
+**Load-bearing constraints.** Any investigation must preserve required test coverage, raw failure exits, finite process custody, dependency-free offline execution, and independent acceptance. Accepted cycle20 source remains read-only without fresh adoption. The mandatory consultation, full Luna/max ADHD, and Luna/high design sequence remains binding. Reduced repetition counts only if total complexity falls; an additional framework, parser, ledger, stage, or acceptance authority would violate the stated objective.
+
+**Strongest objections.** The disclosed errors are heterogeneous. Manifest-cap fixtures and UTF-8 byte expectations concern test semantics; heredoc syntax and Git path slicing concern diagnostic construction. Their coexistence does not demonstrate a shared verification-invocation defect. Existing guidance already covers real commands, raw exits, coherent repairs, and acceptance. Noncompliance could explain the observed friction. Conversely, cycle18’s clarification failing to prevent later errors does not prove guidance is ineffective: applicability and compliance were not measured.
+
+**Evidence gaps.** There is no measured recurrence rate across comparable tasks, attributable repair time, token cost, command inventory stability, or counterfactual showing which errors standardized execution could actually prevent. The external validator’s availability and offline requirements also need reconciliation with the proposed boundary.
+
+**Decisive check.** A read-only reconstruction of the disclosed failures should establish whether each arose from command assembly, fixture reasoning, assertion logic, or ignored existing obligations, and identify which repeated manual actions were necessary rather than incidental.
+
+**Reversal evidence.** Predominantly task-specific failures, already-sufficient unused commands, or higher maintenance burden would weaken the reusable-verification hypothesis. Repeated identical invocation failures despite compliant execution would weaken the discipline-only explanation.

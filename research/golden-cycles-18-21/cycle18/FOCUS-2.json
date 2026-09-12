@@ -1,0 +1,11 @@
+{
+  "connection": "Treat each bespoke helper's declaration as a two-line contract in the existing design/source note: the uncovered behavior and the smallest expected counterexample, including input/state and observable failure. During source/report inspection, compare that contract with the actual source route and existing evidence; an unchanged-surface or vague target indicates a guidance or design mistake, not grounds to waive substantive checks. Failures from incidental wording, model spacing, or JSON Path/str handling can then be classified against the declared counterexample, distinguishing a missing rule from brittle helper execution. Affected verification still runs exact literal routes and explicitly required tests, while the existing report reuses the declaration to explain each result. The benefit is falsifiable in the next comparable cycle: every helper has a distinct observable counterexample, fewer target unchanged surfaces, and non-target failures are identified before wasting execution effort. This remains design-only metadata with no runtime, new gate, ledger, prose exemption, test waiver, or arbitrary retry, preserving the Golden full pipeline.",
+  "load_bearing_risk": "Authors may rubber-stamp vague or implementation-shaped counterexamples, creating false confidence; independent acceptance must challenge whether each counterexample would actually fail under the claimed regression.",
+  "first_concrete_step": "Backfill the nine existing helper scripts with behavior/counterexample declarations, then inspect each against source and report evidence to classify the six failures before changing any guidance.",
+  "subideas": [
+    "Require the counterexample to specify observable failure, not merely an assertion or expected output.",
+    "Reuse the existing execution report to carry declarations instead of creating a new ledger.",
+    "Group helpers by distinct target behavior and retire duplicates that have no unique counterexample.",
+    "Use one independent acceptance spot-check per helper class to test whether declarations predict meaningful regressions."
+  ]
+}

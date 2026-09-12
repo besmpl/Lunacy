@@ -1,0 +1,302 @@
+[
+  {
+    "id": "regulator-1",
+    "text": "Preflight JSON structure with a bounded scanner that emits a stable, phase-tagged refusal before recursion can occur.",
+    "novelty": 4,
+    "viability": 4,
+    "fit": 7,
+    "score": 4.75,
+    "cluster": "parser",
+    "trap": "Custom scanner duplicates parser and creates lexical correctness burden."
+  },
+  {
+    "id": "regulator-2",
+    "text": "Convert oversized-integer failures into a documented refusal keyed to field path and digit count, never a traceback.",
+    "novelty": 3,
+    "viability": 6,
+    "fit": 8,
+    "score": 5.45,
+    "cluster": "parser",
+    "trap": "Field-path/digit reporting needs extra parsing; fixed existing refusal is simpler."
+  },
+  {
+    "id": "regulator-3",
+    "text": "Detect unpaired surrogates before serialization and refuse atomically before any UTF-8 bytes are written.",
+    "novelty": 3,
+    "viability": 9,
+    "fit": 10,
+    "score": 7.15,
+    "cluster": "output",
+    "trap": null
+  },
+  {
+    "id": "regulator-4",
+    "text": "Constrain stderr to a fixed redacted event grammar containing input kind, phase, reason, and offset only.",
+    "novelty": 5,
+    "viability": 7,
+    "fit": 9,
+    "score": 6.8,
+    "cluster": "diagnostics",
+    "trap": null
+  },
+  {
+    "id": "regulator-5",
+    "text": "Record each synthetic malformed fixture’s exit code, stdout byte count, and diagnostic code as acceptance evidence.",
+    "novelty": 2,
+    "viability": 10,
+    "fit": 9,
+    "score": 6.95,
+    "cluster": "evidence",
+    "trap": null
+  },
+  {
+    "id": "regulator-6",
+    "text": "Capture runtime-sensitive parser limits in a startup capability record rather than relying on ambient interpreter defaults.",
+    "novelty": 5,
+    "viability": 3,
+    "fit": 4,
+    "score": 3.95,
+    "cluster": "bounds",
+    "trap": "Adds runtime record without solving reachable failures."
+  },
+  {
+    "id": "attacker-1",
+    "text": "Inject lone-surrogate strings into valid JSON so ensure_ascii=False crashes at stdout, then sanitize or encode diagnostics at the final output seam.",
+    "novelty": 3,
+    "viability": 6,
+    "fit": 8,
+    "score": 5.45,
+    "cluster": "output",
+    "trap": "Sanitizing success output can alter identity; refuse or prove lossless."
+  },
+  {
+    "id": "attacker-2",
+    "text": "Use exponentially nested arrays/objects to trigger RecursionError during stdlib decoding, then convert parser-depth exhaustion into the existing controlled UsageError path.",
+    "novelty": 3,
+    "viability": 10,
+    "fit": 10,
+    "score": 7.55,
+    "cluster": "parser",
+    "trap": null
+  },
+  {
+    "id": "attacker-3",
+    "text": "Feed an integer token beyond Python’s digit limit to provoke ValueError, with a guarded parse_int or preflight numeric-length check that emits a bounded diagnostic.",
+    "novelty": 3,
+    "viability": 6,
+    "fit": 8,
+    "score": 5.45,
+    "cluster": "parser",
+    "trap": "Custom numeric hooks/limits need evidence beyond narrow exception conversion."
+  },
+  {
+    "id": "attacker-4",
+    "text": "Race a receipt replacement after size inspection, then bind the cap to the opened file descriptor and fstat/read result instead of trusting a prior path check.",
+    "novelty": 4,
+    "viability": 3,
+    "fit": 4,
+    "score": 3.6,
+    "cluster": "bounds",
+    "trap": "read_snapshot already binds opened descriptor, caps read and checks stability."
+  },
+  {
+    "id": "attacker-5",
+    "text": "Hide pathological cost in megabytes of whitespace and escaped scalar text just under the byte cap, using one bounded read/decode path and avoiding content in diagnostics.",
+    "novelty": 4,
+    "viability": 5,
+    "fit": 6,
+    "score": 4.9,
+    "cluster": "bounds",
+    "trap": "Existing finite snapshot covers bound; no demonstrated additional defect."
+  },
+  {
+    "id": "attacker-6",
+    "text": "Construct duplicate, deeply nested, and surrogate-bearing synthetic records together, asserting totals and identity accounting remain unchanged while only boundary failures become stable.",
+    "novelty": 4,
+    "viability": 9,
+    "fit": 10,
+    "score": 7.5,
+    "cluster": "evidence",
+    "trap": null
+  },
+  {
+    "id": "oncall-1",
+    "text": "Install a parser fuse that rejects excessive nesting and integer digit bombs before semantic loading.",
+    "novelty": 3,
+    "viability": 5,
+    "fit": 8,
+    "score": 5.05,
+    "cluster": "parser",
+    "trap": "Parser fuse implies new limits/scanner rather than existing refusal."
+  },
+  {
+    "id": "oncall-2",
+    "text": "Route diagnostics through an ASCII-safe incident envelope while preserving normal UTF-8 output.",
+    "novelty": 4,
+    "viability": 9,
+    "fit": 9,
+    "score": 7.25,
+    "cluster": "diagnostics",
+    "trap": null
+  },
+  {
+    "id": "oncall-3",
+    "text": "Preflight byte ceilings and decode inputs incrementally into bounded buffers.",
+    "novelty": 3,
+    "viability": 3,
+    "fit": 4,
+    "score": 3.25,
+    "cluster": "bounds",
+    "trap": "Existing capped snapshot; incremental decode complexity unneeded."
+  },
+  {
+    "id": "oncall-4",
+    "text": "Represent malformed inputs as typed quarantine records carrying only path, stage, and exception class.",
+    "novelty": 5,
+    "viability": 3,
+    "fit": 5,
+    "score": 4.2,
+    "cluster": "diagnostics",
+    "trap": "New quarantine record representation for a refusing CLI."
+  },
+  {
+    "id": "oncall-5",
+    "text": "Add a final non-throwing renderer for stdout and stderr that substitutes unencodable characters.",
+    "novelty": 3,
+    "viability": 4,
+    "fit": 7,
+    "score": 4.4,
+    "cluster": "output",
+    "trap": "Blanket nonthrowing substitution can mask programming faults or alter identity."
+  },
+  {
+    "id": "oncall-6",
+    "text": "Separate lexical JSON safety checks from business aggregation so rejected files cannot perturb valid totals.",
+    "novelty": 4,
+    "viability": 4,
+    "fit": 6,
+    "score": 4.5,
+    "cluster": "parser",
+    "trap": "Separate lexical parser duplicates JSON and validation."
+  },
+  {
+    "id": "budget-1",
+    "text": "Decode JSON with a bounded integer hook that rejects overlong numeric lexemes before Python converts them.",
+    "novelty": 2,
+    "viability": 6,
+    "fit": 8,
+    "score": 5.1,
+    "cluster": "parser",
+    "trap": "New digit policy may reject valid input accepted by interpreter."
+  },
+  {
+    "id": "budget-2",
+    "text": "Preflight braces and brackets with a tiny depth counter before invoking json.load.",
+    "novelty": 2,
+    "viability": 3,
+    "fit": 7,
+    "score": 3.65,
+    "cluster": "parser",
+    "trap": "Naive bracket counter mishandles JSON strings/escapes."
+  },
+  {
+    "id": "budget-3",
+    "text": "Serialize reports through a UTF-8 backslash-replacing sink for lone surrogates.",
+    "novelty": 3,
+    "viability": 6,
+    "fit": 8,
+    "score": 5.45,
+    "cluster": "output",
+    "trap": "Backslash replacement is not proven lossless for text identity."
+  },
+  {
+    "id": "budget-4",
+    "text": "Convert parser diagnostics to filename plus line/column, discarding JSONDecodeError’s excerpt.",
+    "novelty": 2,
+    "viability": 7,
+    "fit": 8,
+    "score": 5.5,
+    "cluster": "diagnostics",
+    "trap": "JSONDecodeError str does not normally include excerpt; premise unverified."
+  },
+  {
+    "id": "budget-5",
+    "text": "Reserve output capacity by encoding the complete report first and refusing before any partial write.",
+    "novelty": 2,
+    "viability": 3,
+    "fit": 3,
+    "score": 2.65,
+    "cluster": "output",
+    "trap": "Existing code already encodes whole report before cap/write."
+  },
+  {
+    "id": "budget-6",
+    "text": "Read capped inputs through a byte budget that stops exactly at the first excess byte.",
+    "novelty": 2,
+    "viability": 3,
+    "fit": 4,
+    "score": 2.9,
+    "cluster": "bounds",
+    "trap": "Already provided by read_snapshot."
+  },
+  {
+    "id": "child-1",
+    "text": "Put each JSON value in a box that refuses to open past a safe depth.",
+    "novelty": 3,
+    "viability": 4,
+    "fit": 7,
+    "score": 4.4,
+    "cluster": "parser",
+    "trap": "New depth admission rule duplicates parser."
+  },
+  {
+    "id": "child-2",
+    "text": "Teach the number reader to label giant counting strings instead of trying to hold them.",
+    "novelty": 5,
+    "viability": 2,
+    "fit": 3,
+    "score": 3.3,
+    "cluster": "parser",
+    "trap": "Replacing numbers with notes changes schema and totals."
+  },
+  {
+    "id": "child-3",
+    "text": "Give every file its own bad-input basket so one mischievous receipt cannot hide the others.",
+    "novelty": 4,
+    "viability": 2,
+    "fit": 2,
+    "score": 2.7,
+    "cluster": "evidence",
+    "trap": "Partial success hides refused sources and changes whole-report behavior."
+  },
+  {
+    "id": "child-4",
+    "text": "Walk deep JSON with a little notebook instead of climbing the computer’s stairs.",
+    "novelty": 5,
+    "viability": 2,
+    "fit": 5,
+    "score": 3.8,
+    "cluster": "parser",
+    "trap": "Custom iterative JSON parser is disproportionate."
+  },
+  {
+    "id": "child-5",
+    "text": "Let the printer swap terminal-breaking characters for tiny escaped picture codes.",
+    "novelty": 3,
+    "viability": 5,
+    "fit": 7,
+    "score": 4.8,
+    "cluster": "output",
+    "trap": "Output substitution requires lossless proof and can alter identity."
+  },
+  {
+    "id": "child-6",
+    "text": "Place a friendly gate before every decoded string and number, with a clear sign when it is too large.",
+    "novelty": 3,
+    "viability": 3,
+    "fit": 5,
+    "score": 3.5,
+    "cluster": "bounds",
+    "trap": "Per-value limits add new admission policy without evidence."
+  }
+]

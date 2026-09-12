@@ -1,0 +1,11 @@
+{
+  "idea": "Turn the seed into guidance for read-only helpers: match exact words or model strings only when the source defines their literal shape as a contract; otherwise assert the behavior built from them. Preserve exact matching for routes, keys, serialized tokens, JSON paths, and consumer-visible errors, while using structural or outcome-based checks for descriptive prose. Reclassify the nine failed scripts against source and report evidence to distinguish brittle assertions from malformed helper execution. Keep substantive checks, required tests, evidence reuse, custody, independent acceptance, and Golden’s full pipeline unchanged. The benefit is falsifiable: replaying the corpus should reduce incidental wording or spacing failures without reducing substantive defect detection. If it does not, classify the incident as execution error or reject the guidance as needless complexity.",
+  "load_bearing_risk": "A descriptive-versus-contract misclassification could hide a break in a literal consumed by callers, fixtures, routes, model identifiers, or JSON paths.",
+  "first_concrete_step": "Create a source-backed review table for all nine failures, recording each literal, its defining source, consumer evidence, and whether behavior or exact shape is required; independently review that classification before changing checks.",
+  "subideas": [
+    "Use only three guidance terms: contract literal, structural behavior, and descriptive prose; add no ledger or runtime state.",
+    "Reuse each script’s existing parser and predicates, retaining exact assertions wherever downstream behavior depends on them.",
+    "Pair source-contract evidence with observed report output so reviewers can separate guidance gaps from execution mistakes.",
+    "Measure incidental-failure reduction and unchanged substantive findings on the existing corpus plus one contract-critical fixture."
+  ]
+}

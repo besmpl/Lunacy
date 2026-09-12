@@ -305,3 +305,20 @@ fresh cold-complete packet rather than reusing the old answer.
 | No authorized next outcome; or ongoing improvement has no viable big win | Idle. |
 
 Keep feedback small: existing reports may note time to accepted output, first-pass acceptance, defects caught, repair burden, and whether consultation resolved its question. When useful, they may use concrete evidence such as the failed criterion or protected boundary to distinguish instruction ambiguity from an execution mistake. Improve an existing ambiguous instruction instead of adding one new rule for every correction. Do not create a dashboard, measurement service, cache, ledger, launcher, or dynamic router for this mode. Cost claims require trustworthy billing evidence.
+
+Before adding a bespoke assertion, identify the claim, its source owner, and
+its actual consumer. Use exact equality only when that owner/consumer
+contract requires a literal token or shape, such as a report schema, an
+accepted phase value, or a parser-recognized option; a README example and
+incidental prose spacing or order are descriptive unless a consumer contract
+makes them significant. For a behavior claim, inspect the structured outcome
+and use the applicable existing behavior or integration evidence. For a
+source-only roadmap claim, direct source, interface, and evidence review is
+sufficient when no execution is being claimed. If evidence fails, preserve
+the actual result and use the existing repair and decision rules: the same
+owner may make ordinary pre-FINAL repair within the sealed attempt; a settled
+contract/test mismatch stays with that owner, while a genuine contract or
+source/roadmap conflict is `DECISION_REQUIRED`. After FINAL, the worker is
+frozen; substantive correction requires a new parent assignment and report
+with affected proof. Do not add a checker, report-validation pass, ledger,
+runtime, retry, or test waiver merely to choose among these evidence types.

@@ -1,0 +1,26 @@
+[
+  {
+    "text": "Decode JSON with a bounded integer hook that rejects overlong numeric lexemes before Python converts them.",
+    "rationale": "Prevents huge-integer ValueError and keeps failures inside the UsageError boundary."
+  },
+  {
+    "text": "Preflight braces and brackets with a tiny depth counter before invoking json.load.",
+    "rationale": "Turns pathological nesting into a controlled refusal instead of RecursionError."
+  },
+  {
+    "text": "Serialize reports through a UTF-8 backslash-replacing sink for lone surrogates.",
+    "rationale": "Preserves CLI completion when receipt text contains invalid Unicode scalar values."
+  },
+  {
+    "text": "Convert parser diagnostics to filename plus line/column, discarding JSONDecodeError’s excerpt.",
+    "rationale": "Maintains the no-receipt-content diagnostic promise."
+  },
+  {
+    "text": "Reserve output capacity by encoding the complete report first and refusing before any partial write.",
+    "rationale": "Makes the output cap deterministic and avoids truncated JSON."
+  },
+  {
+    "text": "Read capped inputs through a byte budget that stops exactly at the first excess byte.",
+    "rationale": "Keeps manifest and receipt size failures predictable without loading unbounded data."
+  }
+]

@@ -1,0 +1,11 @@
+The case warrants a narrowly scoped Golden improvement search, but does not yet warrant changing guidance. Its significance is the mismatch between the design-only task and verification failures introduced by bespoke checking code—not evidence that prose needs less verification.
+
+Load-bearing constraints remain unchanged: research must use clean shipped source, preserve required routes, ownership, custody and tests, and avoid parent-authored worker solutions. Any search must retain Golden’s consultation, generation, scoring, fresh-focus, source-checked design, adoption and independent acceptance requirements. Existing evidence may satisfy applicable checks; unchanged product source does not automatically make packaging tests irrelevant.
+
+The strongest objection is that current guidance already requires proportional, behavior-focused verification and source checking. Nine harness runs could reflect poor execution rather than missing policy. Adding guidance might therefore increase reading and coordination costs while duplicating existing instructions. The recently clarified current-source self-review rule also complicates attribution: the observed case may not represent behavior under today’s wording. An underdescribed failure history is a separate reporting concern, not sufficient grounds for another mandatory validation pass.
+
+The evidence establishes avoidable-looking checking defects, but not their attributable cost, causal relationship to guidance, recurrence or preventability. Six failed attempts are not six independent incidents. Nor do the three passing runs establish that the harnesses proved something necessary.
+
+The decisive check is whether retained logs and exact assignment/source wording reveal a consequential method-selection ambiguity that existing rules leave unresolved. Compare any proposed clarification with faithful execution of existing guidance, including net complexity and observable completion. Negative cases must include non-executable artifacts whose substantive claims require executable verification.
+
+Reverse toward retaining source if existing instructions resolve the choices, the clarification already addresses them, or the proposal merely restates proportionality. Reverse toward adoption only with a source-grounded distinction and credible benefit beyond this single incident.

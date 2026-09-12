@@ -1,0 +1,35 @@
+[
+  {
+    "id": "child-2",
+    "text": "Treat exact words like toy blocks: match them only when the source says the block’s shape matters; otherwise match the behavior built from them.",
+    "rationale": "This separates contract-critical wording and model strings from brittle descriptive assertions without waiving substantive checks.",
+    "novelty": 7,
+    "viability": 9,
+    "fit": 10,
+    "score": 8.55,
+    "cluster": "literal",
+    "trap": ""
+  },
+  {
+    "id": "regulator-2",
+    "text": "Require each bespoke helper to declare the uncovered behavior and expected counterexample it targets.",
+    "rationale": "Separates guidance gaps from execution errors and exposes unchanged-surface tests.",
+    "novelty": 6,
+    "viability": 8,
+    "fit": 9,
+    "score": 7.55,
+    "cluster": "method",
+    "trap": ""
+  },
+  {
+    "id": "child-4",
+    "text": "When a checker fails, make it point to the first broken arrow—source, behavior, or report—instead of launching a new checker.",
+    "rationale": "The next action becomes evidence-led repair, not an arbitrary retry or duplicate script.",
+    "novelty": 6,
+    "viability": 8,
+    "fit": 9,
+    "score": 7.55,
+    "cluster": "repair",
+    "trap": ""
+  }
+]

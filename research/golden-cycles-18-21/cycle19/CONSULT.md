@@ -1,0 +1,11 @@
+Investigating Golden’s strategy overhead is justified as an evidence-gathering question, not yet as a justified policy change. The observed mismatch between extensive strategy work and a narrow accepted edit creates a credible hypothesis of avoidable cost; it does not establish that the strategy lacked value.
+
+**Load-bearing constraints.** Golden remains guidance, not an enforcing runtime. Its full procedure governs this explicitly selected cycle. Any future simplification must preserve exact routes, source custody, worker authorship and independent acceptance. Ordinary Lunacy already supplies a lower-overhead route, so Golden’s distinct purpose matters. Source readiness remains separate from release authority, and the isolated, uncommitted cycle18 source is not authorization for broader changes.
+
+**Strongest objection.** Retaining policy while improving execution may leave mandatory work intact even where better execution cannot eliminate it. Conversely, revising guidance risks adding another discretionary interpretation layer without removing any actual obligation. Cycle17’s duplication finding makes that risk concrete. Cycle18’s small diff is insufficient evidence against its preparatory work: strategy might have prevented a worse change, narrowed scope or established confidence unavailable beforehand.
+
+**Evidence gap.** The record shows required stages and repair work, but not their marginal decision contribution, comparative outcome quality or attributable token cost. The nine bespoke self-review attempts demonstrate friction, yet do not identify whether mandatory strategy, unclear wording or execution mistakes caused it. Passing tests establish checked compatibility, not behavioral improvement or savings.
+
+**Decisive check.** The decisive evidence would distinguish mandatory work that changed an accepted decision or caught a material defect from work that merely restated already-applicable evidence, while accounting for comparable risk and outcome quality.
+
+**Reversal evidence.** Repeated, attributable discovery of consequential issues would weaken the simplification hypothesis. Demonstrably removed obligations, lower total effort and preserved acceptance quality would strengthen it; clearer prose alone would not.

@@ -1,0 +1,302 @@
+[
+  {
+    "id": "oncall-1",
+    "text": "Emit a replay capsule next to every repair: exact input bytes, working directory, bounded command, and raw exit transcript.",
+    "novelty": 4,
+    "viability": 4,
+    "fit": 6,
+    "score": 4.5,
+    "cluster": "evidence",
+    "trap": "New capsule duplicates retained receipts."
+  },
+  {
+    "id": "oncall-2",
+    "text": "Make boundary fixtures literal byte strings with names that state their post-truncation length, including 512-in/508-out cases.",
+    "novelty": 3,
+    "viability": 4,
+    "fit": 6,
+    "score": 4.15,
+    "cluster": "fixtures",
+    "trap": "508 is incidental, not invariant."
+  },
+  {
+    "id": "oncall-3",
+    "text": "Replace one-off shell diagnostics with a tiny python -m verifier that reads a capsule and exits with the original command status.",
+    "novelty": 4,
+    "viability": 3,
+    "fit": 5,
+    "score": 3.85,
+    "cluster": "execution",
+    "trap": "Unjustified capsule parser/runner."
+  },
+  {
+    "id": "oncall-4",
+    "text": "Let a worker hand off its exact verification command and working directory as data, and have acceptance execute that command without reconstructing it.",
+    "novelty": 3,
+    "viability": 7,
+    "fit": 7,
+    "score": 5.6,
+    "cluster": "execution",
+    "trap": null
+  },
+  {
+    "id": "oncall-5",
+    "text": "Keep a two-case boundary pair for every byte and slice rule: a valid UTF-8 cut and an invalid-byte cut, stored as ordinary unittest inputs.",
+    "novelty": 3,
+    "viability": 8,
+    "fit": 7,
+    "score": 6.0,
+    "cluster": "fixtures",
+    "trap": null
+  },
+  {
+    "id": "oncall-6",
+    "text": "Render raw failure evidence as a fixed-width line of input length, output length, slice bounds, and exit code from the existing test process.",
+    "novelty": 4,
+    "viability": 6,
+    "fit": 7,
+    "score": 5.55,
+    "cluster": "diagnostics",
+    "trap": null
+  },
+  {
+    "id": "child-1",
+    "text": "A paper-airplane receipt folds differently for each proof, so a parent can see the whole test trip in one shape.",
+    "novelty": 5,
+    "viability": 2,
+    "fit": 3,
+    "score": 3.3,
+    "cluster": "evidence",
+    "trap": "Representation supplies no executable proof."
+  },
+  {
+    "id": "child-2",
+    "text": "A magic mailbox spits out a red marble only when two workers tell the same story about a repair.",
+    "novelty": 5,
+    "viability": 1,
+    "fit": 2,
+    "score": 2.65,
+    "cluster": "acceptance",
+    "trap": "Agreement is not correctness."
+  },
+  {
+    "id": "child-3",
+    "text": "A puzzle lock has four teeth for route, custody, testing, and acceptance; the finished box cannot close with a missing tooth.",
+    "novelty": 4,
+    "viability": 2,
+    "fit": 4,
+    "score": 3.2,
+    "cluster": "acceptance",
+    "trap": "New proof gate without evidence."
+  },
+  {
+    "id": "child-4",
+    "text": "A tiny shoebox museum keeps each failed fix beside its fixed twin, so the next worker can avoid the same hole.",
+    "novelty": 3,
+    "viability": 7,
+    "fit": 7,
+    "score": 5.6,
+    "cluster": "fixtures",
+    "trap": null
+  },
+  {
+    "id": "child-5",
+    "text": "A talking stopwatch wakes the parent only when the same error appears twice, then plays both little recordings.",
+    "novelty": 5,
+    "viability": 2,
+    "fit": 4,
+    "score": 3.55,
+    "cluster": "acceptance",
+    "trap": "Unjustified monitor."
+  },
+  {
+    "id": "child-6",
+    "text": "Workers pass one glowing pebble that changes color at each handoff and goes dark if anyone opens the work without adding proof.",
+    "novelty": 5,
+    "viability": 2,
+    "fit": 4,
+    "score": 3.55,
+    "cluster": "acceptance",
+    "trap": "Duplicates existing custody."
+  },
+  {
+    "id": "logistics-1",
+    "text": "Attach a returns label to every boundary fixture carrying its measured byte budget and offending tail, so a cap failure goes straight back to its fixture owner instead of reopening unrelated checks.",
+    "novelty": 3,
+    "viability": 7,
+    "fit": 7,
+    "score": 5.6,
+    "cluster": "diagnostics",
+    "trap": null
+  },
+  {
+    "id": "logistics-2",
+    "text": "Materialize a fixture only at the instant its owning command is dispatched, then scrap it after the transcript is captured to prevent stale shared state from crossing workers.",
+    "novelty": 3,
+    "viability": 6,
+    "fit": 7,
+    "score": 5.2,
+    "cluster": "fixtures",
+    "trap": "Test temp lifecycle already exists; scrapping evidence unsafe."
+  },
+  {
+    "id": "logistics-3",
+    "text": "Cross-dock worker evidence through one handoff envelope: route by owner, pass raw exits unchanged, and let the independent checker receive the parcel without a parent’s second interpretation.",
+    "novelty": 3,
+    "viability": 5,
+    "fit": 7,
+    "score": 4.8,
+    "cluster": "evidence",
+    "trap": "Duplicates report contract."
+  },
+  {
+    "id": "logistics-4",
+    "text": "Pack the final UTF-8 truncation and gitstatus-slice assertions as last-mile delivery checks at the artifact boundary, rather than repeating them in each upstream repair.",
+    "novelty": 3,
+    "viability": 6,
+    "fit": 7,
+    "score": 5.2,
+    "cluster": "execution",
+    "trap": "Last-mile placement cannot fix wrong expectations."
+  },
+  {
+    "id": "logistics-5",
+    "text": "When repairs share a command shape, ship one batched setup parcel with separate fixture labels and raw transcripts for each case.",
+    "novelty": 4,
+    "viability": 7,
+    "fit": 7,
+    "score": 5.95,
+    "cluster": "execution",
+    "trap": null
+  },
+  {
+    "id": "logistics-6",
+    "text": "Return a rejected patch with a stamped delta of line, byte count, exit code, and owner, rebuilding only that damaged parcel while completed routes remain closed.",
+    "novelty": 3,
+    "viability": 7,
+    "fit": 7,
+    "score": 5.6,
+    "cluster": "evidence",
+    "trap": null
+  },
+  {
+    "id": "inversion-1",
+    "text": "Emit a shell-safe, copy-pastable repro argv from each existing failing unittest assertion so the parent reruns the same command instead of reconstructing a probe.",
+    "novelty": 4,
+    "viability": 8,
+    "fit": 9,
+    "score": 6.85,
+    "cluster": "diagnostics",
+    "trap": null
+  },
+  {
+    "id": "inversion-2",
+    "text": "Make boundary fixtures carry a named byte budget and expected retained length, letting cap and UTF-8 assertions consume the same fixture metadata.",
+    "novelty": 3,
+    "viability": 6,
+    "fit": 7,
+    "score": 5.2,
+    "cluster": "fixtures",
+    "trap": "Shared expected metadata risks tautological oracle."
+  },
+  {
+    "id": "inversion-3",
+    "text": "Have packaging/build_plugin.py report the exact artifact path, slice window, raw exit, and invocation whenever an existing verification command fails.",
+    "novelty": 4,
+    "viability": 3,
+    "fit": 4,
+    "score": 3.6,
+    "cluster": "diagnostics",
+    "trap": "Builder does not own arbitrary verification/Git slices."
+  },
+  {
+    "id": "inversion-4",
+    "text": "Replace ad-hoc diagnostic probes with an optional test-local explanation branch that prints raw inputs and exits without changing the normal command.",
+    "novelty": 4,
+    "viability": 6,
+    "fit": 7,
+    "score": 5.55,
+    "cluster": "diagnostics",
+    "trap": "New mode instead of ordinary assertion messages."
+  },
+  {
+    "id": "inversion-5",
+    "text": "Canonicalize git-status output once at the verification boundary and include the exact retained slice in the existing assertion message.",
+    "novelty": 3,
+    "viability": 3,
+    "fit": 5,
+    "score": 3.5,
+    "cluster": "execution",
+    "trap": "New status parser for incidental check."
+  },
+  {
+    "id": "inversion-6",
+    "text": "Attach an ephemeral failure capsule to existing test output containing target, argv, limit, observed bytes, and exit code, without creating a ledger.",
+    "novelty": 5,
+    "viability": 6,
+    "fit": 8,
+    "score": 6.15,
+    "cluster": "evidence",
+    "trap": "Duplicates inversion1 with extra capsule."
+  },
+  {
+    "id": "budget-1",
+    "text": "Print the unit in every failing boundary assertion: entries, bytes, or records, next to the observed and expected values.",
+    "novelty": 3,
+    "viability": 9,
+    "fit": 8,
+    "score": 6.65,
+    "cluster": "diagnostics",
+    "trap": null
+  },
+  {
+    "id": "budget-2",
+    "text": "Make the valid-UTF-8 truncation fixture a raw byte string and decode only after taking the expected 508-byte prefix.",
+    "novelty": 2,
+    "viability": 3,
+    "fit": 5,
+    "score": 3.15,
+    "cluster": "fixtures",
+    "trap": "508 not universal; slice can split UTF8."
+  },
+  {
+    "id": "budget-3",
+    "text": "Build the manifest's valid fixture with exactly cap generated entries and reserve one separate overflow fixture for rejection.",
+    "novelty": 2,
+    "viability": 3,
+    "fit": 4,
+    "score": 2.9,
+    "cluster": "fixtures",
+    "trap": "Manifest cap is bytes not entries."
+  },
+  {
+    "id": "budget-4",
+    "text": "Use a tuple of (record_id, line) for Gitstatus expectations and slice the tuple list before comparing IDs.",
+    "novelty": 3,
+    "viability": 3,
+    "fit": 5,
+    "score": 3.5,
+    "cluster": "execution",
+    "trap": "Incidental Git check creates representation."
+  },
+  {
+    "id": "budget-5",
+    "text": "Expose each edge case as a normal unittest method whose fully qualified name is the worker's only rerun token.",
+    "novelty": 3,
+    "viability": 9,
+    "fit": 10,
+    "score": 7.15,
+    "cluster": "execution",
+    "trap": null
+  },
+  {
+    "id": "budget-6",
+    "text": "Have the parent discard scratch diagnostics after the first green rerun and retain the exact regression test diff plus raw exit.",
+    "novelty": 3,
+    "viability": 2,
+    "fit": 4,
+    "score": 2.85,
+    "cluster": "evidence",
+    "trap": "Discarding failure evidence violates retention."
+  }
+]

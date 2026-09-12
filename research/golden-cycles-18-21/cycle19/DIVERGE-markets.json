@@ -1,0 +1,26 @@
+[
+  {
+    "text": "Run a prediction market on failure modes, letting materially shifting risk estimates determine where design attention concentrates.",
+    "rationale": "Buyers price risks, sellers submit forecasts, and a market-maker aggregates disagreement into targeted work."
+  },
+  {
+    "text": "Treat uncertain source checks as verification options exercised only when implementation or acceptance touches the underlying claim.",
+    "rationale": "The buyer purchases coverage, the seller supplies evidence, and settlement occurs against concrete delivery exposure."
+  },
+  {
+    "text": "Require each architecture proposal to post explicit invariants as collateral that acceptance can redeem or invalidate.",
+    "rationale": "Design sellers stake correctness claims while the clearing mechanism localizes losses to broken invariants."
+  },
+  {
+    "text": "Build a provenance-preserving liquidity pool of accepted evidence that routine tasks can borrow instead of regenerate.",
+    "rationale": "Evidence suppliers contribute reusable assets, buyers draw them, and the market-maker matches custody with current scope."
+  },
+  {
+    "text": "Have opposing workers quote the cheapest safe path and the worst-case rework exposure, with the parent accepting the spread as its delivery budget.",
+    "rationale": "The spread reveals hidden execution cost without changing authorship or acceptance ownership."
+  },
+  {
+    "text": "Use standing market orders for recurring low-risk task shapes, repricing only when a new failure signal moves their risk band.",
+    "rationale": "Buyers get a fast route for familiar work, sellers reuse stable tactics, and market-makers reopen scrutiny on changed conditions."
+  }
+]

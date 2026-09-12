@@ -1,0 +1,32 @@
+[
+  {
+    "id": "budget-5",
+    "text": "Expose each edge case as a normal unittest method whose fully qualified name is the worker's only rerun token.",
+    "novelty": 3,
+    "viability": 9,
+    "fit": 10,
+    "score": 7.15,
+    "cluster": "execution",
+    "trap": null
+  },
+  {
+    "id": "inversion-1",
+    "text": "Emit a shell-safe, copy-pastable repro argv from each existing failing unittest assertion so the parent reruns the same command instead of reconstructing a probe.",
+    "novelty": 4,
+    "viability": 8,
+    "fit": 9,
+    "score": 6.85,
+    "cluster": "diagnostics",
+    "trap": null
+  },
+  {
+    "id": "budget-1",
+    "text": "Print the unit in every failing boundary assertion: entries, bytes, or records, next to the observed and expected values.",
+    "novelty": 3,
+    "viability": 9,
+    "fit": 8,
+    "score": 6.65,
+    "cluster": "diagnostics",
+    "trap": null
+  }
+]

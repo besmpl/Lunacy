@@ -1,0 +1,26 @@
+[
+  {
+    "text": "Cross-dock the design parcel straight into implementation, preserving citations, decision boundaries, and open questions.",
+    "rationale": "The same artifact travels across handoffs without repacking."
+  },
+  {
+    "text": "Use hub-and-spoke dispatch: the parent routes only each worker’s missing edge, while every spoke returns a self-contained artifact.",
+    "rationale": "Routing stays centralized without rewriting worker-authored work."
+  },
+  {
+    "text": "Open a returns lane: acceptance defects go directly to the responsible owner with a typed failure reason.",
+    "rationale": "Failed last-mile deliveries avoid retracing already-cleared stages."
+  },
+  {
+    "text": "Build a last-mile kit at adoption containing implementation steps, source receipts, and acceptance probes.",
+    "rationale": "The delivery parcel arrives ready for coding and independent verification."
+  },
+  {
+    "text": "Run a milk-run source expedition that collects receipts for every shortlisted design in one bounded route.",
+    "rationale": "Related source custody travels together while remaining attached to each claim."
+  },
+  {
+    "text": "Reverse-logistics rejected ideas into explicit constraints on the next design brief.",
+    "rationale": "Dead ends become routing information instead of recurring cargo."
+  }
+]

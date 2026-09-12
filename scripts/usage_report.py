@@ -23,6 +23,7 @@ MANIFEST_CAP = 1024 * 1024
 MAX_SOURCES = 64
 TOTAL_SOURCE_CAP = 64 * 1024 * 1024
 MAX_RECORDS = 200_000
+DIAGNOSTIC_CAP = 512
 FIELDS = ("input", "cache_read", "cache_write", "uncached_input", "output", "reasoning")
 RAW_FIELDS = ("input", "cache_read", "cache_write", "output", "reasoning")
 PHASES = {"consultation", "breadth", "focus", "design", "implementation", "repair", "acceptance", "unknown"}
@@ -36,6 +37,27 @@ RATE_DATE = "2026-09-10"
 
 class UsageError(Exception):
     pass
+
+
+def _refusal_bytes(message: str) -> bytes:
+    """Return one bounded, UTF-8-safe refusal line for the public CLI."""
+    prefix = "usage report refused: "
+    normalized = str(message).replace("\n", "\\n").replace("\r", "\\r")
+    body = (prefix + normalized).encode("utf-8", "replace")
+    limit = DIAGNOSTIC_CAP - 1
+    if len(body) <= limit:
+        return body + b"\n"
+
+    # Preserve both the existing prefix and the end of the reason when a
+    # caller-supplied label is much longer than the diagnostic budget.
+    prefix_bytes = prefix.encode("ascii")
+    message_bytes = normalized.encode("utf-8", "replace")
+    available = limit - len(prefix_bytes) - 3
+    head_size = available // 2
+    tail_size = available - head_size
+    head = message_bytes[:head_size].decode("utf-8", "ignore").encode("utf-8")
+    tail = message_bytes[-tail_size:].decode("utf-8", "ignore").encode("utf-8")
+    return prefix_bytes + head + b"..." + tail + b"\n"
 
 
 class Parser(argparse.ArgumentParser):
@@ -58,6 +80,10 @@ def load_json(data: bytes, label: str) -> Any:
                           parse_constant=constant)
     except (UnicodeDecodeError, json.JSONDecodeError, UsageError) as exc:
         raise UsageError(f"invalid {label}: {exc}") from exc
+    except RecursionError as exc:
+        raise UsageError(f"invalid {label}: JSON nesting is too deep") from exc
+    except ValueError as exc:
+        raise UsageError(f"invalid {label}: JSON value could not be decoded") from exc
 
 
 def label(value: Any, name: str) -> str | None:
@@ -573,14 +599,19 @@ def main(argv=None) -> int:
                               args.include_observations)
         output = (json.dumps(report, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n"
                   if args.format == "json" else render_text(report))
-        encoded = output.encode("utf-8")
+        try:
+            encoded = output.encode("utf-8")
+        except UnicodeEncodeError:
+            sys.stderr.buffer.write(
+                b"usage report refused: report contains unencodable Unicode\n"
+            )
+            return 2
         if len(encoded) > args.output_cap:
             raise UsageError(f"report exceeds {args.output_cap}-byte output cap")
         sys.stdout.buffer.write(encoded)
         return 0
     except (UsageError, OSError) as exc:
-        message = str(exc).replace("\n", "\\n")[:500]
-        print(f"usage report refused: {message}", file=sys.stderr)
+        sys.stderr.buffer.write(_refusal_bytes(str(exc)))
         return 2
 
 

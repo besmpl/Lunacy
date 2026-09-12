@@ -1,0 +1,32 @@
+[
+  {
+    "id": "attacker-2",
+    "text": "Use exponentially nested arrays/objects to trigger RecursionError during stdlib decoding, then convert parser-depth exhaustion into the existing controlled UsageError path.",
+    "novelty": 3,
+    "viability": 10,
+    "fit": 10,
+    "score": 7.55,
+    "cluster": "parser",
+    "trap": null
+  },
+  {
+    "id": "attacker-6",
+    "text": "Construct duplicate, deeply nested, and surrogate-bearing synthetic records together, asserting totals and identity accounting remain unchanged while only boundary failures become stable.",
+    "novelty": 4,
+    "viability": 9,
+    "fit": 10,
+    "score": 7.5,
+    "cluster": "evidence",
+    "trap": null
+  },
+  {
+    "id": "oncall-2",
+    "text": "Route diagnostics through an ASCII-safe incident envelope while preserving normal UTF-8 output.",
+    "novelty": 4,
+    "viability": 9,
+    "fit": 9,
+    "score": 7.25,
+    "cluster": "diagnostics",
+    "trap": null
+  }
+]

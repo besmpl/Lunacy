@@ -1,0 +1,1 @@
+{"text": "Emit a shell-safe, copy-pastable repro argv from each existing failing unittest assertion so the parent reruns the same command instead of reconstructing a probe."}

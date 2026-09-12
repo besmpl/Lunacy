@@ -1,0 +1,26 @@
+[
+  {
+    "text": "Attach a returns label to every boundary fixture carrying its measured byte budget and offending tail, so a cap failure goes straight back to its fixture owner instead of reopening unrelated checks.",
+    "rationale": "Returns preserve the raw failure while localizing repair."
+  },
+  {
+    "text": "Materialize a fixture only at the instant its owning command is dispatched, then scrap it after the transcript is captured to prevent stale shared state from crossing workers.",
+    "rationale": "Just-in-time inventory removes drift without changing the required command."
+  },
+  {
+    "text": "Cross-dock worker evidence through one handoff envelope: route by owner, pass raw exits unchanged, and let the independent checker receive the parcel without a parent’s second interpretation.",
+    "rationale": "Cross-docking cuts interpretive rework while keeping acceptance independent."
+  },
+  {
+    "text": "Pack the final UTF-8 truncation and gitstatus-slice assertions as last-mile delivery checks at the artifact boundary, rather than repeating them in each upstream repair.",
+    "rationale": "Last-mile ownership puts boundary invariants beside the delivered bytes."
+  },
+  {
+    "text": "When repairs share a command shape, ship one batched setup parcel with separate fixture labels and raw transcripts for each case.",
+    "rationale": "Batching amortizes setup while retaining case-level proof."
+  },
+  {
+    "text": "Return a rejected patch with a stamped delta of line, byte count, exit code, and owner, rebuilding only that damaged parcel while completed routes remain closed.",
+    "rationale": "A precise return route avoids whole-run replay without hiding failure evidence."
+  }
+]

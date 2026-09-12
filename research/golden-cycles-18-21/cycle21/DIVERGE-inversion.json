@@ -1,0 +1,26 @@
+[
+  {
+    "text": "Emit a shell-safe, copy-pastable repro argv from each existing failing unittest assertion so the parent reruns the same command instead of reconstructing a probe.",
+    "rationale": "Inversion: ambiguous hand-written probes guarantee syntax repair; emitted argv removes that reconstruction."
+  },
+  {
+    "text": "Make boundary fixtures carry a named byte budget and expected retained length, letting cap and UTF-8 assertions consume the same fixture metadata.",
+    "rationale": "Inversion: separate literal limits guarantee cap-versus-508 disputes; one fixture-owned budget aligns the boundary."
+  },
+  {
+    "text": "Have packaging/build_plugin.py report the exact artifact path, slice window, raw exit, and invocation whenever an existing verification command fails.",
+    "rationale": "Inversion: reconstructing paths and exits guarantees parent reruns; failure output keeps the original command and evidence together."
+  },
+  {
+    "text": "Replace ad-hoc diagnostic probes with an optional test-local explanation branch that prints raw inputs and exits without changing the normal command.",
+    "rationale": "Inversion: every extra shell probe guarantees another quoting failure; a test-owned explanation path keeps diagnosis beside the assertion."
+  },
+  {
+    "text": "Canonicalize git-status output once at the verification boundary and include the exact retained slice in the existing assertion message.",
+    "rationale": "Inversion: worker and parent slicing independently guarantees disagreement; one boundary-visible slice removes duplicate interpretation."
+  },
+  {
+    "text": "Attach an ephemeral failure capsule to existing test output containing target, argv, limit, observed bytes, and exit code, without creating a ledger.",
+    "rationale": "Inversion: missing context guarantees the parent repeats the investigation; a compact capsule makes one raw rerun sufficient."
+  }
+]

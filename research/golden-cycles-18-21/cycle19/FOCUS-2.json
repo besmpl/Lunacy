@@ -1,0 +1,12 @@
+{
+  "idea": "Risk-band standing orders",
+  "how_it_works": "Future Golden guidance could treat a previously accepted, low-risk task shape as a standing order that preselects the same route and reuses still-valid evidence instead of reopening equivalent strategy discovery. The task still follows exact Golden routing and preserves worker authorship, source custody, correctness checks, required tests, independent acceptance, and separate release authority; each stage validates the order rather than regenerating identical work. New dependencies, changed requirements, failed tests, acceptance disagreement, or prior repairs reprice the shape into scrutiny and require fresh strategy work. The savings are falsifiable by comparing strategy-stage effort and defect or rollback rates for repeated shapes before and after adoption, without adding runtime state or a ledger.",
+  "load_bearing_risk": "A stale or overly broad risk-band classification could normalize hidden requirement drift and suppress the scrutiny needed to catch it.",
+  "first_concrete_step": "Define one narrow recurring task shape and write a guidance-only standing-order template with explicit expiry and repricing signals, then test it against several prior Golden runs.",
+  "sub_ideas": [
+    "Use an evidence freshness window so reused advice/design sources require only a targeted delta check.",
+    "Combine standing orders with failure-signal taxonomy and automatic escalation language, without implementing automation.",
+    "Create seller-side tactic cards that preserve original worker authorship while making proven implementation patterns discoverable.",
+    "Allow neighboring low-risk shapes to share a standing order only after an explicit boundary test demonstrates equivalent acceptance outcomes."
+  ]
+}

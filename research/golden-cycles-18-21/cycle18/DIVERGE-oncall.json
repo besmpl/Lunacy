@@ -1,0 +1,26 @@
+[
+  {
+    "text": "Ship a failure postcard beside each worker result: source pointer, affected invariant, replay command, and safe recovery action.",
+    "rationale": "A night responder follows one bounded path instead of reverse-engineering prose."
+  },
+  {
+    "text": "Route wording, model identifiers, and JSON-path extraction through one typed comparison vocabulary instead of per-script conventions.",
+    "rationale": "Observed mismatch shapes become diagnosable without weakening source-checked proof."
+  },
+  {
+    "text": "Have acceptance replay the worker’s affected proof slice while independently inspecting cited source and report pointers.",
+    "rationale": "Valid evidence is reused without removing substantive checks or independent acceptance."
+  },
+  {
+    "text": "Make every helper failure name its violated semantic layer—token, path, pointer, or output shape—before raw details.",
+    "rationale": "The first failure line identifies the repair surface."
+  },
+  {
+    "text": "Generate the final report from the same structured facts acceptance inspects, with prose as a rendering layer.",
+    "rationale": "Pointer drift and sentence disagreement surface at the data boundary."
+  },
+  {
+    "text": "When parsing fails, emit a complete read-only diagnostic bundle and stop before unrelated packaging work begins.",
+    "rationale": "Malformed input becomes a bounded handoff instead of collateral 3am work."
+  }
+]

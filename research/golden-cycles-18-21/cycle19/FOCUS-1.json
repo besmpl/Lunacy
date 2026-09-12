@@ -1,0 +1,13 @@
+{
+  "idea": "Evidence-triggered, question-scoped advice",
+  "sketch": "Golden begins with a bounded local evidence pass and compact TASK, rather than unconditionally asking Astra for advice. That pass names a live question only when it finds ambiguity, conflicting constraints, a concrete failure, or a non-routine decision; otherwise no advice call is made. When a question exists, the parent sends only that question and relevant evidence to targeted advice, which remains advisory and does not own implementation. The result enters the existing 5×6 isolated ADHD → all-30 scoring → three-fresh focus → Luna/high source-checked design → parent adoption → coherent implementation → independent acceptance route, with authorship, source custody, correctness, tests, and release authority unchanged. A later failure can summon advice at the failing decision seam without restarting unrelated upstream work. Offline replay compares removed advice calls with decision changes, caught risks, rework, and acceptance outcomes, making the simplification falsifiable.",
+  "load_bearing_risk": "Local evidence can look coherent while hiding a cross-cutting constraint, and a subjective trigger could become a loophole for suppressing useful advice. Calibrate the trigger against retrospective routine, ambiguous, and failure cases, checking specifically for escaped defects or acceptance rework.",
+  "first_concrete_step": "Mine recent Golden runs and label each advice call as decision-changing, risk-finding, or no-op; use the results to draft the conditional Markdown branch and a small offline replay set before changing the guidance.",
+  "sub_ideas": [
+    "Failure-seam interrupt: invoke the same narrowly scoped advice contract when tests or acceptance expose a genuinely unresolved question.",
+    "Decision-delta advice: ask Astra to compare locally evidenced options instead of generating a broad strategy.",
+    "Evidence-maturity ladder: escalate from local scan to targeted advice to full exploration only when uncertainty survives, while preserving the exact downstream route once entered.",
+    "Counterfactual replay: compare historical outcomes with and without the advice call to estimate missed-risk versus saved-work tradeoffs.",
+    "Question stop-condition: close an advisory call once the named question is answered and no new evidence is added, preventing strategy sprawl."
+  ]
+}

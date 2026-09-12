@@ -1,0 +1,12 @@
+{
+  "sketch": "Add one failure-only emitter shared by load_json and main. Build a fixed-shape incident envelope containing only an allowlisted stage and error code, excluding receipt paths, payloads, and raw exception text. Serialize it with json.dumps(ensure_ascii=True) and write encoded bytes directly to stderr so surrogates or hostile stream encodings cannot trigger a second failure. Preserve the existing ensure_ascii=False UTF-8 serialization for successful reports, including exit behavior, CLI, and schema. First establish public-CLI regressions for each handled failure and assert the diagnostic line is ASCII-only and receipt-free. If diagnostic writing fails, emit one constant ASCII fallback without inspecting input.",
+  "load_bearing_risk": "Any accidental inclusion of str(exc), a path, or payload-derived metadata can both reintroduce UnicodeEncodeError and violate the no-receipt-content guarantee; the envelope must remain fixed-data-first.",
+  "first_concrete_step": "Run a baseline public-CLI reproduction using synthetic malformed input and surrogate-bearing boundary data, recording current exit status and stderr before changing implementation.",
+  "sub_ideas": [
+    "Map every handled failure to stable numeric or symbolic incident codes so callers need not parse text.",
+    "Centralize byte-level stderr emission with a StringIO-compatible ASCII fallback while leaving stdout untouched.",
+    "Add bounded boundary-case tests for surrogate text, malformed UTF-8, deep nesting, and huge integers, distinguishing reproduced failures from merely suspected ones.",
+    "Assert an invariant that every failure diagnostic is ASCII while every successful report remains valid UTF-8."
+  ],
+  "wildcard_provocation": "Could a deliberately minimal code-and-stage envelope be more operationally useful than raw exception text because it is composable, stable, and incapable of leaking receipt content?"
+}

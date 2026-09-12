@@ -1,0 +1,26 @@
+[
+  {
+    "text": "Make each check a connect-the-dots picture: source promise → visible consequence → independent acceptance question.",
+    "rationale": "A missing dot exposes a guidance gap; a broken dot exposes execution error without adding a second validation ritual."
+  },
+  {
+    "text": "Treat exact words like toy blocks: match them only when the source says the block’s shape matters; otherwise match the behavior built from them.",
+    "rationale": "This separates contract-critical wording and model strings from brittle descriptive assertions without waiving substantive checks."
+  },
+  {
+    "text": "For every JSON check, ask the document a real path question and print the path with its answer before deciding true or false.",
+    "rationale": "The output makes Path-versus-string mistakes immediately visible while preserving the actual value check."
+  },
+  {
+    "text": "When a checker fails, make it point to the first broken arrow—source, behavior, or report—instead of launching a new checker.",
+    "rationale": "The next action becomes evidence-led repair, not an arbitrary retry or duplicate script."
+  },
+  {
+    "text": "Read the changed source and final report as one comic strip, then have acceptance read a different strip without borrowing its ending.",
+    "rationale": "One inspection covers pointer/report coherence while acceptance stays independent and unchanged-product packaging work disappears."
+  },
+  {
+    "text": "Ask the worker to say “because” twice: the claim is true because the source says X, and the result is real because observation Y happened.",
+    "rationale": "Two concrete reasons expose unsupported prose early while retaining source proof, behavioral proof, and final acceptance."
+  }
+]

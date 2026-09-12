@@ -1,0 +1,26 @@
+[
+  {
+    "text": "Treat repository test assertions as the drafting keyboard: a read-only extractor emits exact wording/model literals and source spans for paste-in, never paraphrase.",
+    "rationale": "The next checker consumes authoritative literals, separating guidance drift from product behavior."
+  },
+  {
+    "text": "Add a JSON type lens that prints runtime types, path grammar, and one known-good accessor for every field a verification script touches.",
+    "rationale": "Path/str mismatches surface before bespoke assertion iterations."
+  },
+  {
+    "text": "Make git diff the launch ramp: emit changed product inputs, affected tests, and the exact required packaging command, without suppressing commands.",
+    "rationale": "Unchanged-product probes become visibly unnecessary while required tests remain proof."
+  },
+  {
+    "text": "Collapse report navigation into a canonical pointer token—file, line, and anchor—generated read-only and pasted into final inspection.",
+    "rationale": "Pointer inspection remains independent while hand-written link-resolution scripts disappear."
+  },
+  {
+    "text": "When a prose assertion fails, surface its failing literal, producer test, and source owner beside the traceback.",
+    "rationale": "Execution mistakes route directly to the contract without adding a report-validation gate."
+  },
+  {
+    "text": "Let workers attach prior command output by reference to acceptance context instead of replaying unchanged checks solely to quote results.",
+    "rationale": "Evidence reuse becomes explicit and auditable while substantive checks remain unchanged."
+  }
+]

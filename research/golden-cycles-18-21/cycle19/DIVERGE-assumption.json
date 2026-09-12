@@ -1,0 +1,26 @@
+[
+  {
+    "text": "Golden’s unit of work is not the whole request; uncertainty slices can travel through different stages while the final route remains exact.",
+    "rationale": "This makes orchestration proportional to decision boundaries instead of request size."
+  },
+  {
+    "text": "Design does not have to precede implementation; a narrowly bounded implementation can serve as the design probe before source-checked refinement.",
+    "rationale": "It turns speculative design prose into evidence without changing authorship or custody."
+  },
+  {
+    "text": "A strategy decision is not single-use; it remains valid across related repairs until acceptance evidence falsifies it.",
+    "rationale": "This removes repeated strategic recomputation while preserving independent acceptance."
+  },
+  {
+    "text": "ADHD alternatives need not be prose proposals; they can be tiny executable probes scored by observed behavior.",
+    "rationale": "The option space becomes evidence-producing rather than document-producing."
+  },
+  {
+    "text": "Advice is not the first artifact; a concrete uncertainty or failure can summon targeted advice after local evidence exists.",
+    "rationale": "This makes advice answer a live question instead of ceremonially preceding one."
+  },
+  {
+    "text": "Acceptance need not be conceived after delivery; its independent oracle can be authored when the work contract is formed and evaluated after change.",
+    "rationale": "Separating oracle creation from execution preserves independence while removing duplicated framing work."
+  }
+]

@@ -1,0 +1,26 @@
+[
+  {
+    "text": "Emit a replay capsule next to every repair: exact input bytes, working directory, bounded command, and raw exit transcript.",
+    "rationale": "At 3am the failure is rerunnable offline without rebuilding a fixture or trusting a paraphrased status."
+  },
+  {
+    "text": "Make boundary fixtures literal byte strings with names that state their post-truncation length, including 512-in/508-out cases.",
+    "rationale": "The numbers become visible at construction time, so cap arithmetic cannot silently drift between worker repair and parent acceptance."
+  },
+  {
+    "text": "Replace one-off shell diagnostics with a tiny python -m verifier that reads a capsule and exits with the original command status.",
+    "rationale": "No heredoc quoting or environment guesswork is needed, while raw exits and finite process ownership stay intact."
+  },
+  {
+    "text": "Let a worker hand off its exact verification command and working directory as data, and have acceptance execute that command without reconstructing it.",
+    "rationale": "Routing and custody remain explicit, eliminating the parent-side copy of command assembly that creates a second place to repair."
+  },
+  {
+    "text": "Keep a two-case boundary pair for every byte and slice rule: a valid UTF-8 cut and an invalid-byte cut, stored as ordinary unittest inputs.",
+    "rationale": "The pair forces retained-length and decoding behavior to surface together instead of paging later for an underspecified edge case."
+  },
+  {
+    "text": "Render raw failure evidence as a fixed-width line of input length, output length, slice bounds, and exit code from the existing test process.",
+    "rationale": "The on-call view contains the arithmetic needed to fix cap and Gitstatus mistakes without an extra probe or parser."
+  }
+]\n

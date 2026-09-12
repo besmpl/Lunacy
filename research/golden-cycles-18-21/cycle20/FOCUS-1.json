@@ -1,0 +1,11 @@
+{
+  "focus": "Wrap only the stdlib JSON decode call in load_json so a confirmed parser RecursionError becomes the existing controlled UsageError path. First reproduce the failure with exponentially nested arrays and objects through the public CLI, since the change is not justified until an actual failure is observed. If confirmed, catch RecursionError at that narrow boundary and raise UsageError with a stable diagnostic that contains no receipt content. Leave valid decoding, totals, unknown counts, identity/overlap, dated pricing, CLI behavior, and output encoding unchanged. Keep main’s existing UsageError handling responsible for the user-visible exit path. This contains parser-depth exhaustion without adding dependencies, runtimes, or broad refactoring.",
+  "load_bearing_risk": "Catching RecursionError too broadly could hide an unrelated recursion defect or produce version-dependent behavior, so the handler must surround only stdlib decoding.",
+  "first_concrete_step": "Generate temporary exponentially nested array and object JSON inputs, invoke the public usage_report.py CLI, and record whether stderr, exit status, and traceback establish a reproducible decoder RecursionError before editing code.",
+  "sub_ideas": [
+    "Add focused regression cases for both array- and object-dominant nesting, asserting controlled failure, empty stdout, and receipt-free diagnostics.",
+    "Factor the decode boundary into a tiny private helper whose sole contract is JSON bytes/text to parsed data or UsageError, making exception scope auditable.",
+    "Compare behavior near the successful depth limit across supported Python versions to avoid rejecting valid inputs or relying on a fragile recursion threshold.",
+    "If decoding remains expensive before recursion exhaustion, investigate a separate bounded nesting precheck only after profiling demonstrates that parser exception conversion is insufficient."
+  ]
+}

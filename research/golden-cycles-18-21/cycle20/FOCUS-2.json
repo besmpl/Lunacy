@@ -1,0 +1,12 @@
+{
+  "idea": "Create a single public-CLI synthetic corpus combining duplicate records, deeply nested JSON, huge integers, and surrogate-bearing strings. The harness should first establish which suspected boundary failures actually reproduce, rather than assuming fixes are needed. For valid duplicates, it must assert unchanged totals, unknown counts, identity accounting, overlap handling, dated pricing, and CLI/schema output. For reproduced invalid inputs, it should assert stable diagnostics and exit behavior without exposing receipt content, while preserving UTF-8 output semantics. This cleanly separates accounting regressions from boundary normalization and permits a legitimate no-change result.",
+  "load_bearing_risk": "The fixtures may fail to trigger the suspected parser or encoding exceptions, creating false confidence unless each case is verified through the real public CLI and failure class is recorded.",
+  "first_concrete_step": "Add a focused subprocess regression test that generates all synthetic records in a temporary directory, invokes usage_report.py through its documented CLI, and captures exit status, stdout, and stderr for invariant and boundary assertions.",
+  "sub_ideas": [
+    "Parameterize nesting depth and integer digit count to identify reproducible thresholds without committing to arbitrary limits.",
+    "Add deterministic surrogate positions in both receipt input and diagnostic paths to distinguish JSON decoding from UTF-8 emission failures.",
+    "Compare duplicate permutations to prove identity and overlap accounting are order-independent.",
+    "Use a diagnostics sanitizer assertion that rejects receipt payload text while allowing stable error type and location metadata.",
+    "Run the corpus under constrained manifest, receipt, and output-size limits to connect parser failures with existing resource-boundary behavior."
+  ]
+}
