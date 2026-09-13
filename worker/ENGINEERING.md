@@ -2,7 +2,22 @@
 
 ## Coherent implementation and repair
 
-Own the assigned TASK attempt end-to-end. Before acting, read the immutable Authorized Assignment and its adoption, exact route/context rule, owned paths/effects, report path, attempt/recovery entitlement, applicable guidance, and project rules. The assignment already authorizes work; it is not launch evidence and does not depend on a future handle update. Start at the affected behavior and likely owner; trace maintained callers, reuse, integration edges, and relevant tests before editing. Use repository contracts, callers, conventions, and tests to resolve routine implementation choices inside the assigned authority; incomplete discovery alone is a reason to keep tracing, not to transfer the decision to the parent. Expand discovery when ownership is ambiguous, state is shared, tests conflict, or caller effects may be material. Implement the complete bounded change, verify, self-review, repair ordinary defects, and run terminal affected verification after the last substantive change.
+Own the assigned TASK attempt end-to-end. Before acting, read its immutable
+combined single-owner record or its Authorized Assignment plus adoption, then
+the applicable project rules, shared [record/report contract](../WORKSPACE.md#the-uniform-record-contract),
+and this guide. Read [exact routing](../orchestrator/PLANNING.md#exact-native-routing)
+only when resolving or checking route/context details; a worker does not need
+the full parent or Golden manual for ordinary construction. The assignment
+record already authorizes work; it is not launch evidence and does not depend
+on a future handle update. Start at the affected behavior and likely owner;
+trace maintained callers, reuse, integration edges, and relevant tests before
+editing. Use repository contracts, callers, conventions, and tests to resolve
+routine implementation choices inside the assigned authority; incomplete
+discovery alone is a reason to keep tracing, not to transfer the decision to
+the parent. Expand discovery when ownership is ambiguous, state is shared,
+tests conflict, or caller effects may be material. Implement the complete
+bounded change, verify, self-review, repair ordinary defects, and run terminal
+affected verification after the last substantive change.
 
 Prefer the simplest coherent design after tracing ownership and invariants. Reuse sound abstractions; avoid speculative frameworks, registries, duplicate systems, hidden global state, and unrelated cleanup. Preserve public contracts unless the adoption changes them. A selected green test list is evidence, not scope authority.
 

@@ -12,7 +12,28 @@ Before dispatch or re-entry, compare same-root ACTIVE tasks and BLOCKED tasks wi
 
 For a run selected prospectively under this contract, the only mandatory coordination/authority record is parent-owned `TASK.md`. Each worker has one distinct immutable report and only necessary durable logs. Do not require separate `PLAN.md`, `STATE.md`, `STEPS.md`, `DECISIONS.md`, routine gate files, duplicated handoff inventories, or future validation pointers. Existing runs retain their original records and are never retrospectively migrated.
 
-The adoption may replace its repeated detail with one exact immutable plan reference only when that reference contains every required field. `TASK.md` is ordinary Markdown evidence, not a machine schema or transaction manager. Named anchors make entries retrievable; no digest or parser is required. The parent alone creates or changes TASK, including coordination, adoptions, authorized assignments, recovery facts, and acceptance. Workers send actual updates and write only their owned artifacts, report, and logs. Unknown required facts remain explicit; omitted optional fields prove nothing.
+For one coherent single-owner result, one combined adoption-and-assignment record
+is the supported compact form: both lookup anchors resolve to that same complete
+immutable record, so no second adjacent block is required. It contains authority,
+outcome, scope/non-goals, applicable project contracts/non-negotiables, owned
+surfaces/effects, literal model and literal effort, purpose/transport/context,
+checks and acceptance evidence, report, and applicable attempt/recovery
+entitlement exactly once. It contains no future
+owner/handle or launch claim. Genuinely shared work keeps a common adoption and
+one distinct assignment/report per actual owner; route, context, scope/effects,
+report, and limits never inherit between workers. Existing tasks retain the
+record contract under which they were adopted.
+
+A record may replace unchanged detail with one exact immutable complete-plan
+reference only when that reference is retrievable and contains every required
+field. Missing facts remain explicit and stop the affected action; there is no
+mutable default inheritance. `TASK.md` is ordinary Markdown evidence, not a
+machine schema or transaction manager. Named anchors make entries retrievable;
+no digest or parser is required. The parent alone creates or changes TASK,
+including coordination, adoptions, assignments, recovery facts, and acceptance.
+Workers send actual updates and write only their owned artifacts, report, and
+logs. Unknown required facts remain explicit; omitted optional fields prove
+nothing.
 
 ### Compact TASK form
 
@@ -20,7 +41,22 @@ Parent-only authoring guidance: use the [Compact TASK form](orchestrator/PLANNIN
 
 Current coordination is mutable observation, not an automatic substantive product change. It may point tersely to immutable history and reports. A material authority change belongs in a new adoption; a consequential conclusion belongs in a decision. Do not use “coordination only” to hide an actual artifact or effect writer. The parent records actual handles after creation, never placeholders masquerading as custody.
 
-Before dispatch on every route, the parent appends one Authorized Assignment that references the existing adoption and immutably binds the literal model and effort selected under the canonical [Exact native routing](orchestrator/PLANNING.md#exact-native-routing) rule, the context rule, worker purpose and slice/effects, report path, and applicable attempt/recovery entitlement. The worker must receive that same literal pair, context, scope/report, and entitlement binding. The assignment is authorization for the worker to act, not evidence that dispatch occurred; it contains no future handle or `LAUNCHED` declaration. After dispatch returns, the parent records the actual returned owner/handle and launch observation in current coordination, not by rewriting immutable history. A missing or ambiguous return is recorded as UNKNOWN with an OPEN barrier and retained possible custody; it never grants replay, replacement, or a fresh entitlement. Changing a live or unknown-effect same-surface attempt's pair is forbidden: settle its ownership/effects, then obtain a new adoption and fresh authorized assignment/attempt. Unrelated old OPEN work does not prohibit demonstrably independent new work on different established-independent surfaces. Fresh child context is default; an inheritance exception must be justified in the adoption/decision and changes only inheritance, never model or effort.
+Before dispatch on every route, the parent appends either the combined
+single-owner record or, for shared/compatible work, an Authorized Assignment
+that references its adoption. The chosen record immutably binds the literal
+model and effort under [Exact native routing](orchestrator/PLANNING.md#exact-native-routing),
+context, worker purpose and scope/effects, report, and applicable entitlement.
+The worker receives those same facts. The record authorizes work; it does not
+prove dispatch and contains no future handle or `LAUNCHED` declaration. After
+dispatch returns, the parent records the actual owner/handle and launch
+observation in mutable coordination. A missing or ambiguous return is UNKNOWN
+with an OPEN barrier and retained possible custody; it never grants replay,
+replacement, or fresh entitlement. Changing a live or unknown-effect
+same-surface attempt's pair is forbidden: settle ownership/effects, then obtain
+a new adoption and assignment/attempt. Unrelated old OPEN work does not block
+demonstrably independent work on different established-independent surfaces.
+Fresh child context is default; an adopted exception changes only inheritance,
+never model or effort.
 
 ### Worker updates and immutable report
 

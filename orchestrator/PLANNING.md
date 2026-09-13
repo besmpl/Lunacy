@@ -12,7 +12,16 @@ When current authority selects ongoing plugin improvement and a viable material 
 
 ### Compact TASK form
 
-Astra uses this parent-only form to author the concrete adoption and assignment that workers read and act under.
+Astra chooses one of the two parent-only forms below. For one coherent result
+owned by one worker, the combined record replaces separate adoption and
+assignment content; do not fill out both forms. Keep the two-record form for
+genuinely shared work and for compatibility with existing tasks.
+
+#### Single-owner adoption and assignment
+
+Both anchors identify the same complete immutable record. They do not imply a
+second adjacent block, and the record is authorization rather than a launch
+receipt.
 
 ```markdown
 # <task title>
@@ -27,34 +36,22 @@ Uncertainty: <NONE only when established | exact unknown>
 Next action: <one exact authorized action>
 Recovery: <assignment/attempt; exact pre-authorized challenge/renewal/deadline facts when applicable>
 
-## Shared work
-| Owner/assignment | Owned surfaces/effects | Depends on | Barrier |
-| ...only necessary actual rows... |
-
 ## Immutable history
-<a id="adoption-001"></a>
-### Adoption 001 — <title>
-Authority: <current source>
+<a id="adoption-001"></a><a id="assignment-001"></a>
+### Single-owner adoption and assignment 001 — <goal>
+Authority/contract: <current authority and Lunacy contract>
 Outcome: <complete observable outcome>
-Affected scope: <inputs, outputs, maintained boundaries>
-Model binding: <literal native model AND effort, including for a named default; optional alias label only, no conflict>; authority: <exact current source authorizing this pair for this worker purpose>
-Worker role/transport: <bulk | judgment | explicit purpose; supported native agent tool/fixed role or deliberate fresh native CLI>
-Context: <fresh context or exact justified exception>
-Required verification: <commands/behaviors/independent proof>
-Permitted effects: <writes, processes, network/external effects and limits>
-Contracts: <project rules, architecture, non-negotiables, acceptance standard>
-Complete-plan reference: <optional exact immutable reference containing every field above>
-
-<a id="assignment-001"></a>
-### Authorized Assignment 001 — <goal>
-Adoption: [Adoption 001](#adoption-001)
-Model/effort: <literal native model and effort; if a named default, include its alias; no alias plus conflicting explicit pair>
-Worker role/transport: <purpose and exact supported transport selected before launch>
-Authority/purpose: <exact current source authorizing this pair for this worker purpose>
-Context: <fresh-context rule or adopted exception>
-Owned scope/effects: <exact worker slice, permitted effects, and custody boundaries>
-Report: <exact path assigned to this attempt>
-Attempt/recovery entitlement: <ordinary repair or exact stricter attempt limit; applicable challenge/renewal/deadline rights, including NONE>
+Affected scope and non-goals: <inputs, outputs, maintained boundaries>
+Project contracts/non-negotiables: <applicable architecture, invariants, and preserved behavior>
+Model binding: <literal native model AND literal effort; a named default is only a non-conflicting label>
+Model authority/purpose: <exact current source authorizing this pair for this worker purpose>
+Worker role and transport: <bulk | judgment | explicit purpose; exact supported native agent tool/fixed role or deliberate fresh native CLI>
+Context: <fresh context, or exact justified exception and its authority>
+Owned surfaces and permitted effects: <exact writes/processes/network and custody boundaries>
+Required verification and acceptance evidence: <commands, behaviors, independent proof, parent-only acceptance>
+Report: <one immutable report path for this attempt>
+Attempt/recovery entitlement: <ordinary repair or exact stricter limit; applicable challenge/renewal/deadline rights, including NONE>
+Complete-plan reference: <optional exact immutable complete reference; it may not hide a missing field>
 
 <a id="decision-001"></a>
 ### Decision 001 — <title>
@@ -70,27 +67,123 @@ Independent review: <code/diff/behavior and required parent proof inspected>
 Decision: <whole-outcome judgment and residual obligations>
 ```
 
+`Model binding`, role/transport, context, report, and attempt/recovery
+entitlement are mandatory. An exact immutable complete-plan reference may
+supply unchanged fields only when it is retrievable and contains every required
+fact; otherwise state each missing fact here and stop the affected dispatch.
+Never put a future owner/handle or `LAUNCHED` claim in immutable history. Record
+the actual returned handle, lifecycle, uncertainty, and barriers in mutable
+coordination only after dispatch.
+
+#### Shared-work and compatible two-record form
+
+Use the established Adoption plus one Authorized Assignment per actual worker
+when work is shared. Each assignment has its own literal model and effort,
+role/transport, context, owned scope/effects, report, and entitlement; no row
+inherits them from another. Existing adopted records remain valid under the
+contract that created them.
+
+```markdown
+<a id="adoption-001"></a>
+### Adoption 001 — <shared outcome>
+Authority/outcome/scope: <complete shared facts and maintained boundaries>
+Contracts/effects/verification: <shared non-negotiables and acceptance>
+Complete-plan reference: <optional exact immutable complete reference>
+
+<a id="assignment-001"></a>
+### Authorized Assignment 001 — <worker goal>
+Adoption: [Adoption 001](#adoption-001)
+Model/effort: <literal native model AND literal effort>
+Worker role/transport: <purpose and exact supported transport>
+Authority/purpose: <exact current source for this worker purpose>
+Context: <fresh-context rule or adopted exception>
+Owned scope/effects: <exact worker slice and custody boundaries>
+Report: <exact immutable path for this attempt>
+Attempt/recovery entitlement: <exact applicable rights, including NONE>
+```
+
 Record current barrier observations once: in the header when no scoped rows are needed, or in the necessary shared-work rows, not both. Keep actual owners, non-worker effects, uncertainty and the authorized next action visible. The parent's whole-outcome custody judgment still belongs in immutable acceptance under the shared rule; neither missing rows nor all displayed rows CLOSED proves acceptance or coverage.
 
 ## Exact native routing
 
-Select and persist one immutable model binding per assignment before dispatch. The named defaults remain exactly: `luna` = `gpt-5.6-luna`/`max`; `sol-medium` = `gpt-5.6-sol`/`medium`; explicitly selected `sol-high` = `gpt-5.6-sol`/`high`. Task roles are independent of those immutable aliases: `bulk` defaults to Luna/max for bounded work with cheap independent checks; `judgment` defaults to Sol/medium for difficult implementation, diagnosis, and discriminating test design. This task-shape policy is not a measured superiority or file-count claim.
+Select and persist one immutable model binding per assignment before dispatch.
+The named aliases remain exactly: `luna` = `gpt-5.6-luna`/`max`, `sol-medium` =
+`gpt-5.6-sol`/`medium`, and explicitly selected `sol-high` =
+`gpt-5.6-sol`/`high`. Task responsibilities, defaults, ownership, and review
+boundaries are canonical in the [role table](WORKER-MODELS.md#two-roles-unchanged-defaults).
 
-For custom roles, follow [Worker model selection](WORKER-MODELS.md). Current user/project authority may select an exact catalog model and supported effort for a worker purpose, including by answering the launch-time role question. The user may expressly select that model's advertised catalog-default effort; resolve it to a literal before adoption, never inherit the previous role's effort. A model mention, general interest in cheaper/better models, consultation selection, or catalog availability alone is not worker authority. Preserve unspecified roles' named defaults. Record the literal model and effort, role/purpose, selected dispatch transport, and authorizing user selection in TASK adoption and Authorized Assignment. A saved role preference is input for a future assignment, never a live binding. Catalog/default changes cannot alter a sealed assignment. An immutable alias plus a conflicting explicit pair still conflicts; label custom bindings with the role, not a redefined alias. Recheck current authority and relevant availability before dispatch; material restriction or selection changes require new adoption.
+For custom roles, follow [Worker model selection](WORKER-MODELS.md). Current user/project authority may select an exact catalog model and supported effort for a worker purpose, including by answering the launch-time role question. The user may expressly select that model's advertised catalog-default effort; resolve it to a literal before adoption, never inherit the previous role's effort. A model mention, general interest in cheaper/better models, consultation selection, or catalog availability alone is not worker authority. Preserve unspecified roles' named defaults. Record the literal model and effort, role/purpose, selected dispatch transport, and authorizing user selection in the applicable combined record or TASK adoption/Authorized Assignment. A saved role preference is input for a future assignment, never a live binding. Catalog/default changes cannot alter a sealed assignment. An immutable alias plus a conflicting explicit pair still conflicts; label custom bindings with the role, not a redefined alias. Recheck current authority and relevant availability before dispatch; material restriction or selection changes require new adoption.
 
 Choose a supported transport **before** the first launch. Prefer the current native agent creation tool when its supplied schema accepts both literal parameters, or its supplied fixed-role definition fixes both to that pair. A role name/config file, old receipt, or prompt alone is insufficient; a model-fixed but effort-inherited role is insufficient. Do not override a fixed role to change its pair. For an explicitly selected catalog model that the agent tool cannot express, the parent may instead adopt a fresh direct native `codex exec -m MODEL -c 'model_reasoning_effort="EFFORT"'` worker when that installed CLI, ordinary permissions, and finite process/receipt custody support the assignment. This is a deliberately selected native CLI transport, not a promise of identical agent-tool features or a fallback after a failed/uncertain spawn. See the [CLI dispatch boundary](WORKER-MODELS.md#native-dispatch-boundary). Neither helper output nor a catalog's multi-agent metadata proves dispatch support, backend identity, or model obedience.
 
 If the selected transport cannot preserve the pair or provide required tools, context, permissions, and lifecycle evidence, refuse only the affected dispatch. Do not invent IDs/efforts, use hidden defaults, change security controls, silently fall back, or start a dummy trial. The first real authorized assignment is the launch observation. A CLI option or tool request is requested routing, not independent backend attestation.
 
-Use a fresh child context by default. An exact justified inheritance exception belongs in the adoption/decision and may alter only context inheritance. Every dispatch requires the preexisting immutable Authorized Assignment; it is authority to act, not launch evidence, and never contains an invented future handle or `LAUNCHED` fact. After creation returns, record the actual handle and launch observation in mutable TASK coordination. A missing or ambiguous return stays UNKNOWN/OPEN possible custody and grants no retry, replay, replacement, fallback, or renewed entitlement. Never change the pair of a live or unknown-effect same-surface attempt. A route change requires its ownership/effects to settle, a new adoption, and a fresh authorized assignment/attempt; old attempt budgets, history, contract, model, effort, and effects remain unchanged. Unrelated old OPEN work does not globally block demonstrably independent, explicitly authorized work on different established-independent surfaces. Same-agent substantive post-FINAL continuation requires a new authorized assignment/report and follows the fresh-context default; the shared report-only correction rule requires no worker continuation.
+Use a fresh child context by default. An exact justified inheritance exception belongs in the adoption/decision and may alter only context inheritance. Every dispatch requires the preexisting immutable combined record or Authorized Assignment; it is authority to act, not launch evidence, and never contains an invented future handle or `LAUNCHED` fact. After creation returns, record the actual handle and launch observation in mutable TASK coordination. A missing or ambiguous return stays UNKNOWN/OPEN possible custody and grants no retry, replay, replacement, fallback, or renewed entitlement. Never change the pair of a live or unknown-effect same-surface attempt. A route change requires its ownership/effects to settle, a new adoption, and a fresh assignment/attempt; old attempt budgets, history, contract, model, effort, and effects remain unchanged. Unrelated old OPEN work does not globally block demonstrably independent, explicitly authorized work on different established-independent surfaces. Same-agent substantive post-FINAL continuation requires a new authorized assignment/report and follows the fresh-context default; the shared report-only correction rule requires no worker continuation.
 
 ## Dispatch and evidence ownership
 
 Before dispatch or continuation, read [Authority, entry, and coexistence](../WORKSPACE.md#authority-entry-and-coexistence) and [Ownership, barrier, and acceptance](../WORKSPACE.md#ownership-barrier-and-acceptance). Reconcile current service/entry, competing surfaces, reservations, attempts, and effects before forming the maximal safe batch.
 
-A handoff names current project rules, exact TASK adoption/assignment anchors, applicable shared [WORKSPACE.md](../WORKSPACE.md) sections, [ENGINEERING.md](../worker/ENGINEERING.md), and only the specific parent-planning sections required for the assigned action, plus owned scope/effects and exact absolute report/log/output paths; this whole guide is not a default worker prerequisite. It also names the exact starting inputs and their purpose: a storage-root pointer is not an input list. The parent's self-transport capture—the native transcript recording this worker—stays outside worker-owned output selectors and is not an input or progress signal; use the returned native result/handle for lifecycle observation. Worker-owned command logs remain legitimate evidence. Resolve a recurring path once and repeat the same absolute value. Require affected-behavior discovery, maintained caller/reuse/test tracing, end-to-end implementation, ordinary repair, final diff review, terminal verification, and escalation before overlap or material expansion.
+A handoff names current project rules, the exact combined record or TASK
+adoption/assignment anchors, applicable shared [WORKSPACE.md](../WORKSPACE.md)
+sections, [ENGINEERING.md](../worker/ENGINEERING.md), and only the specific
+parent-planning sections required for the action, plus owned scope/effects and
+exact absolute report/log/output paths; this whole guide is not a default worker
+prerequisite. A bounded handoff carries one objective, necessary constraints and
+non-goals, owned surfaces/effects, literal route/context, acceptance checks, and
+relevant evidence pointers—not a parent transcript or full historical research.
+It also names the exact starting inputs and their purpose: a storage-root pointer
+is not an input list. The parent's self-transport capture—the native transcript
+recording this worker—stays outside worker-owned output selectors and is not an
+input or progress signal; use the returned native result/handle for lifecycle
+observation. Worker-owned command logs remain legitimate evidence. Resolve a
+recurring path once and repeat the same absolute value. Require affected-behavior
+discovery, maintained caller/reuse/test tracing, end-to-end implementation,
+ordinary repair, final diff review, terminal verification, and escalation before
+overlap or material expansion.
 
 When repair needs parent action, first use the evidence to distinguish an unclear outcome or authority boundary, missing validation, and genuinely difficult technical judgment. Give targeted feedback rather than taking over implementation or indefinitely restating the assignment; routine authorized pre-FINAL repair stays with its owner. Repeated failure without new evidence or a materially different approach calls for reassessment, not blind retries. Clarification cannot rewrite a sealed adoption or assignment; a material change needs a new adoption, and substantive post-FINAL repair needs settled ownership/effects and a new authorized assignment/report under the exact-route and fresh-context rules. A task-selected judgment role may be considered for genuinely difficult work only with exact authority and routing—worker failure never proves that Astra should code or that a model should be upgraded. None of this limits independent review or necessary safety intervention.
+
+| Observed situation | Existing owner/action |
+| --- | --- |
+| Actionable in-scope pre-FINAL defect | Current worker repairs and reruns affected checks within the sealed attempt. |
+| Missing material decision | Parent decides the question; the worker implements the settled result. |
+| Scope, architecture, or contract changed | Parent re-scopes through existing adoption and custody rules before affected work continues. |
+| Substantive post-FINAL defect with prior ownership/effects settled | Parent authorizes the compact repair attempt below. |
+| Unknown owner, effect, or custody | Reconcile and keep `OPEN`; do not replacement-spawn, replay, or infer release. |
+| Repeated failure without new evidence or a materially different approach | Use existing recovery/reassessment; do not invent a retry, escalation right, or model ladder. |
+
+### Compact post-FINAL repair handoff
+
+Use this only after the prior attempt's ownership/effects are settled, a
+substantive post-FINAL defect is identified, and a new attempt is authorized.
+It is not pre-FINAL ceremony: ordinary same-owner repair uses the current
+record/report, and a receipt-supported clerical report fix uses the parent-only
+correction rule. Point directly to the complete immutable base, never through a
+chain of repairs; keep the old report and any acceptance frozen.
+
+```text
+<a id="assignment-repair-001"></a>
+### Authorized Assignment repair 001
+base: <direct immutable complete adoption/plan anchor, not an earlier repair>
+failed criterion: <specific requirement not met>
+failed evidence: <direct raw completed receipt/diff/diagnostic pointers>
+inherited scope/outcome: <one sentence; only facts verified unchanged>
+changed result/effects: <what this attempt changes and owns>
+model/effort: <literal model AND literal effort for this assignment>
+transport/context: <exact supported transport/fresh context, or exact unchanged base reference>
+attempt/recovery entitlement: <exact applicable rights, including NONE; no reset>
+verification: <affected checks and applicable unaffected evidence>
+report: <fresh immutable report path>
+predispatch disposition: <authority for this attempt; prior ownership/effects settled; barrier safe for dispatch>
+```
+
+The literal model **and** effort always remain visible in every repair
+assignment. Only unchanged transport/context may be supplied by an exact base
+reference. Changed architecture or effect surfaces require an appropriate new
+adoption rather than short-form inheritance. Evidence reuse still requires the
+artifact, dependencies, configuration, relevant environment, and required scope
+to match; a different reviewer alone does not force a duplicate run.
 
 For a once-per-session duty, reuse an established receipt only when evidence covers the applicable session; follow the duty on a confirmed uncovered session. Unknown coverage requires resolution before affected dispatch, neither omission nor repetition. Carry no invented platform session semantics.
 
@@ -106,6 +199,17 @@ Before closure, reread current authority and TASK, reconcile all actual workers,
 
 Only the parent accepts. Apply the shared [Ownership, barrier, and acceptance](../WORKSPACE.md#ownership-barrier-and-acceptance) rule and [Worker updates and immutable report](../WORKSPACE.md#worker-updates-and-immutable-report) rule for actual result/evidence/custody review, required execution triggers, immutable acceptance and any correction or substantive repair. Every request must be satisfied, explicitly superseded or authoritatively deferred. Required live evidence remains live; prose scenarios cannot replace it. Contract disagreement is a finding/decision, not invented custody uncertainty.
 
+Keep the acceptance entry compact by reusing existing fields: identify the
+changed result, each criterion with its evidence pointer, unresolved findings,
+and owned-effect/barrier state. The parent may accept, return one specific
+material defect, request missing proof, or reconcile unsettled effects. These
+are review dispositions, not a new status schema. Rerun proof when it is
+explicitly required, changed or stale, contradictory or missing, when an
+integration boundary is uncovered, or when a named consequential risk warrants
+it—not automatically because the reviewer differs. Material findings should
+carry stable references and useful acceptance conditions without forcing a full
+adversarial review for every trivial result.
+
 ## Adopted deadlines and finalization
 
 This section applies only when authority adopts an overall task deadline. Otherwise do not invent one; commands and sessions still have finite bounds and recovery clocks. At adoption, reserve a named finalization interval sufficient for custody reconciliation, TASK update, and parent acceptance. If the budget cannot contain them, expose the conflict rather than dropping proof.
@@ -118,7 +222,7 @@ Before any potentially blocking finalization wait, write one durable TASK coordi
 
 On restart, read current rules, authority, TASK, and only evidence required by its next action. Never reconstruct authority from chat or bulk history. Recovery applies only before an adopted implementation cutoff; a shorter cutoff grants no retry or shortcut.
 
-For genuinely new work, the Authorized Assignment may pre-adopt one optional earlier initial-silence threshold. The assignment itself must state the threshold, the observable parent event used as its clock anchor, the clock basis, and the parent-visible observation scope. The anchor is an evidenced observable parent event, never an inferred provider or backend start. Do not add a mandatory ledger, stage, acknowledgement, preliminary artifact, token file, or default numeric threshold. If this policy is absent, its anchor or required clock evidence is unavailable or unestablished, or an earlier overall implementation cutoff arrives first, preserve the uncertainty and use the existing recovery/cutoff rules rather than inventing elapsed time.
+For genuinely new work, the combined record or Authorized Assignment may pre-adopt one optional earlier initial-silence threshold. The assignment record itself must state the threshold, the observable parent event used as its clock anchor, the clock basis, and the parent-visible observation scope. The anchor is an evidenced observable parent event, never an inferred provider or backend start. Do not add a mandatory ledger, stage, acknowledgement, preliminary artifact, token file, or default numeric threshold. If this policy is absent, its anchor or required clock evidence is unavailable or unestablished, or an earlier overall implementation cutoff arrives first, preserve the uncertainty and use the existing recovery/cutoff rules rather than inventing elapsed time.
 
 The earlier threshold may advance only the first lifecycle inspection for that assignment. It applies only until **any qualifying substantive parent-visible evidence** is actually received, whether or not it is the expected evidence; a verified FINAL may be the first such evidence. Qualifying evidence identifies changed owned work with substantive evidence, a running bounded command and its custody, or a terminal result with enough evidence to reconcile. Narrative activity, bare assertions, metadata/no-op churn, irrelevant reruns, weakened acceptance, or mandatory-interim-artifact theatre do not qualify. No qualifying evidence observed is not proof that no work occurred, and late visibility must preserve that distinction. Once qualifying evidence arrives, the initial-silence rule is permanently inapplicable to that assignment; it does not reset any clock or attempt fact.
 

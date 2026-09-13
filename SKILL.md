@@ -5,11 +5,20 @@ description: Orchestrate explicitly adopted, genuinely new ordinary engineering 
 
 # Lunacy native workflow
 
+## Ordinary delivery at a glance
+
+Establish authority and scope -> bind one coherent owner and an exact literal
+model/effort route -> let that owner deliver, check, repair, and report -> have
+the parent independently accept. Use ordinary Lunacy for a known engineering
+outcome. Use [Golden](orchestrator/IMPROVEMENT.md) whenever it is explicitly
+selected for any outcome, including a known implementation; never silently
+downgrade it to ordinary delivery.
+
 ## Supported scope and capability ceilings
 
-Use this skill only for a genuinely new ordinary engineering outcome whose current user/project authority explicitly selects this contract. Astra owns architecture, consequential decisions, `TASK.md`, coordination, and acceptance. Each worker owns its assigned implementation, tests, ordinary repair, report, and necessary logs. Use the same contract for single-worker and shared work; shared work adds only the parent-owned owner/dependency rows actually needed.
+Use this skill only for a genuinely new ordinary engineering outcome whose current user/project authority explicitly selects this contract. Astra owns architecture, consequential decisions, `TASK.md`, coordination, and acceptance. Each worker owns its assigned implementation, tests, ordinary repair, report, and necessary logs. A single-owner outcome uses one combined immutable [adoption-and-assignment record](orchestrator/PLANNING.md#single-owner-adoption-and-assignment); shared work keeps a common adoption and one distinct assignment/report per actual owner.
 
-Choose one immutable model binding before dispatch under the canonical [Exact native routing](orchestrator/PLANNING.md#exact-native-routing) rule. The unchanged named defaults are `luna` = `gpt-5.6-luna`/`max`, `sol-medium` = `gpt-5.6-sol`/`medium`, and explicitly selected `sol-high` = `gpt-5.6-sol`/`high`. For task-local customization, use [Worker model selection](orchestrator/WORKER-MODELS.md): the user can choose catalog models and supported efforts for the `bulk` and `judgment` roles without redefining those aliases. Current user/project authority must authorize the resolved exact pair for its worker purpose; an explicit role selection qualifies, while a general mention, catalogue entry, consultation selection, or host availability alone does not. Persist the literal pair before dispatch, require the host to preserve it exactly, and refuse conflicts or unsupported pairs without inference, normalization, probing, fallback, or changing a live or unknown-effect same-surface attempt.
+Choose one immutable binding before dispatch under [Exact native routing](orchestrator/PLANNING.md#exact-native-routing). The unchanged defaults are `bulk` (`gpt-5.6-luna` / `max`) and `judgment` (`gpt-5.6-sol` / `medium`); explicitly selected `sol-high` remains `gpt-5.6-sol` / `high`. [Worker model selection](orchestrator/WORKER-MODELS.md#two-roles-unchanged-defaults) is the canonical role/customization guide. Persist the literal model **and** effort for the worker purpose and exact transport/context; refuse unsupported or conflicting pairs without inference, probing, fallback, or changing a live or unknown-effect same-surface attempt.
 
 This is guidance plus optional read-only evidence and worker-model-selection helpers. It ships no authority resolver, assignment schema/digest validator, model launcher, supervisor, isolation or topology runtime, retention service, hook, MCP, agent configuration, installer, updater, or managed driver. It does not preserve AUTO/EXPLORE/Focus or managed admission/recovery capabilities and does not claim OS confinement or transactional immutability. Reconsider executable machinery only under new explicit authority and justified total cost.
 
@@ -25,10 +34,22 @@ Read only what the next action needs. In a fresh context, read unchanged rules a
 
 1. Read current project/user authority and [Authority, entry, and coexistence](WORKSPACE.md#authority-entry-and-coexistence).
 2. Astra reads the applicable section of [parent planning](orchestrator/PLANNING.md) for adoption, material input, dispatch, acceptance, deadline, or recovery; parent-only TASK authoring uses its [Compact TASK form](orchestrator/PLANNING.md#compact-task-form). Workers do not need the whole parent guide for ordinary construction.
-3. Before implementation, read the concrete pre-dispatch immutable Authorized Assignment and its adoption, exact route/context rule, owned paths/effects, report path, attempt/recovery entitlement, this contract, shared assignment/report interpretation in [The uniform record contract](WORKSPACE.md#the-uniform-record-contract), and [worker engineering](worker/ENGINEERING.md). Do not wait for a post-dispatch handle write or treat the assignment as proof of launch.
+3. Before implementation, a worker reads its concrete combined record or assignment plus adoption, the [uniform record/report contract](WORKSPACE.md#the-uniform-record-contract), [worker engineering](worker/ENGINEERING.md), and applicable project rules. Read the route section only when route/context details need resolution. Do not wait for a post-dispatch handle write or treat authorization as proof of launch.
 4. Use only the applicable established form: Astra authors/adopts TASK records; workers read and act under them and use [Worker updates and immutable report](WORKSPACE.md#worker-updates-and-immutable-report). Do not create parallel Plan/State/Steps/decision/gate records.
 
 An unspecified resume uses the selected run's existing contract and records and asks when ambiguous. Missing records decide nothing.
+
+## Compact examples
+
+- **Ordinary single-owner fix:** one combined record names the bug outcome,
+  owned files/effects, literal `gpt-5.6-luna` / `max` route, checks, report, and
+  entitlement; that worker fixes and tests it, then the parent accepts.
+- **Custom worker:** current authority selects a supported literal model and
+  effort for `judgment`; the record preserves that exact pair, transport, and
+  fresh context without changing any named default.
+- **Material pre-FINAL failure:** the parent returns the failed criterion and
+  evidence to the current owner. The worker diagnoses and repairs within scope;
+  the parent does not supply replacement code or create a repair packet.
 
 ## Optional captured-command evidence index
 

@@ -9,15 +9,21 @@ agent definitions, or an already running worker.
 
 ## Two roles, unchanged defaults
 
-| Task role | Purpose | Default exact pair |
-| --- | --- | --- |
-| `bulk` | Bounded implementation with cheap independent checks | `gpt-5.6-luna` / `max` |
-| `judgment` | Difficult implementation, diagnosis, discriminating tests | `gpt-5.6-sol` / `medium` |
+| Responsibility | Meaning and unchanged default |
+| --- | --- |
+| `bulk` | One bounded, decisively checkable coherent result; `gpt-5.6-luna` / `max`. |
+| `judgment` | Difficult implementation, cross-cutting diagnosis, discriminating tests, or material ambiguity; `gpt-5.6-sol` / `medium`. |
+| Parent | Architecture, adoption, consequential decisions, coordination, custody reconciliation, and acceptance; not replacement implementation. |
+| Specialist review | Only when an explicit check or concrete risk warrants independence; never an automatic second worker. |
 
 Either role can use a user-selected model and supported effort from the current
 catalog. These purpose labels are not provider aliases or measured capability
 ratings. Picking a weaker model does not relax acceptance. The immutable named
 routes `luna`, `sol-medium`, and `sol-high` keep their original meanings.
+Bulk and judgment are alternative task responsibilities, not a required
+planner/coder/tester or bulk-then-judgment pipeline. One selected worker owns a
+coherent result, its tests, and ordinary pre-FINAL repair. A task may select
+`judgment` first when its difficulty is already known; no fail-first rule applies.
 
 An invocation such as `choose workers; <outcome>` requests the coding-role
 launch selector. An explicit `Workers: bulk = MODEL / EFFORT; judgment = MODEL /

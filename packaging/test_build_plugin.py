@@ -103,7 +103,18 @@ class PluginBuildTests(unittest.TestCase):
             links = re.findall(r"\]\((\.\./[^)]+)\)", (golden / "SKILL.md").read_text())
             self.assertTrue(links)
             for link in links:
-                self.assertTrue((golden / link).is_file(), link)
+                path, _, fragment = link.partition("#")
+                target = golden / path
+                self.assertTrue(target.is_file(), link)
+                if fragment:
+                    target_text = target.read_text()
+                    explicit = f'id="{fragment}"' in target_text
+                    headings = re.findall(r"^#{1,6}\s+(.+?)\s*$", target_text, re.MULTILINE)
+                    generated = {
+                        re.sub(r"[^a-z0-9 -]", "", heading.lower()).strip().replace(" ", "-")
+                        for heading in headings
+                    }
+                    self.assertTrue(explicit or fragment in generated, link)
 
     def test_git_free_fixture_builds_complete_package(self):
         with tempfile.TemporaryDirectory() as temporary:

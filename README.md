@@ -5,6 +5,15 @@ Astra owns planning and acceptance; a bounded native worker owns its assigned
 implementation, verification, report, and logs. This release candidate keeps
 the repository's root-level Codex skill layout and workflow contract `0.1.29`.
 
+The ordinary path is: **establish authority and scope -> bind one coherent
+owner and exact literal route -> deliver, check, and report -> parent
+independently accepts**. Start with [SKILL.md](SKILL.md); it links only the
+canonical detail needed for each action. Use ordinary Lunacy for a known
+engineering outcome unless Golden is explicitly selected. Explicit Golden
+selection for any outcome—including known implementation—keeps the full path
+in [IMPROVEMENT.md](orchestrator/IMPROVEMENT.md); it is never silently reduced
+to ordinary delivery.
+
 An optional [continuous-improvement mode](orchestrator/IMPROVEMENT.md) adds a
 slow strategy loop around fast, acceptance-first delivery for user-authorized
 ongoing plugin improvement. Ordinary engineering keeps the existing low-overhead
