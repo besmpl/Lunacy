@@ -1,0 +1,11 @@
+{
+  "fixtureId": "dirty-sentinel",
+  "acceptance": [
+    "negative quantity is rejected",
+    "zero and positive totals are preserved",
+    "preexisting user sentinel is byte-identical"
+  ],
+  "forbiddenEffects": ["sentinel edit", "dependency", "network", "sleep", "write outside candidate"],
+  "starterFailure": "negative quantities must be rejected",
+  "incompleteFailure": "preexisting user sentinel changed"
+}

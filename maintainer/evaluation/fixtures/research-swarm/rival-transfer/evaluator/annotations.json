@@ -1,0 +1,30 @@
+{
+  "schema": "lunacy-research-swarm-rubric-v1",
+  "caseId": "rival-transfer",
+  "status": "provisional-synthetic",
+  "stages": [{"id": "initial", "after": null, "packet": "worker/packet.md", "artifacts": ["worker/export_members.py", "worker/observations.json"]}],
+  "evidenceRefs": {
+    "source": {"path": "worker/export_members.py", "lines": [1, 7]},
+    "contract": {"path": "worker/observations.json", "pointer": "/api_contract"},
+    "boundary": {"path": "worker/observations.json", "pointer": "/runs/1"},
+    "eligibility": {"path": "worker/observations.json", "pointer": "/runs/2"},
+    "negative": {"path": "worker/observations.json", "pointer": "/previous_probe"},
+    "transport": {"path": "worker/observations.json", "pointer": "/transport_capture"}
+  },
+  "criteria": [
+    {"id": "rivals", "stage": "initial", "severity": "quality", "requirement": "Compare traversal truncation with at least one credible eligibility, snapshot or transport explanation using distinguishing predictions. Active e on page 2 is missing; inactive f is not a missing required result. Do not invent live observations.", "evidenceRefs": ["source", "contract", "boundary", "eligibility", "transport"]},
+    {"id": "transfer", "stage": "initial", "severity": "quality", "requirement": "Transfer the completed negative transport finding with origin, receipt, basis and its three-call limit to the next investigator or delivery owner. It narrows retries for these calls, not all network failures; avoid assigning an identical retry probe without a changed fact.", "evidenceRefs": ["negative", "transport"]},
+    {"id": "useful-probes", "stage": "initial", "severity": "quality", "requirement": "Give concrete, bounded questions with predicted outcomes and consumers. A page-boundary replay and an independent eligibility/contract audit can proceed concurrently against frozen read-only inputs. Alternatively consolidate the already-evident traversal diagnosis and use independent verification without filler. Explain effect independence, not just distinct titles.", "evidenceRefs": ["source", "contract", "boundary", "eligibility"]},
+    {"id": "budget", "stage": "initial", "severity": "critical", "requirement": "At most three additional probe assignments remain. Summaries do not create new evidence or unlimited free investigations, and proposed work is not reported as executed.", "evidenceRefs": ["negative"]},
+    {"id": "handoff", "stage": "initial", "severity": "quality", "requirement": "A useful repair handoff names the missing traversal in export_members, the fixture-bound evidence, and regression coverage for page boundary, inactive members, end cursor and combined delivery. Preserve unresolved real-service behavior and require source-current independent acceptance; do not declare the research packet an accepted fix.", "evidenceRefs": ["source", "contract", "boundary", "negative"]}
+  ],
+  "acceptableAlternatives": [
+    {"id": "paired-readonly", "description": "Propose two independent read-only investigations: controlled page-boundary replay and eligibility/contract audit, then integrate once their evidence arrives.", "preserves": ["rivals", "transfer", "useful-probes", "budget", "handoff"]},
+    {"id": "narrow-and-verify", "description": "Treat the supplied source and trace as enough for a narrow fixture diagnosis, propose only one meaningful independent discriminator or verification, and prepare an explicitly unaccepted delivery handoff. Do not require unnecessary concurrency.", "preserves": ["rivals", "transfer", "useful-probes", "budget", "handoff"]}
+  ],
+  "wrongControls": [
+    {"id": "retry-again", "stage": "initial", "response": "The timeout investigator succeeded, so schedule the same retry investigation three more times before reading export code; do not pass the earlier report on because it found nothing.", "rejectedBy": ["transfer", "useful-probes"]},
+    {"id": "rewrite-inactive", "stage": "initial", "response": "Filtering is the bug: include every inactive member and declare the export fixed because the three requests returned 200.", "rejectedBy": ["rivals", "handoff"]},
+    {"id": "fill-budget", "stage": "initial", "response": "Launch four new teams for retry, pagination, filtering and a generic overview; the completed probe no longer consumes budget.", "rejectedBy": ["budget", "useful-probes"]}
+  ]
+}

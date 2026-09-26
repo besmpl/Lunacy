@@ -1,58 +1,103 @@
 ---
 name: lunacy
-description: Orchestrate explicitly adopted, genuinely new ordinary engineering work through Astra decisions and acceptance with coherent native workers. Use only when current project authority selects this guidance contract; do not use it to take over legacy, managed, retained, or provenance-uncertain work.
+description: Orchestrate genuinely new authorized tasks through parent decisions and acceptance with coherent native workers. Explicit selection is required; never take over existing, managed, or provenance-uncertain work.
 ---
 
 # Lunacy native workflow
 
+<a id="ordinary-path"></a>
 ## Ordinary delivery at a glance
 
-Establish authority and scope -> bind one coherent owner and an exact literal
-model/effort route -> let that owner deliver, check, repair, and report -> have
-the parent independently accept. Use ordinary Lunacy for a known engineering
-outcome. Use [Golden](orchestrator/IMPROVEMENT.md) whenever it is explicitly
-selected for any outcome, including a known implementation; never silently
-downgrade it to ordinary delivery.
+Confirm current authority/scope. For small/coupled work, seal one coherent
+owner and exact route in a combined assignment. For large independent work,
+use [ready-work policy](orchestrator/PLANNING.md#ready-work-parallel-delivery)
+and the [native dispatch recipe](#native-dispatch-recipe). Root dispatches;
+wait boundedly, inspect results/effects, and accept only after custody settles.
+Avoid extra plan/state/gate records.
 
-## Supported scope and capability ceilings
+[dispatch mode](orchestrator/PLANNING.md#dispatch-modes-and-wave-protocol):
+super-parallel/22; normal/limit overrides.
 
-Use this skill only for a genuinely new ordinary engineering outcome whose current user/project authority explicitly selects this contract. Astra owns architecture, consequential decisions, `TASK.md`, coordination, and acceptance. Each worker owns its assigned implementation, tests, ordinary repair, report, and necessary logs. A single-owner outcome uses one combined immutable [adoption-and-assignment record](orchestrator/PLANNING.md#single-owner-adoption-and-assignment); shared work keeps a common adoption and one distinct assignment/report per actual owner.
+<a id="native-dispatch-recipe"></a>
+### Native dispatch recipe
 
-Choose one immutable binding before dispatch under [Exact native routing](orchestrator/PLANNING.md#exact-native-routing). The unchanged defaults are `bulk` (`gpt-5.6-luna` / `max`) and `judgment` (`gpt-5.6-sol` / `medium`); explicitly selected `sol-high` remains `gpt-5.6-sol` / `high`. [Worker model selection](orchestrator/WORKER-MODELS.md#two-roles-unchanged-defaults) is the canonical role/customization guide. Persist the literal model **and** effort for the worker purpose and exact transport/context; refuse unsupported or conflicting pairs without inference, probing, fallback, or changing a live or unknown-effect same-surface attempt.
+1. **Prepare all packets.** On adoption/readiness change, seal complete packets
+   for the whole independent group before first spawn: scope/acceptance,
+   route/context/report, inputs/baseline, dependencies/revision,
+   effects/integration. One owner per effect; keep coupled work together.
+2. **Size.** Use `max(0, min(remaining task cap, host room, model/resources))`;
+   choose largest safe set. Default cap 22; lower cap sizes waves, not work.
+3. **Launch/record.** Call `agents.spawn_agent` consecutively, with no
+   planning/polls/waits/other calls between. Calls are sequential; workers may
+   overlap; no batch API/scheduler. Inspect each return; record actual
+   handles/uncertainty in `TASK` after the wave or at an interruption boundary.
+   Authority/route/capacity/effect changes stop affected launches; never replay
+   unknown.
+4. **Refill/wait.** At initial dispatch, real completion/blocker/decision,
+   changed check/integration or authority/interface/capacity/resource/custody
+   event, or due recovery, inspect once; settle cancellation/unsafe effects and
+   prerequisites; recompute. Prepare complete next packets; use safe room
+   before waiting, even while unrelated children run. Task-wide cancellation
+   stops refill. Before waiting, do one bounded sweep; wait only on a live handle
+   if no useful safe launch is ready. Never poll healthy workers or rescan
+   unchanged evidence.
 
-This is guidance plus optional read-only evidence and worker-model-selection helpers. It ships no authority resolver, assignment schema/digest validator, model launcher, supervisor, isolation or topology runtime, retention service, hook, MCP, agent configuration, installer, updater, or managed driver. It does not preserve AUTO/EXPLORE/Focus or managed admission/recovery capabilities and does not claim OS confinement or transactional immutability. Reconsider executable machinery only under new explicit authority and justified total cost.
+Apply these invariants immediately:
 
-## Entry and reciprocal selection
-
-Selection permits read-only identification, not execution. Before mutation, dispatch, resume, or effects, require current authority to match this exact contract and the immutable adoption in `TASK.md`; apply [Authority, entry, and coexistence](WORKSPACE.md#authority-entry-and-coexistence). Existing native, managed, retained, frozen, legacy, or provenance-uncertain work keeps its original contract, route, history, effects, and recovery owner. The presence or absence of `TASK.md`, a new ID, timeout, missing record, current repository state, or lifecycle-terminal text never migrates old work, establishes new-work eligibility, releases effects, or grants replacement or acceptance. Mixed-project use needs reciprocal authority on every affected side.
-
-When the user explicitly selects Golden, use the optional [Golden-cycle and continuous-improvement guidance](orchestrator/IMPROVEMENT.md): each meaningful outcome requires consultation, actual ADHD, adopted Lunacy delivery, and parent acceptance. Ordinary Lunacy remains the direct low-overhead path. Ongoing improvement additionally requires current user authority and a viable material big win; neither mode permits invented work.
+<a id="supported-scope-and-capability-ceilings"></a>
+<a id="entry-and-reciprocal-selection"></a>
+- A task-directed invocation selects Lunacy for genuinely new work, including
+  non-engineering tasks, with current authority; selection alone does not
+  authorize deletion or other effects. Existing/managed/provenance-uncertain
+  work keeps its owner/contract.
+- One owner controls each surface/effect. Unknown effects forbid replay,
+  replacement, release, or acceptance. Settle known effects only through
+  observed completion or authorized wait, cancellation, or cleanup; timeout,
+  missing records, terminal prose, or dirty tree proves no release.
+- Seal model/effort/purpose/transport before dispatch. `bulk`/`judgment` default
+  to `gpt-6-luna` / `max`. Only a clear affirmative task-local request such as
+  `use Sol medium` may bind suitable `judgment`; quoted, negated, hypothetical,
+  or incidental mentions do not. See [exact native
+  routing](orchestrator/PLANNING.md#exact-native-routing); never infer/probe/
+  substitute/fall back/rebind live work.
+- Worker owns delivery, verification, pre-FINAL repair/report/logs; parent owns
+  approach, decisions, `TASK.md`, coordination, and independent acceptance.
+  Post-FINAL substantive repair requires settled effects and a new
+  assignment/report; history stays frozen.
+- Explicit [Golden](orchestrator/IMPROVEMENT.md#golden-cycle) is unchanged;
+  never silently downgrade it to ordinary delivery.
 
 ## Before-action reads
 
-Read only what the next action needs. In a fresh context, read unchanged rules and contract references once; reread mutable current authority and TASK coordination whenever their boundary may have changed, plus new evidence needed for the action.
+Read current authority and mutable `TASK.md` coordination on boundary changes.
+Read only action-relevant detail. Missing records decide nothing; ambiguous
+resumes require the existing contract.
 
-1. Read current project/user authority and [Authority, entry, and coexistence](WORKSPACE.md#authority-entry-and-coexistence).
-2. Astra reads the applicable section of [parent planning](orchestrator/PLANNING.md) for adoption, material input, dispatch, acceptance, deadline, or recovery; parent-only TASK authoring uses its [Compact TASK form](orchestrator/PLANNING.md#compact-task-form). Workers do not need the whole parent guide for ordinary construction.
-3. Before implementation, a worker reads its concrete combined record or assignment plus adoption, the [uniform record/report contract](WORKSPACE.md#the-uniform-record-contract), [worker engineering](worker/ENGINEERING.md), and applicable project rules. Read the route section only when route/context details need resolution. Do not wait for a post-dispatch handle write or treat authorization as proof of launch.
-4. Use only the applicable established form: Astra authors/adopts TASK records; workers read and act under them and use [Worker updates and immutable report](WORKSPACE.md#worker-updates-and-immutable-report). Do not create parallel Plan/State/Steps/decision/gate records.
+<a id="ordinary-progressive-reads"></a>
+### Ordinary trigger table
 
-An unspecified resume uses the selected run's existing contract and records and asks when ambiguous. Missing records decide nothing.
+<a id="compact-examples"></a>
+| Trigger | Read next |
+| --- | --- |
+| One-owner adoption/dispatch | [authority](WORKSPACE.md#authority-entry-and-coexistence), [TASK](orchestrator/PLANNING.md#compact-task-form), [contract](WORKSPACE.md#the-uniform-record-contract), [routing](orchestrator/PLANNING.md#exact-native-routing) |
+| Parallel parent or logical-team coordination | [ready-work policy](orchestrator/PLANNING.md#ready-work-parallel-delivery), [records](WORKSPACE.md#the-uniform-record-contract); [recovery](orchestrator/PLANNING.md#recovery-and-anti-stall) |
+| Worker implementation/report | Current assignment and project rules, then [worker delivery](worker/ENGINEERING.md) and [report contract](WORKSPACE.md#worker-updates-and-immutable-report); code-specific guidance applies to code work |
+| Parent acceptance/evidence gap | [acceptance](orchestrator/PLANNING.md#acceptance-and-barrier), [barrier](WORKSPACE.md#ownership-barrier-and-acceptance), affected checks; dispatch links only for assignment/effect/custody gaps |
+| Pre-FINAL defect | [repair](worker/ENGINEERING.md#coherent-implementation-and-repair); keep current owner |
+| Post-FINAL defect | [handoff](orchestrator/PLANNING.md#compact-post-final-repair-handoff) after effects settle |
+| Overlap, unknown authority/effects, deadline, recovery | [coexistence](WORKSPACE.md#authority-entry-and-coexistence), [barrier](WORKSPACE.md#ownership-barrier-and-acceptance), [deadline](orchestrator/PLANNING.md#adopted-deadlines-and-finalization), [recovery](orchestrator/PLANNING.md#recovery-and-anti-stall); stop only affected work |
+| Adopted task deadline | [coexistence](WORKSPACE.md#authority-entry-and-coexistence), [barrier](WORKSPACE.md#ownership-barrier-and-acceptance), [deadline](orchestrator/PLANNING.md#adopted-deadlines-and-finalization) |
+| Explicit worker customization | [models](orchestrator/WORKER-MODELS.md#two-roles-unchanged-defaults) |
+| Explicit research swarm | [protocol](orchestrator/RESEARCH-SWARM.md) |
+| Explicit Golden or usage comparison | [Golden](orchestrator/IMPROVEMENT.md#golden-cycle) or the [usage comparison](orchestrator/USAGE-METRICS.md#ordinary-overhead-comparison); neither is an ordinary prerequisite |
 
-## Compact examples
+After compaction/boundary change, reread authority, `TASK.md` and anchors;
+cached notes aren't authority.
 
-- **Ordinary single-owner fix:** one combined record names the bug outcome,
-  owned files/effects, literal `gpt-5.6-luna` / `max` route, checks, report, and
-  entitlement; that worker fixes and tests it, then the parent accepts.
-- **Custom worker:** current authority selects a supported literal model and
-  effort for `judgment`; the record preserves that exact pair, transport, and
-  fresh context without changing any named default.
-- **Material pre-FINAL failure:** the parent returns the failed criterion and
-  evidence to the current owner. The worker diagnoses and repairs within scope;
-  the parent does not supply replacement code or create a repair packet.
+## Capability ceiling
 
-## Optional captured-command evidence index
-
-When a relevant native JSONL capture already exists and authority permits reading it, `scripts/evidence_index.py` produces a deterministic read-only projection. Select `--source-format app-server` (the default, preserving the existing received-event lifecycle projection) or explicitly select `--source-format session-receipt` for the distinct completion-only native session projection. For a finite turn-ID-free direct-exec JSONL snapshot with one unambiguous thread header and observed turn boundary, explicitly select `--source-format direct-exec`; this format forbids turn/session arguments and groups every command occurrence by literal item ID without deduplication or lifecycle interpretation. There is no auto-detection, fallback, or cross-capture join.
-
-All formats accept an absolute regular path, read at most 64 MiB, hash a finite snapshot, and default to an 8192-byte projection cap. Session output reveals only source/scope locators, metadata/context lines, recorded model/effort, completion lines, item IDs, and raw recorded status/exit code. Direct-exec output reveals only source/scope and boundary locators, counts, literal item IDs, event kinds, raw statuses, and exit presence/value. Both exclude command arguments, cwd, output, prompts, reasoning, encrypted content, extras, and report text. The helper neither launches nor supervises anything and never establishes authority, route/backend truth, semantic success, completeness, custody, effects, correctness, or acceptance. Missing, ambiguous, or unsupported captures are explicit refusals; they do not require an exporter or weaken required proof. See [Optional evidence-index helper](OPERATOR.md#optional-evidence-index-helper).
+<a id="optional-captured-command-evidence-index"></a>
+Optional [navigation](OPERATOR.md#optional-action-context-navigator) and [authorized POSIX runners](OPERATOR.md) aren't model
+launchers, sandboxes, supervisors or authority resolvers. Capture proves neither
+settled effects nor correctness. Indexing grants no replay/acceptance; commands
+require authority.

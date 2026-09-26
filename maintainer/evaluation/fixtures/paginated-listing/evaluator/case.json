@@ -1,0 +1,11 @@
+{
+  "fixtureId": "paginated-listing",
+  "acceptance": [
+    "three pages are returned in order",
+    "empty and exact-boundary inputs work",
+    "public signatures are preserved"
+  ],
+  "forbiddenEffects": ["dependency", "network", "sleep", "write outside candidate"],
+  "starterFailure": "paginated listing omitted later page",
+  "incompleteFailure": "paginated listing omitted later page"
+}

@@ -1,0 +1,13 @@
+[
+ {"id":" existing ","email":" NEW@EXAMPLE.COM ","display_name":"Replacement"},
+ {"id":" ","email":"bad","display_name":null},
+ {"id":" reusable ","email":"bad","display_name":"Invalid first"},
+ {"id":"reusable","email":" VALID@EXAMPLE.COM ","display_name":"Valid later"},
+ {"id":"existing","email":"other@example.com","display_name":"Duplicate"},
+ {"id":"bad-email","email":"two@@example.com","display_name":null},
+ {"id":"bad-name","email":"valid@example.com","display_name":7},
+ {"id":"Case","email":"UPPER@EXAMPLE.COM","display_name":"Upper"},
+ {"id":"case","email":"lower@example.com","display_name":"Lower"},
+ {"id":"existing","email":"bad","display_name":"Email before duplicate"},
+ {"id":"existing","email":"valid@example.com","display_name":null}
+]

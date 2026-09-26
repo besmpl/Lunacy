@@ -23,8 +23,16 @@ CURSOR_CAP = 1024
 DEADLINE_SECONDS = 10.0
 DIAGNOSTIC_CAP = 512
 ROLE_DEFAULTS = {
-    "bulk": ("gpt-5.6-luna", "max", "luna"),
-    "judgment": ("gpt-5.6-sol", "medium", "sol-medium"),
+    "bulk": ("gpt-6-luna", "max", "luna"),
+    # Both coding purposes start on the same low-overhead route.  Sol is a
+    # task-local opt-in for a deliberately selected judgment assignment, not
+    # an escalation inferred from difficulty or a failed attempt.
+    "judgment": ("gpt-6-luna", "max", "luna"),
+}
+NAMED_ALIASES = {
+    ("gpt-6-luna", "max"): "luna",
+    ("gpt-5.6-sol", "medium"): "sol-medium",
+    ("gpt-5.6-sol", "high"): "sol-high",
 }
 
 
@@ -183,7 +191,7 @@ def resolve_roles(catalog: Any, args: argparse.Namespace) -> dict[str, Any]:
     for role in ("bulk", "judgment"):
         custom_model = getattr(args, f"{role}_model")
         custom_effort = getattr(args, f"{role}_effort")
-        default_model, default_effort, alias = ROLE_DEFAULTS[role]
+        default_model, default_effort, _default_alias = ROLE_DEFAULTS[role]
         if custom_model is None:
             if default_model not in by_model:
                 raise WorkerModelError(f"canonical default model is unavailable: {default_model}")
@@ -208,7 +216,9 @@ def resolve_roles(catalog: Any, args: argparse.Namespace) -> dict[str, Any]:
             "effort": effort,
             "displayName": item["display"],
             "selection": selection,
-            "namedAlias": alias if dispatch_model == default_model and effort == default_effort else None,
+            # Keep route aliases stable even though Sol routes are explicit
+            # task-local choices rather than implicit role defaults.
+            "namedAlias": NAMED_ALIASES.get((dispatch_model, effort)),
             "codexExecArgs": [
                 "codex", "exec", "-m", dispatch_model, "-c",
                 f"model_reasoning_effort={json.dumps(effort, ensure_ascii=False)}",

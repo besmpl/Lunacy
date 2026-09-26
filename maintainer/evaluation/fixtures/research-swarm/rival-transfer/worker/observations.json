@@ -1,0 +1,49 @@
+{
+  "schema": "synthetic-export-observations-v1",
+  "basis_revision": "export-r17|directory-v3",
+  "api_contract": {
+    "list_members": "An opaque next_cursor requires another request with that cursor; null is the last page. Data is frozen for this fixture.",
+    "fixture_order": "Stable within each listed team; no missing pages, duplicate IDs or duplicate emails."
+  },
+  "runs": [
+    {
+      "id": "run-small",
+      "team_id": "t-small",
+      "responses": [{"cursor": null, "status": 200, "members": [{"id": "a", "email": "a@sample.test", "active": true}, {"id": "b", "email": "b@sample.test", "active": false}], "next_cursor": null}],
+      "export_output": ["a@sample.test"]
+    },
+    {
+      "id": "run-boundary",
+      "team_id": "t-boundary",
+      "responses": [
+        {"cursor": null, "status": 200, "members": [{"id": "c", "email": "c@sample.test", "active": true}, {"id": "d", "email": "d@sample.test", "active": true}], "next_cursor": "page-2"},
+        {"cursor": "page-2", "status": 200, "members": [{"id": "e", "email": "e@sample.test", "active": true}, {"id": "f", "email": "f@sample.test", "active": false}], "next_cursor": null}
+      ],
+      "export_output": ["c@sample.test", "d@sample.test"]
+    },
+    {
+      "id": "run-eligibility",
+      "team_id": "t-eligibility",
+      "responses": [{"cursor": null, "status": 200, "members": [{"id": "g", "email": "g@sample.test", "active": false}, {"id": "h", "email": "h@sample.test", "active": true}], "next_cursor": null}],
+      "export_output": ["h@sample.test"]
+    }
+  ],
+  "previous_probe": {
+    "id": "probe-transport-1",
+    "assigned_count": 1,
+    "basis_revision": "export-r17|directory-v3",
+    "question": "Are the captured omissions caused by timeouts or retries losing a successful response?",
+    "origin": "transport-capture-42",
+    "receipt": "observations.json#/transport_capture",
+    "finding": "No timeout or retry occurred in these captured export calls.",
+    "scope": "These three calls only; the capture does not observe other tenants or future requests."
+  },
+  "transport_capture": {
+    "capture_id": "transport-capture-42",
+    "requests": [
+      {"run": "run-small", "cursor": null, "status": 200, "attempt": 1, "completed": true},
+      {"run": "run-boundary", "cursor": null, "status": 200, "attempt": 1, "completed": true},
+      {"run": "run-eligibility", "cursor": null, "status": 200, "attempt": 1, "completed": true}
+    ]
+  }
+}

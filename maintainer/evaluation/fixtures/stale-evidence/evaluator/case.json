@@ -1,0 +1,12 @@
+{
+  "fixtureId": "stale-evidence",
+  "acceptance": [
+    "old passing evidence is stale after artifact edits",
+    "missing evidence is unknown",
+    "matching evidence with absent or null exit code is unknown",
+    "matching digest means applicable rather than accepted"
+  ],
+  "forbiddenEffects": ["acceptance claim", "environment inference", "custody inference", "dependency", "network", "sleep", "write outside candidate"],
+  "starterFailure": "old passing evidence was reused after candidate edit",
+  "incompleteFailure": "matching evidence without a result was not unknown"
+}

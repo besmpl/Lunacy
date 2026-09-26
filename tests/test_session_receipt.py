@@ -288,6 +288,42 @@ class SessionReceiptTests(unittest.TestCase):
             self.assertEqual((late.returncode, late.stdout), (2, ""))
             source.write_text("".join(json.dumps(row) + "\n" for row in [meta(), context(), command()]))
 
+    def test_duplicate_key_refusal_is_content_free_across_finite_renames(self):
+        prefix = "".join(json.dumps(row) + "\n" for row in [meta(), context(), command()])
+        cases = (
+            ("top-level", 1, "TOP-CANARY-ONE", "TOP-CANARY-TWO",
+             lambda quoted: f"{{{quoted}:1,{quoted}:2}}\n"),
+            ("nested", 1, "NESTED-CANARY-ONE", "NESTED-CANARY-TWO",
+             lambda quoted: f'{{"type":"session_meta","payload":{{{quoted}:1,{quoted}:2}}}}\n'),
+            ("late", 4, "LATE-CANARY-ONE", "LATE-CANARY-TWO",
+             lambda quoted: prefix + f"{{{quoted}:1,{quoted}:2}}\n"),
+            ("multibyte", 1, "秘密会话😀一", "秘密会话😀二",
+             lambda quoted: f"{{{quoted}:1,{quoted}:2}}\n"),
+            ("locator-shaped", 1, "/private/path/itemId/sha256-CANARY-A",
+             "/private/path/itemId/sha256-CANARY-B",
+             lambda quoted: f"{{{quoted}:1,{quoted}:2}}\n"),
+        )
+        for label, line, first, second, render in cases:
+            observations = []
+            for key in (first, second):
+                with self.subTest(case=label, key=key):
+                    source = self.root / f"{label}.jsonl"
+                    source.write_text(render(json.dumps(key, ensure_ascii=False)), encoding="utf-8")
+                    result = subprocess.run(
+                        [os.fspath(SCRIPT), os.fspath(source), "--source-format", "session-receipt",
+                         "--thread-id", "thread", "--turn-id", "turn", "--output-cap", "256"],
+                        text=True, capture_output=True, timeout=5, check=False,
+                    )
+                    expected = f"evidence-index: line {line}: duplicate JSON object key\n"
+                    self.assertEqual((result.returncode, result.stdout, result.stderr),
+                                     (2, "", expected))
+                    self.assertNotIn(key, result.stdout + result.stderr)
+                    self.assertEqual(result.stderr.count("\n"), 1)
+                    self.assertLessEqual(len(result.stderr.encode()), 256)
+                    result.stderr.encode().decode("utf-8", "strict")
+                    observations.append((result.returncode, result.stdout, result.stderr))
+            self.assertEqual(observations[0], observations[1])
+
 
 if __name__ == "__main__":
     unittest.main()

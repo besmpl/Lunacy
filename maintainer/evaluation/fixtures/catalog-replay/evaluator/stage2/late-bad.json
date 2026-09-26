@@ -1,0 +1,24 @@
+{
+  "first": "root",
+  "pages": {
+    "root": {
+      "rows": [
+        {"sku": "a", "revision": 3, "active": true, "name": "Desk Prime"},
+        {"sku": "b", "revision": 1, "active": true, "name": "Pad, \"Blue\""}
+      ],
+      "next": "gap"
+    },
+    "gap": {"rows": [], "next": "tail"},
+    "tail": {
+      "rows": [
+        {"sku": "c", "revision": 1, "active": true, "name": "Line\nBreak"},
+        {"sku": "b", "revision": 2, "active": false, "name": "Pad, \"Blue\""},
+        {"sku": "a", "revision": 2, "active": true, "name": "Desk Old"},
+        {"sku": "d", "revision": 1, "active": true, "name": "North, \"Annex\""},
+        {"sku": "c", "revision": 1, "active": true, "name": "Line\nBreak"},
+        {"sku": "e", "revision": "4", "active": true, "name": "Bad"}
+      ],
+      "next": null
+    }
+  }
+}

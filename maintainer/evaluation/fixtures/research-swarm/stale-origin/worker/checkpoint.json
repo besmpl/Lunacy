@@ -1,0 +1,19 @@
+{
+  "schema": "lunacy-research-checkpoint-v1",
+  "basis_revision": "queue-r12|fixture-v3",
+  "branches": ["lease-fix", "log-format"],
+  "evidence": [
+    {"id": "old-a", "branch": "lease-fix", "basis_revision": "queue-r11|fixture-v2", "relation": "supports", "origin": "load-run-17", "receipt": "observations.json#/derived_summaries/0"},
+    {"id": "old-b", "branch": "lease-fix", "basis_revision": "queue-r11|fixture-v2", "relation": "supports", "origin": "load-run-17", "receipt": "observations.json#/derived_summaries/1"},
+    {"id": "old-c", "branch": "lease-fix", "basis_revision": "queue-r11|fixture-v2", "relation": "supports", "origin": "load-run-17", "receipt": "observations.json#/derived_summaries/2"},
+    {"id": "current-single", "branch": "lease-fix", "basis_revision": "queue-r12|fixture-v3", "relation": "supports", "origin": "single-replay-21", "receipt": "observations.json#/current_runs/single_consumer"},
+    {"id": "current-pair", "branch": "lease-fix", "basis_revision": "queue-r12|fixture-v3", "relation": "challenges", "origin": "pair-replay-22", "receipt": "observations.json#/current_runs/two_consumers"},
+    {"id": "current-log", "branch": "log-format", "basis_revision": "queue-r12|fixture-v3", "relation": "supports", "origin": "log-review-23", "receipt": "observations.json#/current_runs/log_format"}
+  ],
+  "checks": [
+    {"id": "check-historical", "branch": "lease-fix", "basis_revision": "queue-r11|fixture-v2", "evidence_ids": ["old-a", "old-b", "old-c"], "result": "passed", "receipt": "observations.json#/check_receipts/historical"},
+    {"id": "check-before-pair", "branch": "lease-fix", "basis_revision": "queue-r12|fixture-v3", "evidence_ids": ["current-single"], "result": "passed", "receipt": "observations.json#/check_receipts/before_pair"},
+    {"id": "check-current-matrix", "branch": "lease-fix", "basis_revision": "queue-r12|fixture-v3", "evidence_ids": ["current-single", "current-pair"], "result": "failed", "receipt": "observations.json#/check_receipts/current_matrix"},
+    {"id": "check-log", "branch": "log-format", "basis_revision": "queue-r12|fixture-v3", "evidence_ids": ["current-log"], "result": "passed", "receipt": "observations.json#/check_receipts/log"}
+  ]
+}

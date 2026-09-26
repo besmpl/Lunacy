@@ -1,0 +1,5 @@
+id,email,display_name,ignored
+" q-1 "," FIRST@EXAMPLE.COM ","line one
+line two, ""quoted""solo
+last λ end",extra
+q-2,second@example.com,"Καλημέρα, мир",ignored

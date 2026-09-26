@@ -1,0 +1,9 @@
+{
+  "caseId": "valid-zero",
+  "status": "provisional-synthetic",
+  "usefulFamilies": [],
+  "firstWave": [],
+  "deferred": [],
+  "forbidden": ["start a scout because a slot is free", "invent another docs assignment", "reopen accepted finite scope without new authority"],
+  "acceptanceProof": "No new work; preserve accepted completion unless new authority adopts a genuinely new outcome."
+}

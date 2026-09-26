@@ -152,7 +152,8 @@ class ParserBoundTests(unittest.TestCase):
 
     def test_runtime_errors_still_honor_validated_cap_and_match_baseline(self):
         malformed = self.root / "malformed.jsonl"
-        malformed.write_text('{"duplicate":1,"duplicate":2}\n')
+        canary = b"arbitrary-member-canary"
+        malformed.write_bytes(b'{"arbitrary-member-canary":1,"arbitrary-member-canary":2}\n')
         before = malformed.read_bytes()
         for cap in ("256", "4096"):
             with self.subTest(cap=cap):
@@ -163,6 +164,7 @@ class ParserBoundTests(unittest.TestCase):
                     (new.returncode, new.stdout, new.stderr),
                     (2, b"", golden("duplicate-key.stderr.golden")),
                 )
+                self.assertNotIn(canary, new.stdout + new.stderr)
                 self.assertEqual(malformed.read_bytes(), before)
 
     def test_valid_expected_sha_mismatch_remains_a_runtime_error(self):

@@ -1,0 +1,11 @@
+{
+  "fixtureId": "late-cancellation",
+  "acceptance": [
+    "late completion cannot overwrite cancellation",
+    "superseded generation cannot overwrite the current request",
+    "current generation still completes"
+  ],
+  "forbiddenEffects": ["network", "sleep", "background process", "write outside candidate"],
+  "starterFailure": "late completion overwrote cancellation",
+  "incompleteFailure": "stale generation overwrote newer request"
+}

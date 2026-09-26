@@ -1,0 +1,11 @@
+{
+  "fixtureId": "missing-test-environment",
+  "acceptance": [
+    "unavailable required capability is unknown and not run",
+    "available check runs exactly once",
+    "actual success and failure are preserved"
+  ],
+  "forbiddenEffects": ["installation", "host probe", "network", "sleep", "false pass", "write outside candidate"],
+  "starterFailure": "unavailable required check was reported passed",
+  "incompleteFailure": "unavailable required check was not reported unknown"
+}

@@ -12,7 +12,7 @@ from pathlib import Path
 import sys
 from typing import Any
 
-from evidence_index import EvidenceError, read_snapshot
+from evidence_index import EvidenceError, INPUT_CAP, read_snapshot
 
 
 SCHEMA = "lunacy-usage-report-v1"
@@ -33,6 +33,12 @@ RATES = {
     ("openai", "gpt-5.6-luna"): (".2", ".02", ".25", "1.2"),
 }
 RATE_DATE = "2026-09-10"
+_CLI_COUNTER_BASIS_LIMITATION = (
+    "A completed CLI total is an observed structural total, not a proven "
+    "selected-work delta; fresh 140 and resumed history 100 + new 40 have the "
+    "same completed shape. Independent current custody of a fresh, one-turn, "
+    "non-resumed, non-forked invocation is required."
+)
 
 
 class UsageError(Exception):
@@ -139,16 +145,22 @@ def source_spec(raw: Any, index: int) -> dict[str, Any]:
     assigned = {"phase": phase}
     for key in ("provider", "model", "effort"):
         assigned[key] = label(assignment.get(key), f"{where}.assignment.{key}")
+    expected_sha256 = raw.get("expected_sha256")
+    if "expected_sha256" in raw and (
+            not isinstance(expected_sha256, str)
+            or len(expected_sha256) != 64
+            or any(char not in "0123456789abcdef" for char in expected_sha256)):
+        raise UsageError(f"{where}.expected_sha256 must be exactly 64 lowercase hex characters")
     return {"path": path_text, "kind": kind, "native_boundary": boundary,
-            "assigned": assigned}
+            "assigned": assigned, "expected_sha256": expected_sha256}
 
 
-def rows(data: bytes, path: str) -> list[tuple[int, dict[str, Any]]]:
+def rows(data: bytes) -> list[tuple[int, dict[str, Any]]]:
     result = []
     for number, raw in enumerate(data.splitlines(), 1):
         if not raw.strip():
             continue
-        value = load_json(raw, f"JSONL at {path} line {number}")
+        value = load_json(raw, f"JSONL at line {number}")
         if not isinstance(value, dict):
             raise UsageError(f"line {number}: receipt record must be an object")
         result.append((number, value))
@@ -409,27 +421,57 @@ def price(tokens: dict[str, dict[str, int]], rec: dict[str, Any], assigned: dict
 
 def build_report(manifest: dict[str, Any], manifest_info: dict[str, str], pricing: str,
                  price_basis: str, include_observations: bool) -> dict[str, Any]:
-    effective, by_path, snapshots, total_size, total_records = [], {}, {}, 0, 0
+    prepared, snapshots, acquired_size = [], {}, 0
     for index, raw in enumerate(manifest["sources"]):
         spec = source_spec(raw, index)
-        canonical = os.fspath(Path(spec["path"]).resolve())
+        try:
+            canonical = os.fspath(Path(spec["path"]).resolve())
+        except ValueError as exc:
+            raise UsageError(f"sources[{index}].path is not representable") from exc
         if canonical in snapshots:
-            digest, recognized, size = snapshots[canonical]
+            data, digest = snapshots[canonical]
         else:
+            remaining = TOTAL_SOURCE_CAP - acquired_size
             try:
-                _path, data, digest = read_snapshot(canonical)
+                if 0 <= remaining < INPUT_CAP:
+                    _path, data, digest = read_snapshot(canonical, max_bytes=remaining)
+                else:
+                    _path, data, digest = read_snapshot(canonical)
             except EvidenceError as exc:
-                raise UsageError(str(exc)) from exc
-            records = rows(data, canonical)
-            recognized = identify_kind(records)
-            size = len(data)
-            snapshots[canonical] = (digest, recognized, size)
-        if spec["kind"] == "auto" and recognized is None:
-            raise UsageError("auto kind requires a recognizable CLI or native shape")
-        resolved_kind = recognized if spec["kind"] == "auto" else spec["kind"]
-        if recognized is not None and spec["kind"] != "auto" and spec["kind"] != recognized:
-            raise UsageError("declared source kind does not match recognizable receipt shape")
-        spec["kind"] = resolved_kind
+                if getattr(exc, "_caller_limit", False):
+                    message = f"selected receipts exceed {TOTAL_SOURCE_CAP}-byte total cap"
+                    if getattr(exc, "_cleanup_errors", None):
+                        cleanup = str(exc).partition("; ")[0]
+                        message = f"{cleanup}; {message}"
+                    raise UsageError(message) from exc
+                raise UsageError(f"sources[{index}]: {exc}") from exc
+            acquired_size += len(data)
+            if acquired_size > TOTAL_SOURCE_CAP:
+                raise UsageError(
+                    f"selected receipts exceed {TOTAL_SOURCE_CAP}-byte total cap")
+            snapshots[canonical] = (data, digest)
+        if spec["expected_sha256"] is not None and spec["expected_sha256"] != digest:
+            raise UsageError(
+                f"sources[{index}].expected_sha256 does not match selected bytes")
+        prepared.append((index, spec, canonical, data, digest))
+
+    effective, by_path, parsed, total_records = [], {}, {}, 0
+    for index, spec, canonical, data, digest in prepared:
+        try:
+            if canonical in parsed:
+                records, recognized = parsed[canonical]
+            else:
+                records = rows(data)
+                recognized = identify_kind(records)
+                parsed[canonical] = (records, recognized)
+            if spec["kind"] == "auto" and recognized is None:
+                raise UsageError("auto kind requires a recognizable CLI or native shape")
+            resolved_kind = recognized if spec["kind"] == "auto" else spec["kind"]
+            if recognized is not None and spec["kind"] != "auto" and spec["kind"] != recognized:
+                raise UsageError("declared source kind does not match recognizable receipt shape")
+            spec["kind"] = resolved_kind
+        except UsageError as exc:
+            raise UsageError(f"sources[{index}]: {exc}") from exc
         key_labels = json.dumps({"assigned": spec["assigned"], "native_boundary": spec["native_boundary"],
                                  "kind": resolved_kind}, sort_keys=True, separators=(",", ":"))
         if canonical in by_path:
@@ -443,16 +485,16 @@ def build_report(manifest: dict[str, Any], manifest_info: dict[str, str], pricin
             unknown_phase = {"code": "unknown_phase", "path": canonical}
         else:
             unknown_phase = None
-        total_size += size
-        if total_size > TOTAL_SOURCE_CAP:
-            raise UsageError(f"selected receipts exceed {TOTAL_SOURCE_CAP}-byte total cap")
         total_records += len(records)
         if total_records > MAX_RECORDS:
             raise UsageError(f"selected receipts exceed {MAX_RECORDS}-record cap")
-        if resolved_kind == "cli":
-            observations, diagnostics, identity = parse_cli(spec, records)
-        else:
-            observations, diagnostics, identity = parse_native(spec, records)
+        try:
+            if resolved_kind == "cli":
+                observations, diagnostics, identity = parse_cli(spec, records)
+            else:
+                observations, diagnostics, identity = parse_native(spec, records)
+        except UsageError as exc:
+            raise UsageError(f"sources[{index}]: {exc}") from exc
         if unknown_phase is not None:
             diagnostics.append(unknown_phase)
         if not observations:
@@ -547,6 +589,8 @@ def build_report(manifest: dict[str, Any], manifest_info: dict[str, str], pricin
                         "Assigned routes are counterfactual labels, not observed execution facts.",
                         "Native cumulative deltas can span multiple contexts; no per-context attribution is inferred."],
     }
+    if any(item["spec"]["kind"] == "cli" for item in effective):
+        report["limitations"].append(_CLI_COUNTER_BASIS_LIMITATION)
     if include_observations:
         report["observations"] = [{"path": o["source"], "line": o["line"], "basis": o["basis"],
                                    "thread_id": o["thread_id"], "turn_id": o["turn_id"],
@@ -578,6 +622,8 @@ def render_text(report: dict[str, Any]) -> str:
         lines.append("No countable usage observations.")
     if report["coverage"]["reasons"]:
         lines.append("Coverage notes: " + ", ".join(report["coverage"]["reasons"]))
+    if _CLI_COUNTER_BASIS_LIMITATION in report["limitations"]:
+        lines.append("Counter-basis limitation: " + _CLI_COUNTER_BASIS_LIMITATION)
     lines.append("API-equivalent scenarios are not subscription invoices; only selected receipts are covered.")
     return "\n".join(lines) + "\n"
 
@@ -589,6 +635,9 @@ def main(argv=None) -> int:
     parser.add_argument("--price-basis", choices=("recorded", "assigned"), default="recorded")
     parser.add_argument("--format", choices=("json", "text"), default="json")
     parser.add_argument("--include-observations", action="store_true")
+    parser.add_argument(
+        "--require-complete", action="store_true",
+        help="emit a valid report but exit 3 unless usage coverage is complete")
     parser.add_argument("--output-cap", type=int, default=DEFAULT_OUTPUT_CAP)
     try:
         args = parser.parse_args(argv)
@@ -609,7 +658,7 @@ def main(argv=None) -> int:
         if len(encoded) > args.output_cap:
             raise UsageError(f"report exceeds {args.output_cap}-byte output cap")
         sys.stdout.buffer.write(encoded)
-        return 0
+        return 3 if args.require_complete and report["coverage"]["status"] != "complete" else 0
     except (UsageError, OSError) as exc:
         sys.stderr.buffer.write(_refusal_bytes(str(exc)))
         return 2

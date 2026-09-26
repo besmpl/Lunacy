@@ -140,6 +140,37 @@ class EvidenceIndexTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("incomplete trailing", result.stderr)
 
+    def test_duplicate_key_refusal_is_content_free_across_finite_renames(self):
+        sent = json.dumps({"direction": "send", "message": {"method": "ignored"}}) + "\n"
+        cases = (
+            ("top-level", 1, "TOP-CANARY-ONE", "TOP-CANARY-TWO",
+             lambda quoted: f"{{{quoted}:1,{quoted}:2}}\n"),
+            ("nested", 1, "NESTED-CANARY-ONE", "NESTED-CANARY-TWO",
+             lambda quoted: f'{{"direction":"send","message":{{{quoted}:1,{quoted}:2}}}}\n'),
+            ("late", 2, "LATE-CANARY-ONE", "LATE-CANARY-TWO",
+             lambda quoted: sent + f"{{{quoted}:1,{quoted}:2}}\n"),
+            ("multibyte", 1, "秘密项目😀一", "秘密项目😀二",
+             lambda quoted: f"{{{quoted}:1,{quoted}:2}}\n"),
+            ("locator-shaped", 1, "/private/path/itemId/sha256-CANARY-A",
+             "/private/path/itemId/sha256-CANARY-B",
+             lambda quoted: f"{{{quoted}:1,{quoted}:2}}\n"),
+        )
+        for label, line, first, second, render in cases:
+            observations = []
+            for key in (first, second):
+                with self.subTest(case=label, key=key):
+                    raw = render(json.dumps(key, ensure_ascii=False))
+                    result = self.invoke_raw(raw, "--output-cap", "256")
+                    expected = f"evidence-index: line {line}: duplicate JSON object key\n"
+                    self.assertEqual((result.returncode, result.stdout, result.stderr),
+                                     (2, "", expected))
+                    self.assertNotIn(key, result.stdout + result.stderr)
+                    self.assertEqual(result.stderr.count("\n"), 1)
+                    self.assertLessEqual(len(result.stderr.encode()), 256)
+                    result.stderr.encode().decode("utf-8", "strict")
+                    observations.append((result.returncode, result.stdout, result.stderr))
+            self.assertEqual(observations[0], observations[1])
+
     def test_missing_requested_item_and_post_digest_source_mutation_mismatch_fail(self):
         path = self.write([event("item/started"), event("item/completed", exit_code=0)])
         result = self.invoke(path, "--item-id", "missing")
@@ -343,6 +374,178 @@ class EvidenceIndexTests(unittest.TestCase):
             with self.assertRaises(module.EvidenceError):
                 module.read_snapshot(str(source))
         close.assert_not_called()
+
+    def test_snapshot_caller_limit_shape_is_validated_before_acquisition(self):
+        module = load_evidence_index()
+        source = self.write([])
+        for value in (-1, True, False, 1.5, "1", object()):
+            with self.subTest(value=value), patch.object(module.os, "open") as opened:
+                with self.assertRaisesRegex(module.EvidenceError, "nonnegative integer or None"):
+                    module.read_snapshot(str(source), max_bytes=value)
+                opened.assert_not_called()
+
+    def test_snapshot_lower_limit_static_refusal_reads_nothing_and_closes(self):
+        module = load_evidence_index()
+        source = self.base / "nonempty.bin"
+        source.write_bytes(b"abc")
+        with patch.object(module.os, "read", wraps=module.os.read) as read, patch.object(
+            module.os, "close", wraps=module.os.close
+        ) as close:
+            with self.assertRaises(module.EvidenceError) as caught:
+                module.read_snapshot(str(source), max_bytes=2)
+        self.assertTrue(getattr(caught.exception, "_caller_limit", False))
+        read.assert_not_called()
+        close.assert_called_once()
+
+    def test_snapshot_lower_limit_short_reads_use_remaining_sentinel_honestly(self):
+        module = load_evidence_index()
+        source = self.base / "empty.bin"
+        source.write_bytes(b"")
+        requests = []
+
+        def short_read(_descriptor, requested):
+            requests.append(requested)
+            return b"x"
+
+        with patch.object(module.os, "read", side_effect=short_read):
+            with self.assertRaises(module.EvidenceError) as caught:
+                module.read_snapshot(str(source), max_bytes=2)
+        self.assertTrue(getattr(caught.exception, "_caller_limit", False))
+        self.assertEqual(requests, [3, 2, 1])
+        self.assertEqual(len(requests), 3)  # One returned byte per request.
+        self.assertGreater(sum(requests), 3)
+
+    def test_snapshot_lower_limit_primary_survives_close_failure(self):
+        module = load_evidence_index()
+        source = self.base / "nonempty.bin"
+        source.write_bytes(b"x")
+        close_error = OSError("close failed")
+        with patch.object(module.os, "close", side_effect=self.fail_close(close_error)):
+            with self.assertRaises(module.EvidenceError) as caught:
+                module.read_snapshot(str(source), max_bytes=0)
+        self.assertTrue(getattr(caught.exception, "_caller_limit", False))
+        self.assertIs(caught.exception._cleanup_errors[0][1], close_error)
+        self.assertIn("source-close:OSError", str(caught.exception))
+
+    def test_snapshot_default_and_normalized_limits_keep_close_precedence(self):
+        source = self.base / "empty.bin"
+        source.write_bytes(b"")
+        for value in (None, 64 * 1024 * 1024, 64 * 1024 * 1024 + 1):
+            with self.subTest(max_bytes=value):
+                module = load_evidence_index()
+                close_error = OSError("close failed")
+                with patch.object(module.os, "close", side_effect=self.fail_close(close_error)):
+                    with self.assertRaises(module.EvidenceError) as caught:
+                        module.read_snapshot(str(source), max_bytes=value)
+                self.assertIs(caught.exception.__cause__, close_error)
+                self.assertFalse(getattr(caught.exception, "_caller_limit", False))
+                self.assertIn("descriptor close failed", str(caught.exception))
+
+    def test_snapshot_lower_limit_growth_and_same_size_replacement(self):
+        source = self.base / "race.bin"
+        source.write_bytes(b"")
+        module = load_evidence_index()
+        real_read = module.os.read
+        grown = False
+
+        def grow_then_eof(descriptor, requested):
+            nonlocal grown
+            if not grown:
+                source.write_bytes(b"x")
+                grown = True
+            return real_read(descriptor, requested)
+
+        with patch.object(module.os, "read", side_effect=grow_then_eof):
+            with self.assertRaisesRegex(module.EvidenceError, "changed while read"):
+                module.read_snapshot(str(source), max_bytes=2)
+
+        source.write_bytes(b"abc")
+        module = load_evidence_index()
+        real_read = module.os.read
+        replaced = False
+
+        def replace_same_size(descriptor, requested):
+            nonlocal replaced
+            data = real_read(descriptor, requested)
+            if not replaced:
+                replacement = self.base / "replacement.bin"
+                replacement.write_bytes(b"xyz")
+                replacement.replace(source)
+                replaced = True
+            return data
+
+        with patch.object(module.os, "read", side_effect=replace_same_size):
+            with self.assertRaisesRegex(module.EvidenceError, "changed while read"):
+                module.read_snapshot(str(source), max_bytes=3)
+
+    def test_snapshot_replacement_between_stat_and_open_uses_opened_identity_and_limit(self):
+        source = self.base / "replace-before-open.bin"
+        source.write_bytes(b"")
+        module = load_evidence_index()
+        real_open = module.os.open
+        replacement = self.base / "larger.bin"
+        replacement.write_bytes(b"abc")
+
+        def replace_then_open(path, flags):
+            replacement.replace(source)
+            return real_open(path, flags)
+
+        with patch.object(module.os, "open", side_effect=replace_then_open), patch.object(
+            module.os, "read", wraps=module.os.read
+        ) as read:
+            with self.assertRaises(module.EvidenceError) as caught:
+                module.read_snapshot(str(source), max_bytes=2)
+        self.assertTrue(getattr(caught.exception, "_caller_limit", False))
+        read.assert_not_called()
+
+        source.write_bytes(b"abc")
+        module = load_evidence_index()
+        real_open = module.os.open
+        replacement = self.base / "same-size.bin"
+        replacement.write_bytes(b"xyz")
+
+        def replace_same_size_then_open(path, flags):
+            replacement.replace(source)
+            return real_open(path, flags)
+
+        with patch.object(module.os, "open", side_effect=replace_same_size_then_open):
+            with self.assertRaisesRegex(module.EvidenceError, "changed while read"):
+                module.read_snapshot(str(source), max_bytes=3)
+
+    def test_snapshot_lower_limit_final_fstat_failure_remains_primary(self):
+        source = self.base / "empty.bin"
+        source.write_bytes(b"")
+        module = load_evidence_index()
+        real_fstat = module.os.fstat
+        calls = 0
+
+        def fail_second_fstat(descriptor):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise OSError("final fstat failed")
+            return real_fstat(descriptor)
+
+        with patch.object(module.os, "fstat", side_effect=fail_second_fstat):
+            with self.assertRaises(module.EvidenceError) as caught:
+                module.read_snapshot(str(source), max_bytes=1)
+        self.assertIsInstance(caught.exception.__cause__, OSError)
+        self.assertFalse(getattr(caught.exception, "_caller_limit", False))
+        self.assertIn("source is unreadable", str(caught.exception))
+
+    def test_snapshot_lower_limit_open_read_and_fstat_failures_remain_primary(self):
+        source = self.base / "empty.bin"
+        source.write_bytes(b"")
+        for stage in ("open", "read", "fstat"):
+            with self.subTest(stage=stage):
+                module = load_evidence_index()
+                target = getattr(module.os, stage)
+                with patch.object(module.os, stage, side_effect=OSError(f"{stage} failed")):
+                    with self.assertRaises(module.EvidenceError) as caught:
+                        module.read_snapshot(str(source), max_bytes=1)
+                self.assertIsInstance(caught.exception.__cause__, OSError)
+                self.assertFalse(getattr(caught.exception, "_caller_limit", False))
+                self.assertIn("source is unreadable", str(caught.exception))
 
     def test_invalid_utf8_directory_and_oversize_refuse(self):
         invalid = self.base / "invalid.jsonl"

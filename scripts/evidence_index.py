@@ -5,10 +5,12 @@ from __future__ import annotations
 
 import argparse
 from decimal import Decimal, DecimalException
+from datetime import datetime
 import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import stat
 import sys
 from typing import Any
@@ -54,7 +56,7 @@ def no_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     value: dict[str, Any] = {}
     for key, item in pairs:
         if key in value:
-            raise EvidenceError(f"duplicate JSON object key: {short(key)}")
+            raise EvidenceError("duplicate JSON object key")
         value[key] = item
     return value
 
@@ -69,7 +71,18 @@ def require_text(value: Any, label: str) -> str:
     return value
 
 
-def read_snapshot(path_text: str) -> tuple[Path, bytes, str]:
+def _caller_limit_error() -> EvidenceError:
+    error = EvidenceError("source exceeds lower caller byte limit")
+    error._caller_limit = True
+    return error
+
+
+def read_snapshot(path_text: str, *, max_bytes: int | None = None) -> tuple[Path, bytes, str]:
+    if max_bytes is not None and (
+            isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or max_bytes < 0):
+        raise EvidenceError("max_bytes must be a nonnegative integer or None")
+    if max_bytes is not None and max_bytes >= INPUT_CAP:
+        max_bytes = None
     path = Path(path_text)
     if not path.is_absolute():
         raise EvidenceError("source path must be absolute")
@@ -95,8 +108,10 @@ def read_snapshot(path_text: str) -> tuple[Path, bytes, str]:
             opened = os.fstat(descriptor)
             if not stat.S_ISREG(opened.st_mode):
                 raise EvidenceError("source must be a regular file")
+            if max_bytes is not None and opened.st_size > max_bytes:
+                raise _caller_limit_error()
             chunks = []
-            remaining = INPUT_CAP + 1
+            remaining = (max_bytes if max_bytes is not None else INPUT_CAP) + 1
             while remaining:
                 chunk = os.read(descriptor, min(1024 * 1024, remaining))
                 if not chunk:
@@ -104,6 +119,8 @@ def read_snapshot(path_text: str) -> tuple[Path, bytes, str]:
                 chunks.append(chunk)
                 remaining -= len(chunk)
             data = b"".join(chunks)
+            if max_bytes is not None and len(data) > max_bytes:
+                raise _caller_limit_error()
             after = os.fstat(descriptor)
         except EvidenceError:
             raise
@@ -466,6 +483,97 @@ def project_session_receipt(
     }
 
 
+def _lifecycle_timestamp(value: Any, line_number: int) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not re.fullmatch(
+        r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"
+        r"(?:\.[0-9]{1,9})?(?:Z|[+-][0-9]{2}:[0-9]{2})", value
+    ):
+        raise EvidenceError(f"line {line_number}: invalid lifecycle timestamp")
+    try:
+        # Validate calendar fields without normalizing the recorded spelling.
+        # Some Python versions accept ISO 8601's 24:00, outside this grammar.
+        if int(value[11:13]) > 23 or int(value[14:16]) > 59 or int(value[17:19]) > 59:
+            raise ValueError
+        datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if value[-6:-5] in ("+", "-") and (
+            int(value[-5:-3]) > 23 or int(value[-2:]) > 59
+        ):
+            raise ValueError
+    except ValueError as exc:
+        raise EvidenceError(f"line {line_number}: invalid lifecycle timestamp") from exc
+    return value
+
+
+def _project_native_lifecycle(
+    data: bytes, source: Path, digest: str, thread_id: str, turn_id: str,
+) -> dict[str, Any]:
+    """Select captured facts without inferring state or reading any source path."""
+    for value, label in ((thread_id, "thread ID"), (turn_id, "turn ID")):
+        if not isinstance(value, str) or not 1 <= len(value) <= 128:
+            raise EvidenceError(f"{label} must contain 1 through 128 characters")
+    lines = decode_lines(data)
+    metadata_line = None
+    events: list[dict[str, Any]] = []
+    unscoped: list[dict[str, Any]] = []
+    ignored = other_turn = 0
+    for number, text in enumerate(lines, 1):
+        try:
+            record = load_line(text, number, _parse_float=Decimal)
+        except EvidenceError as exc:
+            # Neither malformed content nor arbitrary JSON keys are evidence.
+            raise EvidenceError(f"line {number}: invalid native JSON record") from exc
+        kind = require_text(record.get("type"), f"line {number}: record type")
+        if kind == "session_meta":
+            if metadata_line is not None:
+                raise EvidenceError(f"line {number}: multiple session_meta records")
+            payload = record.get("payload")
+            if not isinstance(payload, dict):
+                raise EvidenceError(f"line {number}: session_meta payload must be an object")
+            ident = require_text(payload.get("id"), f"line {number}: session_meta.id")
+            if ident != thread_id:
+                raise EvidenceError(f"line {number}: session_meta.id does not match requested thread ID")
+            metadata_line = number
+        elif kind == "event_msg":
+            payload = record.get("payload")
+            if not isinstance(payload, dict):
+                raise EvidenceError(f"line {number}: event_msg payload must be an object")
+            event = require_text(payload.get("type"), f"line {number}: event_msg type")
+            if event not in ("task_started", "task_complete", "turn_aborted"):
+                ignored += 1
+                continue
+            recorded_turn = payload.get("turn_id")
+            if recorded_turn is not None:
+                if not isinstance(recorded_turn, str) or not 1 <= len(recorded_turn) <= 128:
+                    raise EvidenceError(f"line {number}: lifecycle turn_id must contain 1 through 128 characters or be null")
+                if recorded_turn != turn_id:
+                    other_turn += 1
+                    continue
+            if len(events) + len(unscoped) >= 128:
+                raise EvidenceError("native lifecycle exceeds 128 selected and unscoped observations")
+            observation = {
+                "line": number, "event": event,
+                "recorded_timestamp": _lifecycle_timestamp(record.get("timestamp"), number),
+            }
+            (unscoped if recorded_turn is None else events).append(observation)
+    if metadata_line is None:
+        raise EvidenceError("source has no session_meta record")
+    return {
+        "schema": "lunacy-native-lifecycle-index-v1",
+        "source": {"path": str(source), "sha256": digest, "bytes": len(data), "lines": len(lines)},
+        "scope": {"thread_id": thread_id, "turn_id": turn_id},
+        "session": {"metadata_line": metadata_line},
+        "events": events, "unscoped_events": unscoped,
+        "ignored_event_count": ignored, "other_turn_event_count": other_turn,
+        "projection_only": True,
+        "non_claims": [
+            "These are recorded facts in the supplied snapshot only; unscoped events are not selected-turn evidence.",
+            "No semantic success, acceptance, custody, dispatch validity, concurrency, capacity, backend identity, clock accuracy, authentication, or uncaptured history is established.",
+        ],
+    }
+
+
 def load_direct_exec_line(text: str, line_number: int) -> dict[str, Any]:
     """Decode a direct-exec record without echoing excluded JSON content."""
     def bounded_integer(value: str) -> int:
@@ -496,13 +604,8 @@ def load_direct_exec_line(text: str, line_number: int) -> dict[str, Any]:
         raise EvidenceError(f"line {line_number}: invalid direct-exec JSON record") from exc
 
 
-def project_direct_exec(
-    data: bytes,
-    source: Path,
-    digest: str,
-    thread_id: str,
-    selected: set[str] | None,
-) -> dict[str, Any]:
+def validate_direct_exec(data: bytes, thread_id: str) -> dict[str, Any]:
+    """Validate a whole direct-exec snapshot and retain its ordered groups."""
     supported_events = {
         "thread.started", "turn.started", "turn.completed", "turn.failed",
         "item.started", "item.updated", "item.completed", "error",
@@ -598,19 +701,34 @@ def project_direct_exec(
         raise EvidenceError("source has no direct-exec thread header")
     if turn_start_line is None:
         raise EvidenceError("source has no direct-exec turn start")
-    if selected is not None:
-        missing = sorted(selected - command_groups.keys())
-        if missing:
-            raise EvidenceError(f"requested item IDs not found in scope ({len(missing)}): {short(', '.join(missing))}")
-
-    included = command_groups if selected is None else {
-        item_id: observations for item_id, observations in command_groups.items()
-        if item_id in selected
-    }
     commands = [
         {"item_id": item_id, "observations": observations}
-        for item_id, observations in sorted(included.items(), key=lambda entry: entry[1][0]["line"])
+        for item_id, observations in sorted(command_groups.items(), key=lambda entry: entry[1][0]["line"])
     ]
+    return {
+        "thread_header_line": header_line,
+        "turn_start_line": turn_start_line,
+        "turn_end_line": turn_end_line,
+        "turn_end_event": turn_end_event,
+        "ignored_noncommand": ignored_noncommand,
+        "commands": commands,
+    }
+
+
+def project_direct_exec(
+    validated: dict[str, Any],
+    source: Path,
+    digest: str,
+    thread_id: str,
+    selected: set[str] | None,
+) -> dict[str, Any]:
+    commands = validated["commands"]
+    if selected is not None:
+        available = {command["item_id"] for command in commands}
+        missing = sorted(selected - available)
+        if missing:
+            raise EvidenceError(f"requested item IDs not found in scope ({len(missing)}): {short(', '.join(missing))}")
+        commands = [command for command in commands if command["item_id"] in selected]
     return {
         "schema": "lunacy-native-direct-exec-index-v1",
         "source": {"path": str(source), "sha256": digest},
@@ -618,18 +736,79 @@ def project_direct_exec(
             "thread_id": thread_id,
             "selected_item_ids": sorted(selected) if selected is not None else None,
         },
-        "thread_header_line": header_line,
-        "turn": {"start_line": turn_start_line, "end_line": turn_end_line, "end_event": turn_end_event},
+        "thread_header_line": validated["thread_header_line"],
+        "turn": {
+            "start_line": validated["turn_start_line"],
+            "end_line": validated["turn_end_line"],
+            "end_event": validated["turn_end_event"],
+        },
         "observed_command_count": len(commands),
         "observed_command_record_count": sum(len(command["observations"]) for command in commands),
-        "ignored_noncommand_record_count": ignored_noncommand,
+        "ignored_noncommand_record_count": validated["ignored_noncommand"],
         "commands": commands,
         "projection_only": True,
         "non_claims": DIRECT_EXEC_NON_CLAIMS,
     }
 
 
-def emit(value: dict[str, Any], cap: int, *, ensure_ascii: bool = False) -> int:
+def correlate_direct_exec(
+    validated: dict[str, Any],
+    source: Path,
+    digest: str,
+    thread_id: str,
+    after_ordinal: int,
+) -> dict[str, Any]:
+    commands = validated["commands"]
+    match = None
+    for ordinal, command in enumerate(commands):
+        if ordinal <= after_ordinal:
+            continue
+        nonzero = [
+            observation for observation in command["observations"]
+            if isinstance(observation["exit_code"], int) and observation["exit_code"] != 0
+        ]
+        if nonzero:
+            first = nonzero[0]
+            match = {
+                "ordinal": ordinal,
+                "item_id": command["item_id"],
+                "first_observation_line": command["observations"][0]["line"],
+                "observation_count": len(command["observations"]),
+                "nonzero_observation_count": len(nonzero),
+                "first_nonzero_observation_line": first["line"],
+                "first_nonzero_exit_code": first["exit_code"],
+            }
+            break
+
+    matched = match is not None
+    scanned_through = match["ordinal"] if matched else len(commands) - 1
+    result = {
+        "schema": "lunacy-native-direct-exec-correlation-v1",
+        "source": {"path": str(source), "sha256": digest},
+        "scope": {"thread_id": thread_id},
+        "correlation": {
+            "kind": "first-nonzero-group",
+            "after_ordinal": after_ordinal,
+            "scanned_through_ordinal": scanned_through,
+            "matched": matched,
+            "complete": not matched,
+            "next_after_ordinal": match["ordinal"] if matched else None,
+        },
+        "projection_only": True,
+        "non_claims": DIRECT_EXEC_NON_CLAIMS,
+    }
+    if matched:
+        result["match"] = match
+    return result
+
+
+def emit(
+    value: dict[str, Any],
+    cap: int,
+    *,
+    ensure_ascii: bool = False,
+    remedy: str = "select fewer item IDs with --item-id or raise --output-cap within the supported limit",
+) -> int:
     encoded = (json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=ensure_ascii) + "\n").encode("utf-8", "backslashreplace")
     if len(encoded) <= cap:
         sys.stdout.buffer.write(encoded)
@@ -638,7 +817,7 @@ def emit(value: dict[str, Any], cap: int, *, ensure_ascii: bool = False) -> int:
         "error": "output_cap_exceeded",
         "limit_bytes": cap,
         "required_bytes": len(encoded),
-        "remedy": "select fewer item IDs with --item-id or raise --output-cap within the supported limit",
+        "remedy": remedy,
     }
     fallback = (json.dumps(diagnostic, sort_keys=True, separators=(",", ":")) + "\n").encode()
     if len(fallback) <= cap:
@@ -662,11 +841,13 @@ def emit_error(exc: Exception, cap: int) -> int:
 def parse_args() -> argparse.Namespace:
     parser = EvidenceArgumentParser(description=__doc__)
     parser.add_argument("source", help="caller-authorized absolute path to a regular JSONL capture")
-    parser.add_argument("--source-format", choices=("app-server", "session-receipt", "direct-exec"), default="app-server")
+    parser.add_argument("--source-format", choices=("app-server", "session-receipt", "direct-exec", "native-lifecycle"), default="app-server")
     parser.add_argument("--thread-id", required=True)
     parser.add_argument("--session-id")
     parser.add_argument("--turn-id")
     parser.add_argument("--item-id", action="append", dest="item_ids")
+    parser.add_argument("--correlate", choices=("first-nonzero",))
+    parser.add_argument("--after-ordinal", action="append")
     parser.add_argument("--expected-sha256")
     parser.add_argument("--output-cap", type=int, default=DEFAULT_OUTPUT_CAP)
     args = parser.parse_args()
@@ -674,8 +855,43 @@ def parse_args() -> argparse.Namespace:
         parser.error(f"--output-cap must be between 256 and {MAX_OUTPUT_CAP}")
     if args.expected_sha256 is not None and (len(args.expected_sha256) != 64 or any(c not in "0123456789abcdef" for c in args.expected_sha256)):
         parser.error("--expected-sha256 must be 64 lowercase hexadecimal characters")
+    if args.source_format == "native-lifecycle":
+        if args.expected_sha256 is None:
+            parser.error("--expected-sha256 is required for native-lifecycle")
+        if args.output_cap > DEFAULT_OUTPUT_CAP:
+            parser.error("native-lifecycle --output-cap must be between 256 and 8192")
+        if any(value is not None for value in (
+            args.session_id, args.item_ids, args.correlate, args.after_ordinal,
+        )):
+            parser.error("native-lifecycle forbids --session-id, --item-id, --correlate and --after-ordinal")
+        for value in (args.thread_id, args.turn_id):
+            if not isinstance(value, str) or not 1 <= len(value) <= 128:
+                parser.error("native-lifecycle thread and turn IDs must contain 1 through 128 characters")
     if args.item_ids is not None and len(set(args.item_ids)) != len(args.item_ids):
         parser.error("--item-id values must be unique")
+    if args.after_ordinal is not None:
+        if len(args.after_ordinal) != 1:
+            parser.error("--after-ordinal may be supplied at most once")
+        ordinal = args.after_ordinal[0]
+        if not ordinal or len(ordinal) > TEXT_CAP or not ordinal.isascii() or not ordinal.isdecimal():
+            parser.error(f"--after-ordinal must be a nonnegative decimal with at most {TEXT_CAP} digits")
+        try:
+            args.after_ordinal = int(ordinal)
+        except ValueError:
+            # Respect a stricter host PYTHONINTMAXSTRDIGITS ceiling. Do not
+            # weaken process-wide integer conversion policy for this helper.
+            parser.error("--after-ordinal exceeds the host integer conversion limit")
+        if args.correlate is None:
+            parser.error("--after-ordinal requires --correlate first-nonzero")
+        if args.expected_sha256 is None:
+            parser.error("--after-ordinal requires --expected-sha256")
+    else:
+        args.after_ordinal = -1
+    if args.correlate is not None:
+        if args.source_format != "direct-exec":
+            parser.error("--correlate requires --source-format direct-exec")
+        if args.item_ids is not None:
+            parser.error("--correlate is mutually exclusive with --item-id")
     if args.source_format == "direct-exec":
         if args.turn_id is not None:
             parser.error("--turn-id is forbidden for --source-format direct-exec")
@@ -714,9 +930,28 @@ def main() -> int:
             result = project_session_receipt(
                 data, source, digest, thread_id, turn_id, selected, args.session_id
             )
+        elif args.source_format == "native-lifecycle":
+            result = _project_native_lifecycle(data, source, digest, thread_id, args.turn_id)
         else:
-            result = project_direct_exec(data, source, digest, thread_id, selected)
-        return emit(result, args.output_cap, ensure_ascii=args.source_format == "session-receipt")
+            validated = validate_direct_exec(data, thread_id)
+            if args.correlate is not None:
+                result = correlate_direct_exec(
+                    validated, source, digest, thread_id, args.after_ordinal
+                )
+            else:
+                result = project_direct_exec(validated, source, digest, thread_id, selected)
+        remedy = (
+            "raise --output-cap only up to 8192; this lifecycle projection cannot be partially emitted"
+            if args.source_format == "native-lifecycle" else
+            "raise --output-cap within the supported limit; an indivisible correlation result cannot be returned below its required size"
+            if args.correlate is not None else
+            "select fewer item IDs with --item-id or raise --output-cap within the supported limit"
+        )
+        return emit(
+            result, args.output_cap,
+            ensure_ascii=args.source_format == "session-receipt",
+            remedy=remedy,
+        )
     except (EvidenceError, RecursionError, MemoryError) as exc:
         return emit_error(exc, args.output_cap)
 

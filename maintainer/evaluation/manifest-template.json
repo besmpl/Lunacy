@@ -1,0 +1,89 @@
+{
+  "schema": "lunacy-offline-evaluation-run-v1",
+  "fixtureId": null,
+  "sourceSnapshotSha256": null,
+  "candidatePluginIdentity": null,
+  "candidatePluginContentSha256": null,
+  "comparison": {
+    "stage": null,
+    "workloadId": null,
+    "cohortId": null,
+    "replicateId": null,
+    "baselineSourceSha256": null,
+    "acceptanceCriteriaSha256": null,
+    "cacheCondition": null
+  },
+  "model": null,
+  "effort": null,
+  "route": {
+    "parentModel": null,
+    "parentEffort": null,
+    "workerModel": null,
+    "workerEffort": null,
+    "overrideReason": null
+  },
+  "context": {
+    "mode": null,
+    "inheritedFrom": null
+  },
+  "allowedOperations": [],
+  "evaluatorCheckId": null,
+  "scale": {
+    "requestedTotalAgents": null,
+    "requestedWorkerAgents": null,
+    "effectiveCapacityTotalAgents": null,
+    "countConvention": null,
+    "topology": null,
+    "observedPeakActiveTotalAgents": null,
+    "observedPeakOpenTotalAgents": null,
+    "observedDistinctAgents": null,
+    "slotReuseEvidencePointer": null
+  },
+  "workspace": {
+    "strategy": null,
+    "startingDirtyStateEvidencePointer": null,
+    "sentinelPreservationEvidencePointer": null,
+    "integrationOwner": null
+  },
+  "resourceBaseline": {
+    "measurementWindow": null,
+    "availableCpuCount": null,
+    "idleCpuPercent": null,
+    "availableMemoryBytes": null,
+    "existingTestLoad": null,
+    "knownThrottling": null,
+    "plannedLimits": null
+  },
+  "budgets": {
+    "wallClockSeconds": null,
+    "turns": null,
+    "toolCalls": null,
+    "outputBytes": null,
+    "requirePositiveFiniteIntegersBeforeDispatch": true
+  },
+  "observedCounters": {
+    "inputTokens": null,
+    "cachedInputTokens": null,
+    "outputTokens": null,
+    "elapsedSeconds": null
+  },
+  "observedOutcomes": {
+    "accepted": null,
+    "timeToAcceptedSeconds": null,
+    "requiredCriteriaPassed": null,
+    "requiredCriteriaTotal": null,
+    "escapedDefects": null,
+    "reworkCount": null,
+    "integrationQueueDelaySeconds": null,
+    "parentDecisionCount": null,
+    "parentReviewCount": null,
+    "peakCpuPercent": null,
+    "peakMemoryBytes": null,
+    "testContention": null,
+    "throttling": null,
+    "failures": [],
+    "cancellations": []
+  },
+  "selectedReceiptPointers": [],
+  "notes": "Null means unknown or not yet recorded; never replace it with zero. This manifest is evidence input, not executable authority."
+}

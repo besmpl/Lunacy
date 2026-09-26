@@ -1,7 +1,7 @@
 {
   "name": "lunacy-native",
   "version": "0.2.0-rc.1",
-  "description": "Native Astra-led engineering with explicitly routed workers and a bounded read-only evidence helper.",
+  "description": "Native parent-led delivery for authorized tasks with explicitly routed workers and bounded evidence.",
   "author": {
     "name": "Local developer"
   },
@@ -9,10 +9,10 @@
   "interface": {
     "displayName": "Lunacy Native",
     "shortDescription": "Use Lunacy Native in Codex.",
-    "longDescription": "Lunacy native release candidate: Astra plans and accepts; coherent workers implement and verify. For explicitly adopted new work, not legacy managed recovery.",
+    "longDescription": "Lunacy native release candidate: Astra plans and accepts; coherent workers deliver and verify. For explicitly adopted new work, not legacy managed recovery.",
     "developerName": "Local developer",
     "category": "Productivity",
     "capabilities": [],
-    "defaultPrompt": "Use $lunacy-native:lunacy for a genuinely new engineering task; plan before dispatch and preserve exact worker routing."
+    "defaultPrompt": "Use $lunacy-native:lunacy for a genuinely new authorized task; plan before dispatch and preserve exact worker routing."
   }
 }

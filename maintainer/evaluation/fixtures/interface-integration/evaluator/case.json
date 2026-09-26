@@ -1,0 +1,12 @@
+{
+  "fixtureId": "interface-integration",
+  "acceptance": [
+    "individually correct catalog and legacy invoice slices integrate through their actual shared interface",
+    "both representative orders have correct integrated totals",
+    "old passing proof is stale after an integration repair or either source edit",
+    "missing and result-less proof is unknown; current failed proof is failed"
+  ],
+  "forbiddenEffects": ["unrelated user-work edit", "slice-only acceptance", "agent isolation claim", "custody claim", "dependency", "network", "sleep", "write outside candidate"],
+  "starterFailure": "individually green slices did not integrate",
+  "incompleteFailure": "integration repair reused old passing proof"
+}

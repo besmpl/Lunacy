@@ -1,0 +1,612 @@
+{
+  "boundaryExpectations": {
+    "httpStatuses": {
+      "METHOD_NOT_ALLOWED": "405 Method Not Allowed",
+      "NOT_FOUND": "404 Not Found",
+      "UNSUPPORTED_MEDIA_TYPE": "415 Unsupported Media Type",
+      "invalid": "400 Bad Request",
+      "ok": "200 OK"
+    },
+    "invalidLengths": [
+      "",
+      "-1",
+      "+2",
+      " 2",
+      "2 ",
+      "2.0",
+      "٢",
+      "\t2",
+      null
+    ],
+    "invalidMediaTypes": [
+      "",
+      "application/xml",
+      "application/json; charset=ascii",
+      "application/json; charset=\"utf-8\"",
+      "application/json; charset=utf-8; charset=utf-8",
+      "application/json; extra=1",
+      "application/json;"
+    ],
+    "requestPrecedence": [
+      "path",
+      "method",
+      "media",
+      "body"
+    ],
+    "utf8": {
+      "errors": [
+        {
+          "code": "INVALID_INPUT",
+          "row": 0
+        }
+      ],
+      "status": "invalid"
+    },
+    "validMediaTypes": [
+      "application/json",
+      "APPLICATION/JSON",
+      " application/json ; charset = UTF-8 ",
+      "text/csv",
+      "TEXT/CSV;CHARSET=utf-8"
+    ]
+  },
+  "captureCases": [
+    {
+      "expected": {
+        "errors": [],
+        "records": [
+          {
+            "display_name": "Alice",
+            "email": "alice@example.com",
+            "id": "c-1"
+          }
+        ]
+      },
+      "file": "initial.json",
+      "format": "json",
+      "name": "initial-json",
+      "sha256": "d05d0535f9e6638da4412a0222020eaf4233210484d3d467e89aaf485a4e9696"
+    },
+    {
+      "expected": {
+        "errors": [],
+        "records": [
+          {
+            "display_name": "Bob",
+            "email": "bob@example.com",
+            "id": "c-2"
+          }
+        ]
+      },
+      "file": "initial.csv",
+      "format": "csv",
+      "name": "initial-csv",
+      "sha256": "a33df089f99318e029afa91e1b1318f2d59aafb7383c9e46b2c1a410b65418b9"
+    },
+    {
+      "expected": {
+        "errors": [
+          {
+            "code": "INVALID_ID",
+            "row": 2
+          },
+          {
+            "code": "INVALID_EMAIL",
+            "row": 3
+          },
+          {
+            "code": "DUPLICATE_ID",
+            "row": 5
+          },
+          {
+            "code": "INVALID_EMAIL",
+            "row": 6
+          },
+          {
+            "code": "INVALID_DISPLAY_NAME",
+            "row": 7
+          },
+          {
+            "code": "INVALID_EMAIL",
+            "row": 10
+          },
+          {
+            "code": "INVALID_DISPLAY_NAME",
+            "row": 11
+          }
+        ],
+        "records": [
+          {
+            "display_name": "Replacement",
+            "email": "new@example.com",
+            "id": "existing"
+          },
+          {
+            "display_name": "Valid later",
+            "email": "valid@example.com",
+            "id": "reusable"
+          },
+          {
+            "display_name": "Upper",
+            "email": "upper@example.com",
+            "id": "Case"
+          },
+          {
+            "display_name": "Lower",
+            "email": "lower@example.com",
+            "id": "case"
+          }
+        ]
+      },
+      "file": "late-mixed.json",
+      "format": "json",
+      "name": "late-mixed",
+      "sha256": "6dc4f5a216b3c01e1f1b603f659fce6d7e9393943181ce16f0888dca6b832023"
+    },
+    {
+      "expected": {
+        "errors": [],
+        "records": [
+          {
+            "display_name": "line one\r\nline two, \"quoted\"\rsolo\nlast λ end",
+            "email": "first@example.com",
+            "id": "q-1"
+          },
+          {
+            "display_name": "Καλημέρα, мир",
+            "email": "second@example.com",
+            "id": "q-2"
+          }
+        ]
+      },
+      "file": "late.csv",
+      "format": "csv",
+      "name": "late-csv",
+      "sha256": "f9880d2ab279392cafb15003d8f1dc038836aca5eafa014685ce6e983f8e205b"
+    },
+    {
+      "expected": {
+        "errors": [],
+        "records": [
+          {
+            "display_name": "CR\rLF\nquote\"，λ next end",
+            "email": "é@example.com",
+            "id": "u-1"
+          }
+        ]
+      },
+      "file": "late.json",
+      "format": "json",
+      "name": "late-json",
+      "sha256": "18fec096db23ac43c55295a547f291229fb4d37ec54111adafffde01e5c70d1e"
+    }
+  ],
+  "inlineCases": [
+    {
+      "expected": {
+        "errors": [],
+        "records": []
+      },
+      "format": "json",
+      "name": "empty-json",
+      "payload": "[]"
+    },
+    {
+      "expected": {
+        "errors": [],
+        "records": []
+      },
+      "format": "csv",
+      "name": "empty-csv",
+      "payload": "id,email,display_name\r\n"
+    },
+    {
+      "expected": {
+        "errors": [],
+        "records": [
+          {
+            "display_name": "",
+            "email": "x@e",
+            "id": "x"
+          }
+        ]
+      },
+      "format": "json",
+      "name": "extra-fields",
+      "payload": "[{\"id\":\" x \",\"email\":\" X@E \",\"display_name\":\"\",\"ignored\":[1]}]"
+    },
+    {
+      "expected": {
+        "errors": [],
+        "records": [
+          {
+            "display_name": "Alice",
+            "email": "a@e",
+            "id": "a"
+          }
+        ]
+      },
+      "format": "csv",
+      "name": "csv-reordered",
+      "payload": "extra,display_name,email,id\nunused,Alice, A@E , a \n"
+    },
+    {
+      "expected": {
+        "errors": [],
+        "records": [
+          {
+            "display_name": "  kept  ",
+            "email": "x@e",
+            "id": "x"
+          }
+        ]
+      },
+      "format": "json",
+      "name": "unicode-whitespace",
+      "payload": "[{\"id\":\"\\u2003x\\u2003\",\"email\":\" X@E \",\"display_name\":\"  kept  \"}]"
+    },
+    {
+      "expected": {
+        "errors": [
+          {
+            "code": "INVALID_INPUT",
+            "row": 0
+          }
+        ],
+        "records": []
+      },
+      "format": "json",
+      "name": "json-object",
+      "payload": "{}"
+    },
+    {
+      "expected": {
+        "errors": [
+          {
+            "code": "INVALID_INPUT",
+            "row": 0
+          }
+        ],
+        "records": []
+      },
+      "format": "json",
+      "name": "json-non-object",
+      "payload": "[{\"id\":\"x\",\"email\":\"x@e\",\"display_name\":\"X\"},null]"
+    },
+    {
+      "expected": {
+        "errors": [
+          {
+            "code": "INVALID_INPUT",
+            "row": 0
+          }
+        ],
+        "records": []
+      },
+      "format": "json",
+      "name": "json-syntax",
+      "payload": "["
+    },
+    {
+      "expected": {
+        "errors": [
+          {
+            "code": "INVALID_INPUT",
+            "row": 0
+          }
+        ],
+        "records": []
+      },
+      "format": "csv",
+      "name": "csv-empty",
+      "payload": ""
+    },
+    {
+      "expected": {
+        "errors": [
+          {
+            "code": "INVALID_INPUT",
+            "row": 0
+          }
+        ],
+        "records": []
+      },
+      "format": "csv",
+      "name": "csv-missing-header",
+      "payload": "id,email\nx,x@e\n"
+    },
+    {
+      "expected": {
+        "errors": [
+          {
+            "code": "INVALID_INPUT",
+            "row": 0
+          }
+        ],
+        "records": []
+      },
+      "format": "csv",
+      "name": "csv-duplicate-header",
+      "payload": "id,email,display_name,id\nx,x@e,X,y\n"
+    },
+    {
+      "expected": {
+        "errors": [
+          {
+            "code": "INVALID_INPUT",
+            "row": 0
+          }
+        ],
+        "records": []
+      },
+      "format": "csv",
+      "name": "csv-header-case",
+      "payload": "ID,email,display_name\nx,x@e,X\n"
+    },
+    {
+      "expected": {
+        "errors": [
+          {
+            "code": "INVALID_INPUT",
+            "row": 0
+          }
+        ],
+        "records": []
+      },
+      "format": "csv",
+      "name": "csv-header-space",
+      "payload": "id, email,display_name\nx,x@e,X\n"
+    },
+    {
+      "expected": {
+        "errors": [
+          {
+            "code": "INVALID_INPUT",
+            "row": 0
+          }
+        ],
+        "records": []
+      },
+      "format": "csv",
+      "name": "csv-narrow-row",
+      "payload": "id,email,display_name\nx,x@e,X\ny,y@e\n"
+    },
+    {
+      "expected": {
+        "errors": [
+          {
+            "code": "INVALID_INPUT",
+            "row": 0
+          }
+        ],
+        "records": []
+      },
+      "format": "csv",
+      "name": "csv-wide-row",
+      "payload": "id,email,display_name\nx,x@e,X,extra\n"
+    },
+    {
+      "expected": {
+        "errors": [
+          {
+            "code": "INVALID_INPUT",
+            "row": 0
+          }
+        ],
+        "records": []
+      },
+      "format": "csv",
+      "name": "csv-syntax",
+      "payload": "id,email,display_name\nx,x@e,\"unterminated\n"
+    },
+    {
+      "expected": {
+        "errors": [
+          {
+            "code": "INVALID_ID",
+            "row": 1
+          }
+        ],
+        "records": []
+      },
+      "format": "json",
+      "name": "missing-id",
+      "payload": "[{\"email\": \"x@e\", \"display_name\": \"X\"}]"
+    },
+    {
+      "expected": {
+        "errors": [
+          {
+            "code": "INVALID_ID",
+            "row": 1
+          }
+        ],
+        "records": []
+      },
+      "format": "json",
+      "name": "boolean-id",
+      "payload": "[{\"id\": false, \"email\": \"x@e\", \"display_name\": \"X\"}]"
+    },
+    {
+      "expected": {
+        "errors": [
+          {
+            "code": "INVALID_EMAIL",
+            "row": 1
+          }
+        ],
+        "records": []
+      },
+      "format": "json",
+      "name": "missing-email",
+      "payload": "[{\"id\": \"x\", \"display_name\": \"X\"}]"
+    },
+    {
+      "expected": {
+        "errors": [
+          {
+            "code": "INVALID_EMAIL",
+            "row": 1
+          }
+        ],
+        "records": []
+      },
+      "format": "json",
+      "name": "number-email",
+      "payload": "[{\"id\": \"x\", \"email\": 7, \"display_name\": \"X\"}]"
+    },
+    {
+      "expected": {
+        "errors": [
+          {
+            "code": "INVALID_DISPLAY_NAME",
+            "row": 1
+          }
+        ],
+        "records": []
+      },
+      "format": "json",
+      "name": "missing-name",
+      "payload": "[{\"id\": \"x\", \"email\": \"x@e\"}]"
+    },
+    {
+      "expected": {
+        "errors": [
+          {
+            "code": "INVALID_EMAIL",
+            "row": 1
+          }
+        ],
+        "records": []
+      },
+      "format": "json",
+      "name": "email-empty",
+      "payload": "[{\"id\": \"x\", \"email\": \" \", \"display_name\": \"X\"}]"
+    },
+    {
+      "expected": {
+        "errors": [
+          {
+            "code": "INVALID_EMAIL",
+            "row": 1
+          }
+        ],
+        "records": []
+      },
+      "format": "json",
+      "name": "email-no-at",
+      "payload": "[{\"id\": \"x\", \"email\": \"example.com\", \"display_name\": \"X\"}]"
+    },
+    {
+      "expected": {
+        "errors": [
+          {
+            "code": "INVALID_EMAIL",
+            "row": 1
+          }
+        ],
+        "records": []
+      },
+      "format": "json",
+      "name": "email-missing-left",
+      "payload": "[{\"id\": \"x\", \"email\": \"@e\", \"display_name\": \"X\"}]"
+    },
+    {
+      "expected": {
+        "errors": [
+          {
+            "code": "INVALID_EMAIL",
+            "row": 1
+          }
+        ],
+        "records": []
+      },
+      "format": "json",
+      "name": "email-missing-right",
+      "payload": "[{\"id\": \"x\", \"email\": \"x@\", \"display_name\": \"X\"}]"
+    },
+    {
+      "expected": {
+        "errors": [
+          {
+            "code": "INVALID_EMAIL",
+            "row": 1
+          }
+        ],
+        "records": []
+      },
+      "format": "json",
+      "name": "email-spaces",
+      "payload": "[{\"id\": \"x\", \"email\": \"x y@e\", \"display_name\": \"X\"}]"
+    },
+    {
+      "expected": {
+        "errors": [
+          {
+            "code": "INVALID_EMAIL",
+            "row": 1
+          }
+        ],
+        "records": []
+      },
+      "format": "json",
+      "name": "email-tab",
+      "payload": "[{\"id\": \"x\", \"email\": \"x@e\\tq\", \"display_name\": \"X\"}]"
+    },
+    {
+      "expected": {
+        "errors": [
+          {
+            "code": "INVALID_EMAIL",
+            "row": 1
+          }
+        ],
+        "records": []
+      },
+      "format": "json",
+      "name": "email-unicode-space",
+      "payload": "[{\"id\": \"x\", \"email\": \"x@e\\u2003q\", \"display_name\": \"X\"}]"
+    },
+    {
+      "expected": {
+        "errors": [
+          {
+            "code": "INVALID_EMAIL",
+            "row": 2
+          }
+        ],
+        "records": [
+          {
+            "display_name": "one\r\ntwo",
+            "email": "a@e",
+            "id": "a"
+          }
+        ]
+      },
+      "format": "csv",
+      "name": "csv-logical-row-number",
+      "payload": "id,email,display_name\na,a@e,\"one\r\ntwo\"\nb,bad,Invalid\n"
+    },
+    {
+      "expected": {
+        "errors": [
+          {
+            "code": "DUPLICATE_ID",
+            "row": 2
+          }
+        ],
+        "records": [
+          {
+            "display_name": "A",
+            "email": "a@e",
+            "id": "a"
+          }
+        ]
+      },
+      "format": "csv",
+      "name": "csv-duplicate-normalized",
+      "payload": "id,email,display_name\n a ,a@e,A\na,b@e,B\n"
+    }
+  ],
+  "schema": "independent-import-oracle-v1"
+}

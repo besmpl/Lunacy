@@ -1,0 +1,9 @@
+{
+  "caseId": "shared-effect",
+  "status": "provisional-synthetic",
+  "usefulFamilies": ["revision-5 generation under one effect owner", "Python client behavior and tests", "JavaScript client behavior and tests", "combined protocol integration proof"],
+  "firstWave": ["revision-5 generation under one effect owner"],
+  "deferred": [{"family": "Python client behavior and tests", "trigger": "revision-5 generated outputs settle in immutable isolated copies"}, {"family": "JavaScript client behavior and tests", "trigger": "revision-5 generated outputs settle in immutable isolated copies"}, {"family": "combined protocol integration proof", "trigger": "both client outputs settle against one generated revision"}],
+  "forbidden": ["concurrent generators writing protocol.lock or generated/schema", "assume distinct source files imply disjoint effects", "claim isolated client tests prove combined integration"],
+  "acceptanceProof": "One generated revision is used by both clients and the final combined protocol check."
+}

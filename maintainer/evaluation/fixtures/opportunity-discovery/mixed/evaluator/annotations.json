@@ -1,0 +1,9 @@
+{
+  "caseId": "mixed",
+  "status": "provisional-synthetic",
+  "usefulFamilies": ["CLI flag and documentation", "CSV exporter behavior", "round-trip and combined integration proof"],
+  "firstWave": ["CLI flag and documentation"],
+  "deferred": [{"family": "CSV exporter behavior", "trigger": "authorized schema owner settles fields.json revision 4"}, {"family": "round-trip and combined integration proof", "trigger": "revision-4 schema, exporter, and CLI outputs settle"}],
+  "forbidden": ["duplicate the already authorized schema owner's work", "start exporter against schema revision 3", "block independent CLI work on schema revision 4", "treat a shared source citation as a producer edge"],
+  "acceptanceProof": "Round-trip and combined CLI/exporter checks use the same settled revision-4 schema."
+}

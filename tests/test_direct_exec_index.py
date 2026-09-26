@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -12,14 +13,26 @@ SCRIPT = ROOT / "scripts" / "evidence_index.py"
 
 
 class DirectExecIndexTests(unittest.TestCase):
+    @staticmethod
+    def encode(records):
+        return b"".join(
+            (json.dumps(record, separators=(",", ":"), ensure_ascii=False) + "\n").encode()
+            for record in records
+        )
+
+    @staticmethod
+    def run_source(source, *extra, thread="thread-1"):
+        return subprocess.run(
+            [sys.executable, "-B", str(SCRIPT), str(source),
+             "--source-format", "direct-exec", "--thread-id", thread, *extra],
+            cwd=ROOT, capture_output=True, timeout=15,
+        )
+
     def run_index(self, records=None, *, raw=None, extra=(), thread="thread-1", mode=0o644):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "events.jsonl"
             if raw is None:
-                raw = b"".join(
-                    (json.dumps(record, separators=(",", ":"), ensure_ascii=False) + "\n").encode()
-                    for record in records
-                )
+                raw = self.encode(records)
             source.write_bytes(raw)
             source.chmod(mode)
             before = (source.read_bytes(), source.stat().st_mode)
@@ -182,11 +195,16 @@ class DirectExecIndexTests(unittest.TestCase):
             (json.dumps({"type": canary, "command": canary, "output": canary}) + "\n").encode(),
             b'{"type":"thread.started","thread_id":"thread-1"}\n{"type":"turn.started"}\n{"type":"item.started","item":{"type":"command_execution","id":"x","status":"x","exit_code":1e999999999999999999999999}}\n',
         ]
-        for raw in raw_cases:
+        for index, raw in enumerate(raw_cases):
             result, _, _, _ = self.run_index(raw=raw)
             self.assert_refused(result)
             self.assertNotIn(canary.encode(), result.stderr)
             self.assertNotIn(canary.encode(), result.stdout)
+            if index == 0:
+                self.assertEqual(
+                    result.stderr,
+                    b"evidence-index: line 2: invalid direct-exec JSON record\n",
+                )
 
     def test_malformed_json_utf8_trailing_line_and_envelope_refuse(self):
         header = b'{"type":"thread.started","thread_id":"thread-1"}\n{"type":"turn.started"}\n'
@@ -251,6 +269,232 @@ class DirectExecIndexTests(unittest.TestCase):
                 cwd=ROOT, capture_output=True, timeout=10,
             )
         self.assert_refused(result)
+
+    def test_correlation_uses_first_observation_group_order_and_retrieves_exact_group(self):
+        records = self.base(
+            self.command("item.started", item_id="A", status="in_progress", exit_marker=None),
+            self.command("item.completed", item_id="B", status="failed", exit_marker=3),
+            self.command("item.updated", item_id="A", status="running", exit_marker=0),
+            self.command("item.completed", item_id="A", status="failed", exit_marker=7),
+            self.command("item.completed", item_id="A", status="failed", exit_marker=-2),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "events.jsonl"
+            source.write_bytes(self.encode(records))
+            correlated = self.run_source(source, "--correlate", "first-nonzero")
+            self.assertEqual(correlated.returncode, 0, correlated.stderr)
+            value = json.loads(correlated.stdout)
+            self.assertEqual(value["schema"], "lunacy-native-direct-exec-correlation-v1")
+            self.assertEqual(value["correlation"], {
+                "kind": "first-nonzero-group", "after_ordinal": -1,
+                "scanned_through_ordinal": 0, "matched": True, "complete": False,
+                "next_after_ordinal": 0,
+            })
+            self.assertEqual(value["match"], {
+                "ordinal": 0, "item_id": "A", "first_observation_line": 3,
+                "observation_count": 4, "nonzero_observation_count": 2,
+                "first_nonzero_observation_line": 6, "first_nonzero_exit_code": 7,
+            })
+            digest = value["source"]["sha256"]
+            retrieved = self.run_source(
+                source, "--item-id", "A", "--expected-sha256", digest,
+                "--output-cap", "16384",
+            )
+            self.assertEqual(retrieved.returncode, 0, retrieved.stderr)
+            command = json.loads(retrieved.stdout)["commands"][0]
+            self.assertEqual(command["item_id"], value["match"]["item_id"])
+            self.assertEqual([item["line"] for item in command["observations"]], [3, 5, 6, 7])
+
+            continued = self.run_source(
+                source, "--correlate", "first-nonzero", "--after-ordinal", "0",
+                "--expected-sha256", digest,
+            )
+            self.assertEqual(continued.returncode, 0, continued.stderr)
+            next_value = json.loads(continued.stdout)
+            self.assertEqual(next_value["match"]["item_id"], "B")
+            self.assertEqual(next_value["match"]["ordinal"], 1)
+
+    def test_correlation_no_match_empty_and_exhausted(self):
+        cases = (
+            (self.base(), -1, None),
+            (self.base(self.command("item.completed", item_id="zero", exit_marker=0)), 0, None),
+        )
+        for records, scanned, after in cases:
+            with self.subTest(scanned=scanned):
+                with tempfile.TemporaryDirectory() as directory:
+                    source = Path(directory) / "events.jsonl"
+                    source.write_bytes(self.encode(records))
+                    first = self.run_source(source, "--correlate", "first-nonzero")
+                    self.assertEqual(first.returncode, 0, first.stderr)
+                    value = json.loads(first.stdout)
+                    self.assertNotIn("match", value)
+                    self.assertEqual(value["correlation"]["scanned_through_ordinal"], scanned)
+                    self.assertEqual(value["correlation"]["matched"], False)
+                    self.assertEqual(value["correlation"]["complete"], True)
+                    self.assertIsNone(value["correlation"]["next_after_ordinal"])
+
+                    digest = value["source"]["sha256"]
+                    exhausted = self.run_source(
+                        source, "--correlate", "first-nonzero", "--after-ordinal", "9999",
+                        "--expected-sha256", digest,
+                    )
+                    self.assertEqual(exhausted.returncode, 0, exhausted.stderr)
+                    self.assertEqual(
+                        json.loads(exhausted.stdout)["correlation"]["scanned_through_ordinal"],
+                        scanned,
+                    )
+
+    def test_correlation_argument_combinations_and_ordinal_bounds(self):
+        records = self.base(self.command("item.completed", exit_marker=1))
+        digest = hashlib.sha256(self.encode(records)).hexdigest()
+        bad = (
+            ("--correlate", "first-nonzero", "--item-id", "cmd-1"),
+            ("--after-ordinal", "0"),
+            ("--correlate", "first-nonzero", "--after-ordinal", "0"),
+            ("--correlate", "first-nonzero", "--after-ordinal", "-1", "--expected-sha256", digest),
+            ("--correlate", "first-nonzero", "--after-ordinal", "+1", "--expected-sha256", digest),
+            ("--correlate", "first-nonzero", "--after-ordinal", " 1", "--expected-sha256", digest),
+            ("--correlate", "first-nonzero", "--after-ordinal", "1", "--after-ordinal", "2", "--expected-sha256", digest),
+            ("--correlate", "first-nonzero", "--after-ordinal", "9" * 4097, "--expected-sha256", digest),
+            ("--correlate", "unknown"),
+        )
+        for extra in bad:
+            with self.subTest(extra=extra[:4]):
+                result, _, _, _ = self.run_index(records, extra=extra)
+                self.assert_refused(result)
+                self.assertLessEqual(len(result.stderr), 256)
+
+        huge, _, _, _ = self.run_index(
+            records,
+            extra=("--correlate", "first-nonzero", "--after-ordinal", "9" * 4096,
+                   "--expected-sha256", digest),
+        )
+        self.assertEqual(huge.returncode, 0, huge.stderr)
+        self.assertFalse(json.loads(huge.stdout)["correlation"]["matched"])
+
+        result, _, _, _ = self.run_index(records, extra=("--correlate", "first-nonzero", "--turn-id", "x"))
+        self.assert_refused(result)
+
+    def test_correlation_stricter_host_integer_limit_is_a_bounded_cli_refusal(self):
+        records = self.base(self.command("item.completed", exit_marker=1))
+        digest = hashlib.sha256(self.encode(records)).hexdigest()
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "events.jsonl"
+            source.write_bytes(self.encode(records))
+            environment = os.environ.copy()
+            environment["PYTHONINTMAXSTRDIGITS"] = "640"
+            result = subprocess.run(
+                [sys.executable, "-B", str(SCRIPT), str(source),
+                 "--source-format", "direct-exec", "--thread-id", "thread-1",
+                 "--correlate", "first-nonzero", "--after-ordinal", "9" * 700,
+                 "--expected-sha256", digest],
+                cwd=ROOT, capture_output=True, timeout=10, env=environment,
+            )
+        self.assert_refused(result)
+        self.assertLessEqual(len(result.stderr), 256)
+        self.assertIn(b"host integer conversion limit", result.stderr)
+        self.assertNotIn(b"Traceback", result.stderr)
+
+    def test_correlation_is_direct_exec_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "events.jsonl"
+            source.write_bytes(b"not opened")
+            result = subprocess.run(
+                [sys.executable, "-B", str(SCRIPT), str(source), "--thread-id", "t",
+                 "--turn-id", "u", "--correlate", "first-nonzero"],
+                cwd=ROOT, capture_output=True, timeout=5,
+            )
+        self.assert_refused(result)
+
+    def test_correlation_validates_late_records_and_binds_continuation_hash(self):
+        good = self.base(self.command("item.completed", item_id="found", exit_marker=4))
+        malformed = good + [{"type": "item.started", "item": {
+            "type": "command_execution", "id": "late", "status": "x", "exit_code": True,
+        }}]
+        result, _, _, _ = self.run_index(malformed, extra=("--correlate", "first-nonzero"))
+        self.assert_refused(result)
+
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "events.jsonl"
+            source.write_bytes(self.encode(good))
+            first = self.run_source(source, "--correlate", "first-nonzero")
+            digest = json.loads(first.stdout)["source"]["sha256"]
+            source.write_bytes(self.encode(self.base(
+                self.command("item.completed", item_id="found", exit_marker=4, private="changed")
+            )))
+            changed = self.run_source(
+                source, "--correlate", "first-nonzero", "--after-ordinal", "0",
+                "--expected-sha256", digest,
+            )
+            self.assert_refused(changed)
+
+    def test_correlation_exact_utf8_cap_and_truthful_indivisible_refusal(self):
+        records = self.base(self.command(
+            "item.completed", item_id="é\\\"-identity", exit_marker=8,
+        ))
+        first, _, _, _ = self.run_index(records, extra=("--correlate", "first-nonzero"))
+        self.assertEqual(first.returncode, 0, first.stderr)
+        required = len(first.stdout)
+        exact, _, _, _ = self.run_index(
+            records, extra=("--correlate", "first-nonzero", "--output-cap", str(required))
+        )
+        self.assertEqual(exact.returncode, 0, exact.stderr)
+        self.assertEqual(len(exact.stdout), required)
+        below, _, _, _ = self.run_index(
+            records, extra=("--correlate", "first-nonzero", "--output-cap", str(required - 1))
+        )
+        self.assertEqual(below.returncode, 3, below.stderr)
+        diagnostic = json.loads(below.stdout)
+        self.assertEqual(diagnostic["required_bytes"], required)
+        self.assertNotIn("after-ordinal", diagnostic["remedy"])
+        self.assertNotIn("item-id", diagnostic["remedy"])
+
+        long_id = "x" * 4096
+        refused, _, _, _ = self.run_index(
+            self.base(self.command("item.completed", item_id=long_id, exit_marker=2)),
+            extra=("--correlate", "first-nonzero", "--output-cap", "256"),
+        )
+        self.assertEqual(refused.returncode, 3, refused.stderr)
+        self.assertNotIn(long_id.encode(), refused.stdout + refused.stderr)
+
+    def test_correlation_privacy_keeps_allowlisted_facts_but_changes_digest(self):
+        outputs = []
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "events.jsonl"
+            for secret in ("PRIVATE-ONE", "PRIVATE-TWO"):
+                source.write_bytes(self.encode(self.base(self.command(
+                    "item.completed", item_id="same", exit_marker=5,
+                    command=secret, output=secret, cwd=secret,
+                ))))
+                result = self.run_source(source, "--correlate", "first-nonzero")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertNotIn(secret.encode(), result.stdout + result.stderr)
+                outputs.append(json.loads(result.stdout))
+        self.assertEqual(outputs[0]["match"], outputs[1]["match"])
+        self.assertEqual(outputs[0]["correlation"], outputs[1]["correlation"])
+        self.assertNotEqual(outputs[0]["source"]["sha256"], outputs[1]["source"]["sha256"])
+
+    def test_oversized_capture_correlation_discovers_known_nonzero_for_exact_retrieval(self):
+        observations = [
+            self.command("item.completed", item_id=f"cmd-{index:04d}", exit_marker=7 if index == 4321 else 0)
+            for index in range(8000)
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "events.jsonl"
+            source.write_bytes(self.encode(self.base(*observations)))
+            whole = self.run_source(source, "--output-cap", str(1024 * 1024))
+            self.assertEqual(whole.returncode, 3, whole.stderr)
+            correlated = self.run_source(source, "--correlate", "first-nonzero")
+            self.assertEqual(correlated.returncode, 0, correlated.stderr)
+            value = json.loads(correlated.stdout)
+            self.assertEqual(value["match"]["item_id"], "cmd-4321")
+            self.assertEqual(value["match"]["ordinal"], 4321)
+            selected = self.run_source(
+                source, "--item-id", value["match"]["item_id"],
+                "--expected-sha256", value["source"]["sha256"],
+            )
+            self.assertEqual(selected.returncode, 0, selected.stderr)
+            self.assertEqual(json.loads(selected.stdout)["commands"][0]["item_id"], "cmd-4321")
 
 
 if __name__ == "__main__":

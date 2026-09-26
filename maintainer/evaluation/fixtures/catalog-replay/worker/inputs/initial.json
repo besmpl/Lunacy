@@ -1,0 +1,19 @@
+{
+  "first": "root",
+  "pages": {
+    "root": {
+      "rows": [
+        {"sku": "a", "revision": 1, "active": true, "name": "Desk"},
+        {"sku": "b", "revision": 1, "active": true, "name": "Pad, \"Blue\""}
+      ],
+      "next": "gap"
+    },
+    "gap": {"rows": [], "next": "tail"},
+    "tail": {
+      "rows": [
+        {"sku": "c", "revision": 1, "active": true, "name": "Line\nBreak"}
+      ],
+      "next": null
+    }
+  }
+}

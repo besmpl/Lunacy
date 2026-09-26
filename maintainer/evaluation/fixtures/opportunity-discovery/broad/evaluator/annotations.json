@@ -1,0 +1,9 @@
+{
+  "caseId": "broad",
+  "status": "provisional-synthetic",
+  "usefulFamilies": ["API validation-error behavior and tests", "CLI validation-error behavior and tests", "migration guide with format/error examples", "final combined release verification"],
+  "firstWave": ["API validation-error behavior and tests", "CLI validation-error behavior and tests", "migration guide with format/error examples"],
+  "deferred": [{"family": "final combined release verification", "trigger": "API, CLI, and guide outputs settle at parser revision 2"}],
+  "forbidden": ["four independent file-edit assignments without checkable consumer results", "run final release proof against unfinished outputs", "claim three green slices prove the release"],
+  "acceptanceProof": "Parent inspects combined API, CLI, guide, and release-check evidence at the same revision."
+}

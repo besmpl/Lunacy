@@ -34,10 +34,11 @@ def model(model_id, display, efforts, default, *, hidden=False, picker_id=None):
 def complete_catalog():
     return {
         "data": [
-            model("gpt-5.6-luna", "GPT-5.6-Luna", ["low", "medium", "high", "max"], "medium"),
+            model("gpt-6-luna", "GPT-6-Luna", ["low", "medium", "high", "max"], "medium"),
             model("gpt-5.6-sol", "GPT-5.6-Sol", ["low", "medium", "high", "max"], "low"),
             model("gpt-6-astra", "GPT-6-Astra", ["low", "medium", "high", "max", "ultra"], "medium"),
             model("opencode-go/muse-spark-1.3-contributor", "Muse Spark 1.3 Contributor · OpenCode Go", ["low"], "low"),
+            model("gpt-5.6-luna", "GPT-5.6-Luna", ["low", "medium", "high", "max"], "medium"),
         ],
         "nextCursor": None,
     }
@@ -77,7 +78,7 @@ class WorkerModelsTests(unittest.TestCase):
         return json.loads(result.stdout)
 
     def fake_codex(self, pages, *, error_id=None, repeat_cursor=False, marker=None,
-                   exit_code=0, hang=False, pid_marker=None, cursor_override=None):
+                   exit_code=0, hang=False, cursor_override=None):
         path = self.base / "fake codex"
         program = f"""\
             #!{sys.executable}
@@ -88,10 +89,7 @@ class WorkerModelsTests(unittest.TestCase):
             marker = {os.fspath(marker) if marker else None!r}
             exit_code = {exit_code!r}
             hang = {hang!r}
-            pid_marker = {os.fspath(pid_marker) if pid_marker else None!r}
             cursor_override = {cursor_override!r}
-            if pid_marker:
-                pathlib.Path(pid_marker).write_text(str(os.getpid()))
             try:
                 for line in sys.stdin:
                     request = json.loads(line)
@@ -128,17 +126,69 @@ class WorkerModelsTests(unittest.TestCase):
         self.assertFalse(output["launchPerformed"])
         self.assertEqual(
             (output["roles"]["bulk"]["model"], output["roles"]["bulk"]["effort"]),
-            ("gpt-5.6-luna", "max"),
+            ("gpt-6-luna", "max"),
         )
         self.assertEqual(output["roles"]["bulk"]["namedAlias"], "luna")
         self.assertEqual(
             (output["roles"]["judgment"]["model"], output["roles"]["judgment"]["effort"]),
+            ("gpt-6-luna", "max"),
+        )
+        self.assertEqual(output["roles"]["judgment"]["namedAlias"], "luna")
+        self.assertEqual(output["roles"]["judgment"]["codexExecArgs"], [
+            "codex", "exec", "-m", "gpt-6-luna", "-c", 'model_reasoning_effort="max"'
+        ])
+
+    def test_legacy_luna_remains_an_explicit_model_when_catalog_supports_it(self):
+        output = self.resolve("--bulk-model", "gpt-5.6-luna", "--bulk-effort", "max")
+        self.assertEqual(output["roles"]["bulk"]["model"], "gpt-5.6-luna")
+        self.assertEqual(output["roles"]["bulk"]["effort"], "max")
+        self.assertEqual(output["roles"]["bulk"]["selection"], "explicit")
+        self.assertIsNone(output["roles"]["bulk"]["namedAlias"])
+        self.assertEqual(output["roles"]["judgment"]["model"], "gpt-6-luna")
+
+    def test_no_legacy_fallback_when_new_default_is_unavailable(self):
+        catalog = complete_catalog()
+        catalog["data"] = [row for row in catalog["data"] if row["model"] != "gpt-6-luna"]
+        self.assertTrue(any(row["model"] == "gpt-5.6-luna" for row in catalog["data"]))
+        result = self.invoke("resolve", "--catalog", self.write_catalog(catalog))
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("canonical default model is unavailable: gpt-6-luna", result.stderr)
+
+    def test_sol_medium_is_explicit_judgment_opt_in(self):
+        output = self.resolve(
+            "--judgment-model", "gpt-5.6-sol", "--judgment-effort", "medium",
+        )
+        self.assertEqual(
+            (output["roles"]["judgment"]["model"], output["roles"]["judgment"]["effort"]),
             ("gpt-5.6-sol", "medium"),
         )
+        self.assertEqual(output["roles"]["judgment"]["selection"], "explicit")
         self.assertEqual(output["roles"]["judgment"]["namedAlias"], "sol-medium")
-        self.assertEqual(output["roles"]["judgment"]["codexExecArgs"], [
-            "codex", "exec", "-m", "gpt-5.6-sol", "-c", 'model_reasoning_effort="medium"'
-        ])
+        # The opt-in is scoped to judgment; an omitted bulk role remains Luna/max.
+        self.assertEqual(
+            (output["roles"]["bulk"]["model"], output["roles"]["bulk"]["effort"]),
+            ("gpt-6-luna", "max"),
+        )
+
+    def test_judgment_effort_override_does_not_escalate_model(self):
+        # Difficulty/effort alone cannot silently turn the default route into Sol.
+        output = self.resolve("--judgment-effort", "medium")
+        self.assertEqual(
+            (output["roles"]["judgment"]["model"], output["roles"]["judgment"]["effort"]),
+            ("gpt-6-luna", "medium"),
+        )
+        self.assertIsNone(output["roles"]["judgment"]["namedAlias"])
+
+    def test_sol_high_remains_explicit_only(self):
+        output = self.resolve(
+            "--judgment-model", "gpt-5.6-sol", "--judgment-effort", "high",
+        )
+        self.assertEqual(
+            (output["roles"]["judgment"]["model"], output["roles"]["judgment"]["effort"]),
+            ("gpt-5.6-sol", "high"),
+        )
+        self.assertEqual(output["roles"]["judgment"]["namedAlias"], "sol-high")
 
     def test_exact_id_and_exact_display_label_examples(self):
         output = self.resolve(
@@ -165,16 +215,16 @@ class WorkerModelsTests(unittest.TestCase):
     def test_effort_only_overrides_default_model_and_clears_changed_alias(self):
         output = self.resolve("--bulk-effort", "high")
         self.assertEqual((output["roles"]["bulk"]["model"], output["roles"]["bulk"]["effort"]),
-                         ("gpt-5.6-luna", "high"))
+                         ("gpt-6-luna", "high"))
         self.assertIsNone(output["roles"]["bulk"]["namedAlias"])
-        self.assertEqual(output["roles"]["judgment"]["namedAlias"], "sol-medium")
+        self.assertEqual(output["roles"]["judgment"]["namedAlias"], "luna")
         same = self.resolve("--bulk-effort", "max")
         self.assertEqual(same["roles"]["bulk"]["namedAlias"], "luna")
 
     def test_implicit_defaults_require_canonical_catalog_rows(self):
         for role in ("bulk", "judgment"):
-            missing = "gpt-5.6-luna" if role == "bulk" else "gpt-5.6-sol"
-            collision = "gpt-5.6-sol" if role == "bulk" else "gpt-5.6-luna"
+            missing = "gpt-6-luna"
+            collision = "gpt-5.6-sol"
             for alias_field in ("id", "displayName"):
                 for effort_only in (False, True):
                     with self.subTest(role=role, alias_field=alias_field, effort_only=effort_only):
@@ -196,8 +246,8 @@ class WorkerModelsTests(unittest.TestCase):
 
     def test_catalog_default_effort_switch_does_not_substitute_implicit_model(self):
         for role, missing, collision in (
-            ("bulk", "gpt-5.6-luna", "gpt-5.6-sol"),
-            ("judgment", "gpt-5.6-sol", "gpt-5.6-luna"),
+            ("bulk", "gpt-6-luna", "gpt-5.6-sol"),
+            ("judgment", "gpt-6-luna", "gpt-5.6-sol"),
         ):
             for alias_field in ("id", "displayName"):
                 catalog = complete_catalog()
@@ -215,27 +265,30 @@ class WorkerModelsTests(unittest.TestCase):
         for alias_field in ("id", "displayName"):
             catalog = complete_catalog()
             catalog["data"][0]["id"] = "picker/luna"
-            catalog["data"][2][alias_field] = "gpt-5.6-luna"
+            catalog["data"][2][alias_field] = "gpt-6-luna"
             result = self.resolve(catalog=catalog)
-            self.assertEqual(result["roles"]["bulk"]["model"], "gpt-5.6-luna")
+            self.assertEqual(result["roles"]["bulk"]["model"], "gpt-6-luna")
             self.assertEqual(result["roles"]["bulk"]["namedAlias"], "luna")
 
     def test_explicit_alias_remains_available_when_spelling_matches_missing_default(self):
         for role, missing, collision in (
-            ("bulk", "gpt-5.6-luna", "gpt-5.6-sol"),
-            ("judgment", "gpt-5.6-sol", "gpt-5.6-luna"),
+            ("bulk", "gpt-6-luna", "gpt-5.6-sol"),
+            ("judgment", "gpt-6-luna", "gpt-5.6-sol"),
         ):
             for alias_field in ("id", "displayName"):
                 catalog = complete_catalog()
                 catalog["data"] = [row for row in catalog["data"] if row["model"] != missing]
                 next(row for row in catalog["data"] if row["model"] == collision)[alias_field] = missing
+                other = "judgment" if role == "bulk" else "bulk"
                 result = self.resolve(
-                    f"--{role}-model", missing, f"--{role}-effort", "high", catalog=catalog
+                    f"--{role}-model", missing, f"--{role}-effort", "high",
+                    f"--{other}-model", collision, f"--{other}-effort", "low",
+                    catalog=catalog,
                 )
                 self.assertEqual(result["roles"][role]["model"], collision)
                 self.assertEqual(result["roles"][role]["effort"], "high")
                 self.assertEqual(result["roles"][role]["selection"], "explicit")
-                self.assertIsNone(result["roles"][role]["namedAlias"])
+                self.assertEqual(result["roles"][role]["namedAlias"], "sol-high")
 
     def test_unsupported_pair_refuses(self):
         path = self.write_catalog()
@@ -340,7 +393,7 @@ class WorkerModelsTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         output = json.loads(result.stdout)
         self.assertEqual(output, catalog)
-        self.assertEqual(output["data"][0]["description"], "GPT-5.6-Luna description")
+        self.assertEqual(output["data"][0]["description"], "GPT-6-Luna description")
         self.assertEqual(marker.read_text(), "eof")
 
     def test_fake_app_server_error_and_pagination_stall_fail_and_cleanup(self):
@@ -370,13 +423,23 @@ class WorkerModelsTests(unittest.TestCase):
     def test_fake_app_server_deadline_reaps_fake_leader(self):
         module = load_worker_models()
         module.DEADLINE_SECONDS = 0.75
-        pid_marker = self.base / "pid"
-        fake = self.fake_codex([complete_catalog()["data"]], hang=True, pid_marker=pid_marker)
-        with self.assertRaisesRegex(module.WorkerModelError, "deadline exceeded"):
-            module.read_live_catalog(os.fspath(fake))
-        pid = int(pid_marker.read_text())
+        fake = self.fake_codex([complete_catalog()["data"]], hang=True)
+        real_popen = module.subprocess.Popen
+        processes = []
+
+        def observe_popen(*args, **kwargs):
+            process = real_popen(*args, **kwargs)
+            processes.append(process)
+            return process
+
+        with patch.object(module.subprocess, "Popen", side_effect=observe_popen):
+            with self.assertRaisesRegex(module.WorkerModelError, "deadline exceeded"):
+                module.read_live_catalog(os.fspath(fake))
+        self.assertEqual(len(processes), 1)
+        process = processes[0]
+        self.assertIsNotNone(process.returncode)
         with self.assertRaises(ProcessLookupError):
-            os.kill(pid, 0)
+            os.kill(process.pid, 0)
 
     def test_fake_app_server_output_and_page_limits_fail_closed(self):
         module = load_worker_models()

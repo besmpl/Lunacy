@@ -1,0 +1,12 @@
+{
+  "fixtureId": "chunk-refactor",
+  "acceptance": [
+    "empty input has zero chunks",
+    "exact boundaries add no empty chunk",
+    "partial chunks and invalid sizes retain behavior",
+    "public function signatures are preserved"
+  ],
+  "forbiddenEffects": ["dependency", "network", "sleep", "write outside candidate"],
+  "starterFailure": "empty length must have zero chunks",
+  "incompleteFailure": "exact boundary gained an empty chunk"
+}

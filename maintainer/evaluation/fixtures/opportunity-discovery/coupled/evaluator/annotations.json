@@ -1,0 +1,9 @@
+{
+  "caseId": "coupled",
+  "status": "provisional-synthetic",
+  "usefulFamilies": ["one coherent cancellation fix with its regression test"],
+  "firstWave": ["one coherent cancellation fix with its regression test"],
+  "deferred": [],
+  "forbidden": ["separate implementation and test writers", "invent a second result to fill a slot", "accept a green test unrelated to cancel-then-complete"],
+  "acceptanceProof": "One owner settles code and test; parent verifies cancel-then-complete remains canceled on the combined diff."
+}

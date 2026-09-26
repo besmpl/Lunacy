@@ -1,38 +1,50 @@
-# Choose coding worker models at launch
+# Choose task worker models at launch
 
-Read this when the user requests coding-worker customization or supplies a custom
-model/effort pair. It applies to the coding `bulk` and `judgment` roles in Golden
+Read this when the user requests worker customization or supplies a custom
+model/effort pair. It applies to the delivery `bulk` and `judgment` roles in Golden
 and explicitly adopted ordinary Lunacy. It does not resolve Golden ADHD workers;
 that distinct selector is defined in `orchestrator/IMPROVEMENT.md`. It changes
 task-local selections, not Codex's native picker, global defaults, installed
 agent definitions, or an already running worker.
 
-## Two roles, unchanged defaults
+<a id="two-roles-unchanged-defaults"></a>
+## Two roles, one default route
 
-| Responsibility | Meaning and unchanged default |
+| Responsibility | Meaning and default |
 | --- | --- |
-| `bulk` | One bounded, decisively checkable coherent result; `gpt-5.6-luna` / `max`. |
-| `judgment` | Difficult implementation, cross-cutting diagnosis, discriminating tests, or material ambiguity; `gpt-5.6-sol` / `medium`. |
-| Parent | Architecture, adoption, consequential decisions, coordination, custody reconciliation, and acceptance; not replacement implementation. |
+| `bulk` | One bounded, decisively checkable coherent result; default `gpt-6-luna` / `max`. |
+| `judgment` | Difficult delivery, cross-cutting diagnosis, discriminating verification, or material ambiguity; default `gpt-6-luna` / `max`. |
+| Parent | Architecture, adoption, consequential decisions, coordination, custody reconciliation, and acceptance; not replacement delivery. |
 | Specialist review | Only when an explicit check or concrete risk warrants independence; never an automatic second worker. |
+
+For the canonical [parallel delivery policy](PLANNING.md#ready-work-parallel-delivery), lead, integrator and reviewer name bounded responsibilities, not new aliases or automatic pipeline stages. Each receives an exact sealed worker route and exclusive surfaces/effects; a lead is not a second parent. Substantive Golden design and roadmap authorship after ADHD prospectively use the literal `gpt-6-luna` / `max` default as well, unless current authority explicitly seals another supported exact pair for that purpose. Existing sealed task routes—including an expressly selected Sol/high engineering assignment—are unchanged.
 
 Either role can use a user-selected model and supported effort from the current
 catalog. These purpose labels are not provider aliases or measured capability
-ratings. Picking a weaker model does not relax acceptance. The immutable named
-routes `luna`, `sol-medium`, and `sol-high` keep their original meanings.
+ratings. Picking a weaker model does not relax acceptance. The named
+routes `luna`, `sol-medium`, and `sol-high` have the exact meanings below;
+only `luna` is an implicit worker default.
 Bulk and judgment are alternative task responsibilities, not a required
 planner/coder/tester or bulk-then-judgment pipeline. One selected worker owns a
-coherent result, its tests, and ordinary pre-FINAL repair. A task may select
+coherent result, its task-appropriate checks, and ordinary pre-FINAL repair. A task may select
 `judgment` first when its difficulty is already known; no fail-first rule applies.
 
-An invocation such as `choose workers; <outcome>` requests the coding-role
+An invocation such as `choose workers; <outcome>` requests the worker-role
 launch selector. An explicit `Workers: bulk = MODEL / EFFORT; judgment = MODEL /
-EFFORT` supplies coding selections directly. `choose ADHD workers` and
+EFFORT` supplies worker selections directly. For a hard delivery,
+cross-cutting diagnosis, or discriminating-verification assignment, a clear affirmative
+task-local request such as `use Sol medium` opts `judgment` into
+`gpt-5.6-sol / medium`. Record the request and literal pair before making a
+new assignment; quoted, negated, hypothetical, or incidental mentions are not
+authorization. It does not change `bulk`, the parent, ADHD, consultation, or
+any live assignment. Difficulty, ambiguity, quota pressure, or worker failure
+never enables Sol by inference, and the opt-in does not apply to all work.
+`choose ADHD workers` and
 `ADHD workers: MODEL / EFFORT` belong to the separate Golden ADHD selector and
-are not resolved here. Ordinary invocations preserve both coding defaults without
-a mandatory question or catalog call. Changing only one coding role preserves the
+are not resolved here. Ordinary invocations preserve both worker defaults without
+a mandatory question or catalog call. Changing only one worker role preserves the
 other.
-Coding-worker settings do not change the actual parent, Golden ADHD worker
+Worker settings do not change the actual parent, Golden ADHD worker
 selection, or separately selected consultation route; those have their own
 explicit task-local authority.
 
@@ -104,7 +116,7 @@ needs the supported nonblocking capability (`os.O_NONBLOCK`). If that capability
 is absent, refuse before acquisition rather than replacing it with blocking I/O;
 this wording does not promise Windows support or a portable transport.
 
-After the user selects exact coding-role pairs, validate the snapshot without
+After the user selects exact worker-role pairs, validate the snapshot without
 starting any process or model. This offline resolver remains limited to `bulk`
 and `judgment`; it never resolves the separate Golden ADHD worker pair:
 
@@ -157,7 +169,7 @@ CLI workers have process/stdout/report coordination, not automatic access to
 the native agent mailbox, continuation or interruption API. If that difference
 prevents the assigned workflow or required evidence, refuse the transport.
 Choose an appropriate bounded assignment; require tools/artifacts/tests rather
-than assuming every chat-capable catalog model can perform engineering work.
+than assuming every chat-capable catalog model can perform the assigned work.
 
 Record the actual returned handle only after dispatch. Own the process through
 its terminal result, inspect nonzero exits, reconcile its report and effects,

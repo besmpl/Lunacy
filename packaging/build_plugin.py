@@ -4,73 +4,31 @@
 import argparse
 from pathlib import Path
 import shutil
-import stat
 import sys
+
+from release_inputs import NATIVE_TREES, copy_entries, select_release_inputs
 
 
 ROOT = Path(__file__).resolve().parents[1]
-ROOT_FILES = ("SKILL.md", "WORKSPACE.md", "OPERATOR.md", "README.md", "LICENSE")
-TEMPLATE_ANCESTORS = (Path("packaging"), Path("packaging/lunacy-native"))
-TEMPLATE_TREES = (Path("packaging/lunacy-native/.codex-plugin"),
-                  Path("packaging/lunacy-native/skills"))
-NATIVE_TREES = tuple(Path(name) for name in ("orchestrator", "worker", "scripts", "tests"))
-NATIVE_IGNORE = shutil.ignore_patterns("__pycache__", "*.pyc")
 
 
-def _source_name(path):
-    return path.relative_to(ROOT).as_posix()
-
-
-def _metadata(path):
+def _validate_guidance(plan):
+    """Load the repository-only preflight without adding it to the package."""
+    sys.path.insert(0, str(ROOT))
     try:
-        return path.lstat()
-    except FileNotFoundError as error:
-        raise ValueError(f"invalid package source {_source_name(path)}: missing") from error
-
-
-def _require_directory(path):
-    mode = _metadata(path).st_mode
-    if stat.S_ISLNK(mode):
-        raise ValueError(f"invalid package source {_source_name(path)}: symbolic link")
-    if not stat.S_ISDIR(mode):
-        raise ValueError(f"invalid package source {_source_name(path)}: expected directory")
-
-
-def _require_regular_file(path):
-    mode = _metadata(path).st_mode
-    if stat.S_ISLNK(mode):
-        raise ValueError(f"invalid package source {_source_name(path)}: symbolic link")
-    if not stat.S_ISREG(mode):
-        raise ValueError(f"invalid package source {_source_name(path)}: expected regular file")
-
-
-def _validate_tree(path, ignore=None):
-    """Validate selected descendants without following links or opening files."""
-    _require_directory(path)
-    children = sorted(path.iterdir(), key=lambda child: child.name)
-    ignored = set(ignore(str(path), [child.name for child in children])) if ignore else set()
-    for child in children:
-        if child.name in ignored:
-            continue
-        mode = _metadata(child).st_mode
-        if stat.S_ISLNK(mode):
-            raise ValueError(f"invalid package source {_source_name(child)}: symbolic link")
-        if stat.S_ISDIR(mode):
-            _validate_tree(child, ignore)
-        elif not stat.S_ISREG(mode):
-            raise ValueError(
-                f"invalid package source {_source_name(child)}: expected regular file or directory")
-
-
-def _validate_sources():
-    for relative in TEMPLATE_ANCESTORS:
-        _require_directory(ROOT / relative)
-    for name in ROOT_FILES:
-        _require_regular_file(ROOT / name)
-    for relative in TEMPLATE_TREES:
-        _validate_tree(ROOT / relative)
-    for relative in NATIVE_TREES:
-        _validate_tree(ROOT / relative, NATIVE_IGNORE)
+        from maintainer.read_map import GOLDEN_SOURCE, ROOT_GUIDANCE, validate_source
+        owners = [name for name in ROOT_GUIDANCE
+                  if Path(name) in plan.root_files]
+        owners.extend(relative.as_posix() for relative in plan.native_entries
+                      if relative.parts[0] in {"orchestrator", "worker"}
+                      and relative.suffix.lower() == ".md"
+                      and (plan.source / relative).is_file())
+        owners.append(GOLDEN_SOURCE)
+        validate_source(plan.source, published_sources=plan.published_sources,
+                        guidance_paths=owners)
+    finally:
+        if sys.path[0] == str(ROOT):
+            sys.path.pop(0)
 
 
 def build(destination):
@@ -81,18 +39,18 @@ def build(destination):
         raise ValueError(f"refusing existing destination: {destination}")
     if destination.resolve().is_relative_to(ROOT):
         raise ValueError("destination must be outside the source checkout")
-    _validate_sources()
+    plan = select_release_inputs(ROOT)
+    _validate_guidance(plan)
     # mkdir owns only this new output; do not overwrite or clean up other paths.
     destination.mkdir()
     shutil.copy2(ROOT / "LICENSE", destination / "LICENSE")
-    for relative in TEMPLATE_TREES:
-        shutil.copytree(ROOT / relative, destination / relative.name)
+    copy_entries(plan, plan.template_entries, destination,
+                 strip=Path("packaging/lunacy-native"))
     native = destination / "skills" / "lunacy"
     native.mkdir()
-    for name in ROOT_FILES:
-        shutil.copy2(ROOT / name, native / name)
-    for relative in NATIVE_TREES:
-        shutil.copytree(ROOT / relative, native / relative.name, ignore=NATIVE_IGNORE)
+    for relative in plan.root_files:
+        shutil.copy2(ROOT / relative, native / relative)
+    copy_entries(plan, plan.native_entries, native)
     return destination
 
 

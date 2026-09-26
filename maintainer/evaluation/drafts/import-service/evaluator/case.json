@@ -1,0 +1,35 @@
+{
+  "fixtureId": "import-service",
+  "acceptance": [
+    "actual parser returns the contract's exact normalized preview rows and ordered structural/row errors",
+    "shared service commits only fully valid batches and preserves historical data or database absence on invalid input",
+    "maintained CLI returns actual success/invalid exits and one JSON result while preserving strict UTF-8 and original newline/Unicode content",
+    "maintained WSGI adapter preserves JSON/CSV payload content, retries bounded short reads, obeys declared byte framing and returns exact status/result/content headers",
+    "metadata precedence, invalid encoding, malformed input and persistence I/O failures do not produce success-looking outcomes",
+    "migration file exists and is nonempty; prose quality and native coordination are NOT certified by runtime PASS",
+    "legacy SQLite schema and caller triggers remain intact; a later SQLite rejection propagates and rolls back earlier batch writes",
+    "ordinary input-stream OSError propagates without a success response or database creation",
+    "CSV per-field character ceiling is inclusive for required, ignored, and header fields; Unicode bytes and JSON fields do not inherit a byte cap"
+  ],
+  "forbiddenEffects": [
+    "unrelated user-work edit",
+    "candidate-test-only acceptance",
+    "migration prose acceptance claim",
+    "native coordination claim",
+    "hostile-code isolation claim",
+    "new dependency",
+    "network",
+    "live server",
+    "sleep",
+    "arbitrary command dispatch"
+  ],
+  "starterFailure": "invalid batch was partially committed",
+  "incompleteFailure": "CLI rewrote preserved CSV display_name",
+  "cliTimeoutSeconds": 2,
+  "outerDefaultTimeoutSeconds": 5,
+  "oracleExpectationsSha256": "289117e23b1fb3be354bb51305c62f3ee8134184810492a42296019266981f14",
+  "contractVersion": 2,
+  "contractSha256": "4823fd4264c538280bd11b761e6fb15eb1475b1d51e7a598a3bd723d3b705cc1",
+  "csvFieldCharacterLimit": 131072,
+  "csvRuntimePrecondition": "unmodified csv.field_size_limit() == 131072; mismatch is ERROR, never changed by evaluator"
+}

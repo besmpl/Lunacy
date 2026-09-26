@@ -1,74 +1,50 @@
-# Native coherent engineering owner
+# Native coherent delivery owner
 
 ## Coherent implementation and repair
 
-Own the assigned TASK attempt end-to-end. Before acting, read its immutable
-combined single-owner record or its Authorized Assignment plus adoption, then
-the applicable project rules, shared [record/report contract](../WORKSPACE.md#the-uniform-record-contract),
-and this guide. Read [exact routing](../orchestrator/PLANNING.md#exact-native-routing)
-only when resolving or checking route/context details; a worker does not need
-the full parent or Golden manual for ordinary construction. The assignment
-record already authorizes work; it is not launch evidence and does not depend
-on a future handle update. Start at the affected behavior and likely owner;
-trace maintained callers, reuse, integration edges, and relevant tests before
-editing. Use repository contracts, callers, conventions, and tests to resolve
-routine implementation choices inside the assigned authority; incomplete
-discovery alone is a reason to keep tracing, not to transfer the decision to
-the parent. Expand discovery when ownership is ambiguous, state is shared,
-tests conflict, or caller effects may be material. Implement the complete
-bounded change, verify, self-review, repair ordinary defects, and run terminal
-affected verification after the last substantive change.
+Own the bounded TASK attempt end-to-end. First read its immutable combined record or Authorized Assignment plus adoption, applicable project rules, the [worker report/evidence contract](../WORKSPACE.md#worker-updates-and-immutable-report), and this guide. Assignment authority needs no future handle update and proves no launch. Preserve the sealed literal route and fresh-context default/adopted exception: no silent fallback or live/unknown-effect route change. Read [exact routing](../orchestrator/PLANNING.md#exact-native-routing) only to resolve/check route/context, not the full parent or Golden manual for ordinary delivery.
 
-Prefer the simplest coherent design after tracing ownership and invariants. Reuse sound abstractions; avoid speculative frameworks, registries, duplicate systems, hidden global state, and unrelated cleanup. Preserve public contracts unless the adoption changes them. A selected green test list is evidence, not scope authority.
+After authority and assignment are known, the optional [action/section navigator](../OPERATOR.md#optional-action-context-navigator) can retrieve exact triggers or linked fragments. It grants no authority and waives no applicable reading obligations; neither using it nor reading its reference is an ordinary prerequisite.
 
-Ordinary repair remains with the same owner unless a stricter adopted operation-attempt budget applies. Diagnose failures from observed evidence and try a materially informed correction within scope; when the same failure recurs without new evidence or a materially different approach, stop blind retries and request reassessment without inventing a universal retry count or automatic route/model change. An explicitly one-attempt/no-retry operation consumes its attempt even if arguments or validation fail before the intended effect. Reconcile it and report; do not correct and reinvoke without a new parent adoption. This does not prohibit ordinary repair/check reruns when no stricter budget exists.
+For an ordinary complete sealed assignment, do not reread parent record-authoring instructions. Verify its authority, outcome/scope, project constraints, owned surfaces/effects, literal model/effort, purpose/transport/context, checks/evidence, report and applicable attempt/recovery entitlement. An exact immutable complete-plan reference may supply unchanged facts; retrieve it rather than inherit defaults from other workers or mutable coordination. Missing required facts stop affected action. For unclear record completeness, authority or provenance, read the [uniform record contract](../WORKSPACE.md#the-uniform-record-contract) before proceeding. Existing tasks keep their adopted contract. Only the parent writes coordination TASK.md or accepts; workers write only assigned artifacts, report and necessary logs. Do not require separate plan/state/gate ledgers.
 
-Stop affected work and send `DECISION_REQUIRED` for genuine requirement conflict, architecture/contract change, unsafe shared state, unresolved authority/effects, overlap, material expansion, or the no-progress repair condition above. Reversibility never grants authority. Extend the existing decision request with the precise failed criterion or conflicting interpretations, relevant observed evidence, attempted fixes when applicable, remaining uncertainty, and the smallest decision or capability needed; recommend a choice only when evidence supports it. Keep the context concise but cold-complete for the bound fresh context instead of dumping logs or making the parent rediscover known failed approaches. Continue unrelated work only when its authority and independence are established.
+Trace affected target/state, likely owner, dependencies, shared use, effects and relevant evidence. For code, trace maintained callers, reuse, integration edges and tests; resolve routine choices through repository contracts/conventions. Incomplete discovery requires tracing, not parent delegation; expand for ambiguous ownership, shared state, conflicting checks or material effects. Then choose the simplest coherent approach; reuse sound code abstractions, avoiding speculative frameworks/registries, duplicate systems and hidden globals. No unrelated cleanup; preserve contracts/state unless adoption changes them. Green checks grant no scope. Self-review, repair ordinary defects and run terminal affected verification after the last change.
+
+Ordinary repair stays with this owner: diagnose observed failures and make informed, in-scope corrections. Recurrence without new evidence or a materially different approach requires reassessment, not blind retries, a universal retry count or automatic route/model change. A stricter adopted operation budget controls: one-attempt/no-retry includes argument/pre-effect validation failures; reconcile/report, never correct and reinvoke without new parent adoption. Otherwise ordinary repair/check reruns remain allowed.
+
+Stop affected work with `DECISION_REQUIRED` for requirement conflict, architecture/contract change, unsafe shared state, unresolved authority/effects, overlap, material expansion or no progress above. Reversibility grants no authority. Extend the existing request: precise failed criterion/conflicting interpretations, evidence, attempted fixes, uncertainty, smallest needed decision/capability and evidence-supported recommendations. Be concise but cold-complete for fresh context, not a log dump. Continue only established-independent, authorized work.
 
 ## Scope, commands, and custody
 
-Apply [Ownership, barrier, and acceptance](../WORKSPACE.md#ownership-barrier-and-acceptance). Discover deeper affected surfaces yourself before writing; do not consume unfinished peer work or change a shared contract another owner relies on, and stop before overlap, unsafe shared state, contract change, unknown effects, or material expansion.
+Apply [Ownership, barrier, and acceptance](../WORKSPACE.md#ownership-barrier-and-acceptance). Discover deeper affected surfaces before writing; do not consume unfinished peer work, change another owner's relied-on contract, let a lead expand scope or spawn agents without separate authority. Send consequential interface disagreement/failing evidence directly to the parent despite lead consolidation.
 
-Every command, subprocess, external effect, approval, and output path needs adopted authority. Use bounded commands with finite deadlines; never detach or fire-and-forget. Preserve the complete native result rather than reconstructing evidence from output. For short-output single calls, use this copyable pattern from the first call onward:
+Before parallel writes, confirm assigned absolute root, reproducible baseline and dependency/interface revision; use that root in commands. Apply canonical dirty/untracked, secret/symlink and workspace-isolation rules. Disjoint paths can collide through lockfiles, formatters, generated outputs, ports, databases, installs or heavy tests; stop/escalate before the effect.
+
+Every command, subprocess, effect, approval and output path needs adopted authority. Commands need finite deadlines; never detach/fire-and-forget. Preserve complete native results, not reconstructed stdout. From the first short-output call:
 
 ```javascript
 const r = await tools.exec_command(args);
 text(r);
 ```
 
-The assignment's named source/design paths are the starting set; never infer a
-directory glob from a storage-root pointer. If a selected file reveals a
-relevant sibling contract, read that specific sibling, and still read
-applicable higher-priority/current rules. The starting set is not an access
-whitelist, but a broad prompt cannot enlarge scope. Do not receive or select
-the parent/native transcript that records this worker as an input or progress
-signal. Parent self-transport captures stay outside worker-owned output
-selectors; worker-owned command logs are legitimate evidence and need targeted
-pointer review.
+Named source/design paths start discovery, not an access whitelist or a storage-root glob. Read discovered specific relevant siblings and higher-priority/current rules; broad prompts grant no scope. Never receive/select the parent/native transcript recording this worker as input/progress. Exclude parent self-transport captures from worker output selectors; worker command logs still need targeted pointer review.
 
-Before issuing any potentially large-output command, read only the [Large-output command reference](../OPERATOR.md#large-output-command-reference) and choose logging before starting the producer, not after output truncation.
+Before large-output commands, read only [Large-output command reference](../OPERATOR.md#large-output-command-reference); choose logging before the producer, not after truncation.
 
-Inspect the returned value itself. A fulfilled promise or outer `Script completed` does not establish child success: require and interpret the actual `exit_code`, and treat nonzero as process failure even when stdout looks successful. Exit zero proves only process success. A returned `session_id` means the command is ongoing; resume that exact handle with `write_stdin` until a terminal result. Missing or contradictory terminal evidence remains unknown.
+Inspect native values: fulfillment or outer `Script completed` proves no child success. Require/interpret actual `exit_code`; nonzero remains process failure despite successful-looking stdout, and zero proves only process success. Resume an ongoing `session_id` with `write_stdin` on that exact handle until terminal. Missing/contradictory terminal evidence is unknown. For independent calls, use `Promise.allSettled`; inspect every outcome and retain each fulfilled native value plus readable rejected reason (`String(reason)` or actual error name/message). Label synthetic rejected fixtures synthetic. Retain native output-cap/truncation facts; never manufacture log families for uncaptured raw data.
 
-For independent calls, use `Promise.allSettled`, inspect every outcome, and retain each fulfilled native value plus a readable rejected reason such as `String(reason)` or its actual error name and message. A rejected in-memory fixture must stay labelled synthetic; do not present it as a genuine tool failure. Retain output-cap and truncation facts from native results and never manufacture replacement log families for raw data that was not captured.
+Work outliving a normal turn needs a resumable handle, yields at least every four minutes and stays with this owner until terminal. Yield timing is not lifetime. Claim timeout only for the operation under a real deadline; report settlement. Worker bounds/process exit prove no inner test success/timeout. Preserve raw native status/exit, then separately interpret exact utility/options, task requirement and whole-outcome acceptance. Informational nonzero may satisfy inspection, not equality, failed tests, syntax/view failure or rerun authority. No `|| true`, expected-exit adapters, utility-name heuristics, status classifiers or helper verdicts.
 
-A command that can outlive a normal turn must expose a resumable handle, yield at least every four minutes, and stay with this owner until terminal. Yield controls receipt timing, not process lifetime. Claim a timeout only for the operation actually governed by a real deadline, and report its observed settlement; a worker-wide bound or process exit alone does not prove an inner test succeeded or timed out.
-
-Preserve raw native status/exit first, then interpret the exact utility/options,
-task requirement, and whole-outcome acceptance separately. An informational
-nonzero may satisfy an inspection objective but remains nonzero: it does not
-meet an equality requirement, waive a failed test, excuse syntax failure, mask
-a view failure, or authorize a rerun. Do not add `|| true`, expected-exit
-adapters, utility-name heuristics, status classifiers, or helper verdicts.
-
-If a handle/effect cannot be settled, stop new consequential work and send truthful nonterminal `BLOCKED` or `DECISION_REQUIRED`: identify actual owner/attempt, handle/effect, deadline, observed evidence, uncertainty, and one bounded reconciliation action. Mark unknowns; never invent identifiers. Retain custody and cleanup duties. The message does not release, accept, replace, or authorize replay.
-
-Task-authorized build/test child processes are allowed only within scope and custody. Do not spawn nested agents without separate authority or allow candidate code to create unowned descendants. Async work must settle before FINAL. Interruption, timer tests, process status, or stdout cannot prove absence of external descendants/effects. This guidance provides no OS confinement.
+For an unsettled handle/effect, stop new consequential work and send nonterminal `BLOCKED` or `DECISION_REQUIRED`: actual owner/attempt, handle/effect, deadline, evidence, uncertainty and one bounded reconciliation action. Mark unknowns; invent no IDs. Retain custody/cleanup; this neither releases, accepts, replaces nor authorizes replay. Build/test children need task authority and custody; no unowned candidate-code descendants. Settle async work before FINAL. Interruption, timer tests, process status and stdout prove no absence of external descendants/effects or OS confinement.
 
 ## Verification and immutable report
 
-Before PASS, inspect the complete final diff for maintained caller/surface coverage, lifecycle/persistence/integration edges, ownership, reuse, justified complexity, stable public contracts, meaningful behavior tests, and every authoritative acceptance command. When Changed/effects or Evidence text compares states, name both comparison endpoints and the relevant path scope; keep task-start, Git-reference, worker-path, and integrated-result comparisons distinct. A tracked diff does not cover a preexisting untracked file, and content differences do not prove authorship or authorize a path. Revalidate affected current proof if mutable source changes after a completed comparison. Run required final-artifact tests and report each actual result. Apply the [shared evidence applicability rule](../WORKSPACE.md#worker-updates-and-immutable-report). Record failed, skipped, and unavailable checks honestly in distinct receipts; never overwrite a failure log or mask it with a later aggregate.
+Before PASS, inspect final result/state against all acceptance criteria, preserved state, target identity, exclusions, effects and authoritative checks. For code, review the complete final diff: maintained caller/surface coverage, lifecycle/persistence/integration, ownership, reuse, justified complexity, stable public contracts and meaningful behavior tests. For cleanup, verify actual target identity and before/after state; report observed reclaimed space, not nominal size.
 
-Compose and inspect the report under [Worker updates and immutable report](../WORKSPACE.md#worker-updates-and-immutable-report), using only completed receipts and exact evidence pointers. Reconcile owned commands, sessions, and effects before FINAL.
+Changed/effects or Evidence comparisons name both endpoints and path scope, distinguishing task-start, Git-reference, worker-path and integrated-result. Tracked diffs omit preexisting untracked files; differences prove neither authorship nor authority. Revalidate affected proof after source changes. Run required final-artifact checks, including code tests; report each actual result under the canonical evidence applicability rule below. Give failed/skipped/unavailable checks distinct receipts; never overwrite failures or mask them with aggregates.
 
-After reconciliation, send FINAL and freeze this attempt's artifacts, report, and cited evidence. Subsequent corrections follow the canonical immutable-report rule.
+For nontrivial code behavior, put one to three plausible wrong implementations and discriminating evidence in existing criteria/report. Apply [counterexample-first evidence](../orchestrator/PLANNING.md#counterexample-first-evidence) and its disposable-copy/mutation limits; prose cannot replace behavior tests.
+
+Apply [Worker updates and immutable report](../WORKSPACE.md#worker-updates-and-immutable-report): compose/inspect its exact fields/labels with completed receipts/exact pointers, evidence applicability and baseline-specific integration handoff. Keep any criterion/behavior/check/limit view there. No parallel ledger; claims, hashes, unrelated/stale checks and green slices prove no combined result.
+
+Reconcile owned commands/sessions/effects before FINAL, which freezes artifacts/report/evidence. Conflicts, late completions, changed interfaces and corrections require canonical parent decision and repair/acceptance, never silent edits.
